@@ -14,15 +14,17 @@ PLUGIN = softhddevice
     # support alsa audio output module
 ALSA ?= $(shell pkg-config --exists alsa && echo 1)
     # support OSS audio output module
-OSS ?= 1
+OSS ?= 0
     # support VDPAU video output module
 VDPAU ?= $(shell pkg-config --exists vdpau && echo 1)
     # support VA-API video output module (deprecated)
 VAAPI ?= $(shell pkg-config --exists libva && echo 1)
     # support glx output
 OPENGL ?= $(shell pkg-config --exists gl glu && echo 1)
+    # support MMAL output
+MMAL ?= 1
     # screensaver disable/enable
-SCREENSAVER ?= 1
+SCREENSAVER ?= 0
     # use ffmpeg libswresample
 SWRESAMPLE ?= $(shell pkg-config --exists libswresample && echo 1)
     # use libav libavresample
@@ -34,7 +36,7 @@ CONFIG := # -DDEBUG #-DOSD_DEBUG	# enable debug output+functions
 #CONFIG += -DSTILL_DEBUG=2		# still picture debug verbose level
 
 CONFIG += -DAV_INFO -DAV_INFO_TIME=3000	# info/debug a/v sync
-CONFIG += -DUSE_PIP			# PIP support
+#CONFIG += -DUSE_PIP			# PIP support
 #CONFIG += -DHAVE_PTHREAD_NAME		# supports new pthread_setname_np
 #CONFIG += -DNO_TS_AUDIO		# disable ts audio parser
 #CONFIG += -DUSE_TS_VIDEO		# build new ts video parser
@@ -100,12 +102,12 @@ ifeq ($(OSS),1)
 CONFIG += -DUSE_OSS
 endif
 ifeq ($(VDPAU),1)
-CONFIG += -DUSE_VDPAU
+CONFIG += -DUSE_XLIB_XCB -DUSE_VDPAU
 _CFLAGS += $(shell pkg-config --cflags vdpau)
 LIBS += $(shell pkg-config --libs vdpau)
 endif
 ifeq ($(VAAPI),1)
-CONFIG += -DUSE_VAAPI
+CONFIG += -DUSE_XLIB_XCB -DUSE_VAAPI
 _CFLAGS += $(shell pkg-config --cflags libva-x11 libva)
 LIBS += $(shell pkg-config --libs libva-x11 libva)
 ifeq ($(OPENGL),1)
@@ -114,7 +116,7 @@ LIBS += $(shell pkg-config --libs libva-glx)
 endif
 endif
 ifeq ($(OPENGL),1)
-CONFIG += -DUSE_GLX
+CONFIG += -DUSE_XLIB_XCB -DUSE_GLX
 _CFLAGS += $(shell pkg-config --cflags gl glu)
 LIBS += $(shell pkg-config --libs gl glu)
 endif
@@ -133,9 +135,14 @@ CONFIG += -DUSE_AVRESAMPLE
 _CFLAGS += $(shell pkg-config --cflags libavresample)
 LIBS += $(shell pkg-config --libs libavresample)
 endif
-
+ifeq ($(MMAL),1)
+CONFIG += -DUSE_MMAL
+_CFLAGS += $(shell pkg-config --cflags libavcodec)
+LIBS += -lrt -lmmal -lmmal_core -lvcos $(shell pkg-config --libs libavcodec)
+else
 _CFLAGS += $(shell pkg-config --cflags libavcodec x11 x11-xcb xcb xcb-icccm)
 LIBS += -lrt $(shell pkg-config --libs libavcodec x11 x11-xcb xcb xcb-icccm)
+endif
 
 ### Includes and Defines (add further entries here):
 

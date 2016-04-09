@@ -8,7 +8,7 @@ inherit vdr-plugin-2 git-2
 
 RESTRICT="test"
 
-EGIT_REPO_URI="git://projects.vdr-developer.org/vdr-plugin-softhddevice.git"
+EGIT_REPO_URI="git://github.com/zillevdr/vdr-plugin-softhddevice.git"
 KEYWORDS=""
 
 DESCRIPTION="VDR Plugin: Software and GPU emulated HD output device"
@@ -16,27 +16,12 @@ HOMEPAGE="http://projects.vdr-developer.org/projects/show/plg-softhddevice"
 
 LICENSE="AGPL-3"
 SLOT="0"
-IUSE="alsa +debug opengl oss vaapi vdpau xscreensaver"
+IUSE="alsa debug +mmal oss"
 
 RDEPEND=">=media-video/vdr-2
-	x11-libs/libX11
-	>=x11-libs/libxcb-1.8
-	x11-libs/xcb-util-wm
-	x11-libs/xcb-util-keysyms
-	x11-libs/xcb-util-renderutil
 	alsa? ( media-libs/alsa-lib )
-	opengl? ( virtual/opengl )
-	vaapi? ( x11-libs/libva
-		virtual/ffmpeg[vaapi] )
-	vdpau? ( x11-libs/libvdpau
-		virtual/ffmpeg[vdpau] )"
-DEPEND="${RDEPEND}
-	virtual/pkgconfig
-	x11-libs/xcb-util"
-
-REQUIRED_USE="opengl? ( vaapi )
-			|| ( vaapi vdpau )
-			|| ( alsa oss )"
+	mmal? ( =media-video/ffmpeg-9999 )"
+#	mmal? ( sys-boot/raspberrypi-firmware )"
 
 #VDR_CONFD_FILE="${FILESDIR}/confd-0.6.0"
 #VDR_RCADDON_FILE="${FILESDIR}/rc-addon-0.6.0.sh"
@@ -52,18 +37,8 @@ src_prepare() {
 	vdr-plugin-2_src_prepare
 
 	BUILD_PARAMS+=" ALSA=$(usex alsa 1 0)"
-	BUILD_PARAMS+=" OPENGL=$(usex opengl 1 0)"
 	BUILD_PARAMS+=" OSS=$(usex oss 1 0)"
-	BUILD_PARAMS+=" VAAPI=$(usex vaapi 1 0)"
-	BUILD_PARAMS+=" VDPAU=$(usex vdpau 1 0)"
-	BUILD_PARAMS+=" SCREENSAVER=$(usex xscreensaver 1 0)"
-
-	if has_version ">=media-video/ffmpeg-0.8"; then
-		BUILD_PARAMS+=" SWRESAMPLE=1"
-	fi
-	if has_version ">=media-video/libav-0.8"; then
-		BUILD_PARAMS+=" AVRESAMPLE=1"
-	fi
+	BUILD_PARAMS+=" MMAL=$(usex mmal 1 0)"
 }
 
 src_install() {

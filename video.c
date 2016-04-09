@@ -38,10 +38,10 @@
 ///	@todo FIXME: use vaErrorStr for all VA-API errors.
 ///
 
-#define USE_XLIB_XCB			///< use xlib/xcb backend
+//#define USE_XLIB_XCB			///< use xlib/xcb backend
 #define noUSE_SCREENSAVER		///< support disable screensaver
-#define USE_AUTOCROP			///< compile auto-crop support
-#define USE_GRAB			///< experimental grab code
+//#define USE_AUTOCROP			///< compile auto-crop support
+//#define USE_GRAB			///< experimental grab code
 #define noUSE_GLX			///< outdated GLX code
 #define USE_DOUBLEBUFFER		///< use GLX double buffers
 //#define USE_VAAPI				///< enable vaapi support
@@ -152,6 +152,16 @@ typedef enum
 #include <libavcodec/vdpau.h>
 #endif
 
+#ifdef USE_MMAL
+#include <stdbool.h>
+#include <bcm_host.h>
+#include <interface/mmal/mmal.h>
+#include <interface/mmal/util/mmal_default_components.h>
+#include <interface/mmal/util/mmal_util.h>
+#include <interface/mmal/util/mmal_util_params.h>
+#include <interface/mmal/mmal_parameters_video.h>
+#endif
+
 #include <libavcodec/avcodec.h>
 // support old ffmpeg versions <1.0
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(55,18,102)
@@ -181,8 +191,6 @@ typedef enum
 #include "misc.h"
 #include "video.h"
 #include "audio.h"
-
-#ifdef USE_XLIB_XCB
 
 //----------------------------------------------------------------------------
 //	Declarations
@@ -259,11 +267,11 @@ typedef struct _video_module_
     void (*const DelHwDecoder) (VideoHwDecoder *);
     unsigned (*const GetSurface) (VideoHwDecoder *, const AVCodecContext *);
     void (*const ReleaseSurface) (VideoHwDecoder *, unsigned);
-    enum PixelFormat (*const get_format) (VideoHwDecoder *, AVCodecContext *,
-	const enum PixelFormat *);
+    enum AVPixelFormat (*const get_format) (VideoHwDecoder *, AVCodecContext *,
+	const enum AVPixelFormat *);
     void (*const RenderFrame) (VideoHwDecoder *, const AVCodecContext *,
 	const AVFrame *);
-    void *(*const GetHwAccelContext)(VideoHwDecoder *);
+    void *(*const GetHwAccelContext)(int);
     void (*const SetClock) (VideoHwDecoder *, int64_t);
      int64_t(*const GetClock) (const VideoHwDecoder *);
     void (*const SetClosing) (const VideoHwDecoder *);
@@ -314,6 +322,8 @@ typedef struct _video_module_
 char VideoIgnoreRepeatPict;		///< disable repeat pict warning
 
 static const char *VideoDriverName;	///< video output device
+
+#ifdef USE_XLIB_XCB
 static Display *XlibDisplay;		///< Xlib X11 display
 static xcb_connection_t *Connection;	///< xcb connection
 static xcb_colormap_t VideoColormap;	///< video colormap
@@ -325,6 +335,7 @@ static xcb_cursor_t VideoBlankCursor;	///< empty invisible cursor
 
 static int VideoWindowX;		///< video output window x coordinate
 static int VideoWindowY;		///< video outout window y coordinate
+#endif
 static unsigned VideoWindowWidth;	///< video output window width
 static unsigned VideoWindowHeight;	///< video output window height
 
@@ -380,19 +391,21 @@ static VideoScalingModes VideoScaling[VideoResolutionMax];
 int VideoAudioDelay;
 
     /// Default zoom mode for 4:3
-static VideoZoomModes Video4to3ZoomMode;
+//static VideoZoomModes Video4to3ZoomMode;
 
     /// Default zoom mode for 16:9 and others
-static VideoZoomModes VideoOtherZoomMode;
+//static VideoZoomModes VideoOtherZoomMode;
 
 static char Video60HzMode;		///< handle 60hz displays
 static char VideoSoftStartSync;		///< soft start sync audio/video
 static const int VideoSoftStartFrames = 100;	///< soft start frames
 static char VideoShowBlackPicture;	///< flag show black picture
 
+#ifdef USE_XLIB_XCB
 static xcb_atom_t WmDeleteWindowAtom;	///< WM delete message atom
 static xcb_atom_t NetWmState;		///< wm-state message atom
 static xcb_atom_t NetWmStateFullscreen;	///< fullscreen wm-state message atom
+#endif
 
 #ifdef DEBUG
 extern uint32_t VideoSwitch;		///< ticks for channel switch
@@ -428,7 +441,7 @@ static int OsdDirtyY;			///< osd dirty area y
 static int OsdDirtyWidth;		///< osd dirty area width
 static int OsdDirtyHeight;		///< osd dirty area height
 
-static int64_t VideoDeltaPTS;		///< FIXME: fix pts
+//static int64_t VideoDeltaPTS;		///< FIXME: fix pts
 
 #ifdef USE_SCREENSAVER
 static char DPMSDisabled;		///< flag we have disabled dpms
@@ -459,7 +472,7 @@ static void X11DPMSDisable(xcb_connection_t *);
 ///
 ///	@note frame->interlaced_frame can't be used for interlace detection
 ///
-static void VideoSetPts(int64_t * pts_p, int interlaced,
+/*static void VideoSetPts(int64_t * pts_p, int interlaced,
     const AVCodecContext * video_ctx, const AVFrame * frame)
 {
     int64_t pts;
@@ -530,13 +543,13 @@ static void VideoSetPts(int64_t * pts_p, int interlaced,
 	}
     }
 }
-
+*/
 ///
 ///	Update output for new size or aspect ratio.
 ///
 ///	@param input_aspect_ratio	video stream aspect
 ///
-static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
+/*static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
     int input_height, VideoResolutions resolution, int video_x, int video_y,
     int video_width, int video_height, int *output_x, int *output_y,
     int *output_width, int *output_height, int *crop_x, int *crop_y,
@@ -562,10 +575,14 @@ static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
 	input_aspect_ratio.den = 1;
     }
 
+//
+// Das muss noch angepast werden
+#ifdef USE_XLIB_XCB
     display_aspect_ratio.num =
 	VideoScreen->width_in_pixels * VideoScreen->height_in_millimeters;
     display_aspect_ratio.den =
 	VideoScreen->height_in_pixels * VideoScreen->width_in_millimeters;
+#endif
 
     display_aspect_ratio = av_mul_q(input_aspect_ratio, display_aspect_ratio);
     Debug(3, "video: aspect %d:%d\n", display_aspect_ratio.num,
@@ -685,7 +702,8 @@ static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
 	*crop_x, *crop_y);
     return;
 }
-
+*/
+#ifdef USE_XLIB_XCB
 //----------------------------------------------------------------------------
 //	GLX
 //----------------------------------------------------------------------------
@@ -1552,7 +1570,7 @@ struct _vaapi_decoder_
     /// flags for put surface for different resolutions groups
     unsigned SurfaceFlagsTable[VideoResolutionMax];
 
-    enum PixelFormat PixFmt;		///< ffmpeg frame pixfmt
+    enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
     int WrongInterlacedWarned;		///< warning about interlace flag issued
     int Interlaced;			///< ffmpeg interlaced flag
     int TopFieldFirst;			///< ffmpeg top field displayed first
@@ -2546,7 +2564,7 @@ static void VaapiUpdateOutput(VaapiDecoder * decoder)
 ///	FIXME: must check if put/get with this format is supported (see intel)
 ///
 static int VaapiFindImageFormat(VaapiDecoder * decoder,
-    enum PixelFormat pix_fmt, VAImageFormat * format)
+    enum AVPixelFormat pix_fmt, VAImageFormat * format)
 {
     VAImageFormat *imgfrmts;
     int imgfrmt_n;
@@ -2909,10 +2927,10 @@ static VAEntrypoint VaapiFindEntrypoint(const VAEntrypoint * entrypoints,
 ///
 ///	@note + 2 surface for software deinterlace
 ///
-static enum PixelFormat Vaapi_get_format(VaapiDecoder * decoder,
-    AVCodecContext * video_ctx, const enum PixelFormat *fmt)
+static enum AVPixelFormat Vaapi_get_format(VaapiDecoder * decoder,
+    AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
-    const enum PixelFormat *fmt_idx;
+    const enum AVPixelFormat *fmt_idx;
     VAProfile profiles[vaMaxNumProfiles(VaDisplay)];
     int profile_n;
     VAEntrypoint entrypoints[vaMaxNumEntrypoints(VaDisplay)];
@@ -5706,8 +5724,8 @@ static const VideoModule VaapiModule = {
 	    const AVCodecContext *))VaapiGetSurface,
     .ReleaseSurface =
 	(void (*const) (VideoHwDecoder *, unsigned))VaapiReleaseSurface,
-    .get_format = (enum PixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum PixelFormat *))Vaapi_get_format,
+    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum AVPixelFormat *))Vaapi_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
 	    const AVCodecContext *, const AVFrame *))VaapiSyncRenderFrame,
     .GetHwAccelContext = (void *(*const)(VideoHwDecoder *))
@@ -5748,8 +5766,8 @@ static const VideoModule VaapiGlxModule = {
 	    const AVCodecContext *))VaapiGetSurface,
     .ReleaseSurface =
 	(void (*const) (VideoHwDecoder *, unsigned))VaapiReleaseSurface,
-    .get_format = (enum PixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum PixelFormat *))Vaapi_get_format,
+    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum AVPixelFormat *))Vaapi_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
 	    const AVCodecContext *, const AVFrame *))VaapiSyncRenderFrame,
     .GetHwAccelContext = (void *(*const)(VideoHwDecoder *))
@@ -5804,7 +5822,7 @@ typedef struct _vdpau_decoder_
     int OutputWidth;			///< real video output width
     int OutputHeight;			///< real video output height
 
-    enum PixelFormat PixFmt;		///< ffmpeg frame pixfmt
+    enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
     int WrongInterlacedWarned;		///< warning about interlace flag issued
     int Interlaced;			///< ffmpeg interlaced flag
     int TopFieldFirst;			///< ffmpeg top field displayed first
@@ -7385,10 +7403,10 @@ static VdpDecoderProfile VdpauCheckProfile(VdpauDecoder * decoder,
 ///			it is terminated by -1 as 0 is a valid format, the
 ///			formats are ordered by quality.
 ///
-static enum PixelFormat Vdpau_get_format(VdpauDecoder * decoder,
-    AVCodecContext * video_ctx, const enum PixelFormat *fmt)
+static enum AVPixelFormat Vdpau_get_format(VdpauDecoder * decoder,
+    AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
-    const enum PixelFormat *fmt_idx;
+    const enum AVPixelFormat *fmt_idx;
     VdpDecoderProfile profile;
     int max_refs;
 
@@ -9545,8 +9563,8 @@ static const VideoModule VdpauModule = {
 	    const AVCodecContext *))VdpauGetSurface,
     .ReleaseSurface =
 	(void (*const) (VideoHwDecoder *, unsigned))VdpauReleaseSurface,
-    .get_format = (enum PixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum PixelFormat *))Vdpau_get_format,
+    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum AVPixelFormat *))Vdpau_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
 	    const AVCodecContext *, const AVFrame *))VdpauSyncRenderFrame,
     .GetHwAccelContext = (void *(*const)(VideoHwDecoder *))
@@ -9572,6 +9590,917 @@ static const VideoModule VdpauModule = {
     .Exit = VdpauExit,
 };
 
+#endif
+
+#endif
+
+#ifdef USE_MMAL
+
+//----------------------------------------------------------------------------
+//	MMAL
+//----------------------------------------------------------------------------
+
+typedef struct _Mmal_decoder_
+{
+    enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
+//    int Interlaced;			///< ffmpeg interlaced flag
+
+//    int CropX;				///< video crop x
+//    int CropY;				///< video crop y
+//    int CropWidth;			///< video crop width
+//    int CropHeight;			///< video crop height
+
+
+    int TrickSpeed;			///< current trick speed
+    int TrickCounter;			///< current trick speed counter
+    VideoStream *Stream;		///< video stream
+    int Closing;			///< flag about closing current stream
+    int64_t PTS;			///< video PTS clock
+
+    int StartCounter;			///< counter for video start
+    int FramesDuped;			///< number of frames duplicated
+    int FramesMissed;			///< number of frames missed
+    int FramesDropped;			///< number of frames dropped
+    int FrameCounter;			///< number of frames decoded
+//    int FramesDisplayed;		///< number of frames displayed
+} MmalDecoder;
+
+static MmalDecoder *MmalDecoders[1];	///< open decoder streams
+static int MmalDecoderN;		///< number of decoder streams
+
+struct data_t {
+	MMAL_COMPONENT_T *vout;
+	MMAL_POOL_T *vout_input_pool;
+	MMAL_QUEUE_T *vout_queue;
+
+	MMAL_COMPONENT_T *deint;
+	MMAL_POOL_T *deint_input_pool;
+
+    DISPMANX_RESOURCE_HANDLE_T resource;
+    DISPMANX_DISPLAY_HANDLE_T display;
+    DISPMANX_ELEMENT_HANDLE_T element;
+    DISPMANX_UPDATE_HANDLE_T update;
+    DISPMANX_MODEINFO_T info;
+    uint32_t vc_image_ptr;
+    void *osd_buf;
+	int osd_width;
+	int osd_height;
+	int osd_x;
+	int osd_y;
+
+	uint32_t width;
+	int interlaced;
+	int64_t lastpts_d;
+	unsigned buffers_in_queue;
+	unsigned buffers_deint_in;
+	unsigned buffers_deint_out;
+	unsigned buffers;
+};
+
+static struct data_t *data_list = NULL;
+static void MmalDisplayFrame(void);
+
+//----------------------------------------------------------------------------
+//	Helper functions
+//----------------------------------------------------------------------------
+
+static void buffer_worker()
+{
+	MMAL_STATUS_T status;
+	MMAL_BUFFER_HEADER_T *buffer;
+    struct data_t *data = data_list;
+
+    if (data->buffers_deint_out < 3){
+		buffer = mmal_queue_get(data->vout_input_pool->queue);
+		mmal_buffer_header_reset(buffer);
+		data->buffers_deint_out++;
+		status = mmal_port_send_buffer(data->deint->output[0], buffer);
+		if(status != MMAL_SUCCESS)
+			fprintf(stderr, "Failed send buffer to deinterlacer output port (%d, %s)\n",
+				status, mmal_status_to_string(status));
+	}
+}
+
+
+void vsync_callback(__attribute__ ((unused)) DISPMANX_UPDATE_HANDLE_T update,
+					__attribute__ ((unused)) void *arg)
+{
+    struct data_t *data = data_list;
+
+    MmalDisplayFrame();
+    if(data->interlaced == 1 && data->buffers > 0){
+		buffer_worker();
+	}
+}
+
+//Renderer
+static void vout_control_port_cb(__attribute__ ((unused)) MMAL_PORT_T *port,
+								MMAL_BUFFER_HEADER_T *buffer)
+{
+	MMAL_STATUS_T status;
+	AVFrame * frame = (AVFrame *)buffer->user_data;
+
+	if (buffer->cmd == MMAL_EVENT_ERROR) {
+		status = *(uint32_t *)buffer->data;
+		fprintf(stderr, "Vout MMAL error %"PRIx32" \"%s\"\n",
+			status, mmal_status_to_string(status));
+	}
+
+	mmal_buffer_header_release(buffer);
+	if(frame){
+		av_frame_free(&frame);
+	}
+}
+
+static void vout_input_port_cb(__attribute__ ((unused)) MMAL_PORT_T *port,
+							  MMAL_BUFFER_HEADER_T *buffer)
+{
+	AVFrame * frame = (AVFrame *)buffer->user_data;
+
+	mmal_buffer_header_release(buffer);
+	if(frame){
+		av_frame_free(&frame);
+	}
+}
+
+// Deinterlacer
+static void deint_control_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
+									MMAL_BUFFER_HEADER_T *buffer)
+{
+	mmal_buffer_header_release(buffer);
+}
+
+static void deint_input_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
+									MMAL_BUFFER_HEADER_T *buffer)
+{
+    struct data_t *data = data_list;
+	AVFrame * frame = (AVFrame *)buffer->user_data;
+
+	mmal_buffer_header_release(buffer);
+	if(frame)
+		av_frame_free(&frame);
+	data->buffers_deint_in--;
+}
+
+static void deint_output_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
+									MMAL_BUFFER_HEADER_T *buffer)
+{
+    struct data_t *data = data_list;
+
+	if (buffer->cmd == 0) {
+		if (buffer->length > 0) {
+			buffer->user_data = NULL;
+			// Correct PTS
+			if((buffer->pts - data->lastpts_d) == 20000)
+				buffer->pts = (buffer->pts -18200);
+			data->lastpts_d = buffer->pts;
+			mmal_queue_put(data->vout_queue, buffer);
+            data->buffers_deint_out--;
+			++data->buffers_in_queue;
+		} else {
+			mmal_buffer_header_release(buffer);
+		}
+	} else {
+		mmal_buffer_header_release(buffer);
+	}
+}
+
+static void* pool_allocator_alloc(void *context, uint32_t size)
+{
+	return mmal_port_payload_alloc((MMAL_PORT_T *)context, size);
+}
+
+static void pool_allocator_free(void *context, void *mem)
+{
+	mmal_port_payload_free((MMAL_PORT_T *)context, (uint8_t *)mem);
+}
+
+///
+///	Allocate new MMAL decoder.
+///
+///	@param stream	video stream
+///
+///	@returns always NULL.
+///
+static MmalDecoder *MmalNewHwDecoder(VideoStream * stream)
+{
+    MmalDecoder *decoder;
+
+    if (MmalDecoderN == 1) {
+	Fatal(_("video/MMAL: out of decoders\n"));
+    }
+    if (!(decoder = calloc(1, sizeof(*decoder)))) {
+	Error(_("video/MMAL: out of memory\n"));
+	return NULL;
+    }
+
+    decoder->Closing = -300 - 1;
+    decoder->PixFmt = AV_PIX_FMT_NONE;
+    decoder->PTS = AV_NOPTS_VALUE;
+    decoder->Stream = stream;
+    MmalDecoders[MmalDecoderN++] = decoder;
+
+    return decoder;
+}
+
+///
+///	Get hwaccel context for ffmpeg.
+///
+///	@param decoder	MMAL hw decoder
+///
+static void *MmalGetHwAccelContext(unsigned int * codec_id)
+{
+    AVHWAccel *hwaccel = NULL;
+
+    while((hwaccel= av_hwaccel_next(hwaccel))){
+        if (hwaccel->id == *codec_id)
+        fprintf(stderr, "MmalGetHwAccelContext: %s\n",hwaccel->name);
+            return hwaccel;
+    }
+	return NULL;
+}
+
+///
+///	Destroy a MMAL decoder.
+///
+///	@param decoder	MMAL hw decoder
+///
+static void MmalDelHwDecoder(MmalDecoder * decoder)
+{
+	decoder = MmalDecoders[0];
+    free(decoder);
+    return;
+}
+
+///
+///	Set MMAL decoder video clock.
+///
+///	@param decoder	MMAL hardware decoder
+///	@param pts	audio presentation timestamp
+///
+void MmalSetClock(MmalDecoder * decoder, int64_t pts)
+{
+    decoder->PTS = pts;
+}
+
+///
+///	Get MMAL decoder video clock.
+///
+///	@param decoder	MMAL hw decoder
+///
+static int64_t MmalGetClock(const MmalDecoder * decoder)
+{
+   	struct data_t *data = data_list;
+
+    if (decoder->PTS == (int64_t) AV_NOPTS_VALUE)
+		return AV_NOPTS_VALUE;
+
+    return decoder->PTS - 20 * 90 * data->buffers;
+}
+
+//----------------------------------------------------------------------------
+//	MMAL OSD
+//----------------------------------------------------------------------------
+
+///
+///	Clear subpicture image.
+///
+///	@note looked by caller
+///
+static void MmalOsdClear(void)
+{
+   	struct data_t *data = data_list;
+   	int ret;
+
+	if(data->osd_buf != NULL){
+		data->update = vc_dispmanx_update_start( 10 );
+		assert( data->update );
+		ret = vc_dispmanx_element_remove( data->update, data->element );
+		assert( ret == 0 );
+		ret = vc_dispmanx_update_submit_sync( data->update );
+		assert( ret == 0 );
+		ret = vc_dispmanx_resource_delete( data->resource );
+		assert( ret == 0 );
+		free(data->osd_buf);
+		data->osd_buf = NULL;
+	}
+}
+
+///
+///	MMAL initialize OSD.
+///
+///	@param width	osd width
+///	@param height	osd height
+///
+static void MmalOsdInit(__attribute__ ((unused))int width, __attribute__ ((unused))int height)
+{
+}
+
+///
+///	Draw OSD ARGB image.
+///
+///	@param xi	x-coordinate in argb image
+///	@param yi	y-coordinate in argb image
+///	@paran height	height in pixel in argb image
+///	@paran width	width in pixel in argb image
+///	@param pitch	pitch of argb image
+///	@param argb	32bit ARGB image data
+///	@param x	x-coordinate on screen of argb image
+///	@param y	y-coordinate on screen of argb image
+///
+///	@note looked by caller
+///
+static void MmalOsdDrawARGB( __attribute__ ((unused)) int xi, __attribute__ ((unused)) int yi,
+    int width, int height, int pitch, const uint8_t * argb, int x, int y)
+{
+   	struct data_t *data = data_list;
+    VC_DISPMANX_ALPHA_T alpha = {DISPMANX_FLAGS_ALPHA_FROM_SOURCE, 0, 0};
+    VC_IMAGE_TYPE_T type = VC_IMAGE_ARGB8888;
+    VC_RECT_T src_rect, dst_rect, rect;
+    int ret, i;
+
+	if(data->osd_buf == NULL){
+		int h = FFALIGN(height, 16);
+		int w = FFALIGN(width, 32);
+		data->osd_buf = calloc(h, w * 4);
+		data->osd_width = w;
+		data->osd_height = h;
+		data->osd_x = x;
+		data->osd_y = y;
+		memcpy(data->osd_buf, argb, height * pitch);
+
+		data->resource = vc_dispmanx_resource_create( type, width, height,
+                                                  &data->vc_image_ptr );
+		assert(data->resource);
+
+		vc_dispmanx_rect_set(&dst_rect, 0, 0, width, height);
+		
+		ret = vc_dispmanx_resource_write_data(data->resource, type,
+                          data->osd_width * 4, data->osd_buf, &dst_rect);
+		assert(ret == 0);
+
+		data->update = vc_dispmanx_update_start(10);
+		assert(data->update);
+
+		vc_dispmanx_rect_set(&src_rect, 0, 0, width << 16, height << 16);
+
+		vc_dispmanx_rect_set(&dst_rect, data->osd_x, data->osd_y, width, height);
+
+		data->element = vc_dispmanx_element_add(data->update, data->display,
+                                  2000, &dst_rect, data->resource, &src_rect,
+                                  DISPMANX_PROTECTION_NONE, &alpha,
+                                  NULL, VC_IMAGE_ROT0);
+
+		ret = vc_dispmanx_update_submit_sync(data->update);
+		assert(ret == 0);
+
+	} else {
+
+		for (i = 0; i < height; ++i){
+			memcpy(data->osd_buf + (y - data->osd_y) * data->osd_width * 4 + 
+						data->osd_width * 4 * i + (x - data->osd_x) * 4,
+						argb + i * pitch, (size_t)pitch);
+		}
+		vc_dispmanx_rect_set(&dst_rect, 0, 0, data->osd_width, data->osd_height);
+
+		ret = vc_dispmanx_resource_write_data(data->resource, type,
+                          data->osd_width * 4, data->osd_buf, &dst_rect);
+		assert(ret == 0);
+
+		data->update = vc_dispmanx_update_start(10);
+		assert(data->update);
+
+		vc_dispmanx_rect_set(&rect, x - data->osd_x, y - data->osd_y, width, height);
+
+		ret = vc_dispmanx_element_modified(data->update, data->element, &rect);
+		assert(ret == 0);
+	
+		ret = vc_dispmanx_update_submit_sync(data->update);
+		assert(ret == 0);
+	}
+}
+
+
+///
+///	Cleanup osd.
+///
+static void MmalOsdExit(void)
+{
+}
+
+static void set_latency_target(bool enable)
+{
+   	struct data_t *data = data_list;
+    MMAL_STATUS_T status;
+
+    MMAL_PARAMETER_AUDIO_LATENCY_TARGET_T latency_target = {
+        .hdr = { MMAL_PARAMETER_AUDIO_LATENCY_TARGET, sizeof(latency_target) },
+        .enable = enable ? MMAL_TRUE : MMAL_FALSE,
+        .filter = 2,
+        .target = 4000,
+        .shift = 3,
+        .speed_factor = -135,
+        .inter_factor = 500,
+        .adj_cap = 20
+    };
+
+    status = mmal_port_parameter_set(data->vout->input[0], &latency_target.hdr);
+    if (status != MMAL_SUCCESS)
+		fprintf(stderr, "Failed to configure latency target on input port %s (status=%"PRIx32" %s)\n",
+              data->vout->input[0]->name, status, mmal_status_to_string(status));
+}
+
+///
+///	MMAL setup.
+///
+///	@param unused
+///
+///	@returns always true.
+///
+static int MmalInit(__attribute__ ((unused)) const char *display_name)
+{
+	struct data_t *data;
+
+	// allocate mem for dev_list
+	data = (struct data_t *) malloc(sizeof(struct data_t));
+	memset(data, 0, sizeof(struct data_t));
+
+	data->width = 0;
+	OsdConfigWidth = 1920; // default
+	OsdConfigHeight = 1080;
+
+    bcm_host_init();
+    data->display = vc_dispmanx_display_open(0);
+	if (data->display == DISPMANX_NO_HANDLE)
+		fprintf(stderr, "Error: cannot open dispmanx display\n");
+	// start vc_dispmanx_vsync_callback
+    if(vc_dispmanx_vsync_callback(data->display, vsync_callback, NULL))
+		fprintf(stderr, "Error: cannot open dispmanx vsync callback\n");
+
+	data_list = data;
+
+    return 1;
+}
+
+///
+///	MMAL Exit function.
+///
+static void MmalExit(void)
+{
+   	struct data_t *data = data_list;
+
+    if(vc_dispmanx_vsync_callback(data->display, NULL, NULL))
+		fprintf(stderr, "Error: cannot close dispmanx vsync callback\n");
+
+/*	vc_dispmanx_display_close(data->display);
+	bcm_host_deinit();*/
+
+    set_latency_target(MMAL_FALSE);
+
+	if (data->deint)
+		mmal_component_release(data->deint);
+
+	if (data->vout)
+		mmal_component_release(data->vout);
+
+	data->interlaced = 0;
+	data->buffers_in_queue = 0;
+	data->buffers_deint_in = 0;
+	data->buffers_deint_out = 0;
+	data->buffers = 0;
+}
+
+static void MmalChangeResolution(MMAL_ES_FORMAT_T *format, int interlaced_frame)
+{
+	MMAL_STATUS_T status;
+
+   	struct data_t *data = data_list;
+
+	// Test if first time
+	if(data->width != 0){
+		MmalExit();
+	}
+
+	status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &data->vout);
+	if (status != MMAL_SUCCESS)
+		fprintf(stderr, "Failed to create MMAL render component %s (status=%"PRIx32" %s)\n",
+		    MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, status, mmal_status_to_string(status));
+
+	status = mmal_port_enable(data->vout->control, vout_control_port_cb);
+	if (status != MMAL_SUCCESS)
+		fprintf(stderr, "Failed to enable render control port %s (%x, %s)\n",
+		    data->vout->control->name, status, mmal_status_to_string(status));
+
+	mmal_format_copy(data->vout->input[0]->format, format);
+	data->vout->input[0]->format->encoding = MMAL_ENCODING_OPAQUE;
+	status = mmal_port_format_commit(data->vout->input[0]);
+	if (status != MMAL_SUCCESS)
+		fprintf(stderr, "Failed to commit format for render input port %s (status=%"PRIx32" %s)\n",
+		   data->vout->input[0]->name, status, mmal_status_to_string(status));
+
+    // Set PARAMETER_DISPLAYREGION
+/*    MMAL_DISPLAYREGION_T param;
+    param.hdr.id = MMAL_PARAMETER_DISPLAYREGION;
+    param.hdr.size = sizeof(MMAL_DISPLAYREGION_T);
+    param.layer = 2;
+//    param.fullscreen = 1;
+//    param.mode = MMAL_DISPLAY_MODE_FILL;
+    param.mode = MMAL_DISPLAY_MODE_LETTERBOX;
+//    param.display_num = 0;//0 typically being a directly connected LCD display
+//    param.set = MMAL_DISPLAY_SET_LAYER|MMAL_DISPLAY_SET_NUM|MMAL_DISPLAY_SET_FULLSCREEN|MMAL_DISPLAY_SET_MODE;
+    param.set = MMAL_DISPLAY_SET_LAYER|MMAL_DISPLAY_SET_MODE;
+    status = mmal_port_parameter_set(data->vout->input[0], &param.hdr);
+    if(status != MMAL_SUCCESS && status != MMAL_ENOSYS)
+        fprintf(stderr, "cannot set vout Component (%d): %m\n", status);
+*/
+	data->vout->input[0]->buffer_size = data->vout->input[0]->buffer_size_recommended;
+	data->vout->input[0]->buffer_num = 50;
+	status = mmal_port_enable(data->vout->input[0], vout_input_port_cb);
+	if (status != MMAL_SUCCESS)
+		fprintf(stderr, "Failed to enable renderer input port %s (status=%"PRIx32" %s)\n",
+		    data->vout->input[0]->name, status, mmal_status_to_string(status));
+
+	status = mmal_component_enable(data->vout);
+	if (status != MMAL_SUCCESS)
+		fprintf(stderr, "Failed to enable renderer component %s (status=%"PRIx32" %s)\n",
+		    data->vout->name, status, mmal_status_to_string(status));
+
+	data->vout_input_pool = mmal_pool_create_with_allocator(data->vout->input[0]->buffer_num,
+	   data->vout->input[0]->buffer_size, data->vout->input[0], pool_allocator_alloc, pool_allocator_free);
+	if(!data->vout_input_pool)
+		printf("Failed to create pool for vout input port (%d, %s)\n",
+			status, mmal_status_to_string(status));
+
+	data->vout_queue = mmal_queue_create();
+
+	if(interlaced_frame == 1){
+		data->interlaced = 1;
+		// Deinterlacer
+		status = mmal_component_create("vc.ril.image_fx", &data->deint);
+		if(status != MMAL_SUCCESS)
+			printf("Failed to create deinterlace component vc.ril.image_fx (%x, %s)\n",
+				status, mmal_status_to_string(status));
+
+        // Param 3 is set 0 (full frame rate) Param 4 is set 1 (QPU usage)
+		MMAL_PARAMETER_IMAGEFX_PARAMETERS_T imfx_param = {{MMAL_PARAMETER_IMAGE_EFFECT_PARAMETERS,
+			sizeof(imfx_param)}, MMAL_PARAM_IMAGEFX_DEINTERLACE_ADV, 4, {3, 0, 0, 1 }};
+		status = mmal_port_parameter_set(data->deint->output[0], &imfx_param.hdr);
+		if (status != MMAL_SUCCESS)
+			printf("Failed to configure MMAL component vc.ril.image_fx (status=%"PRIx32" %s)",
+					status, mmal_status_to_string(status));
+
+		status = mmal_port_enable(data->deint->control, deint_control_port_cb);
+		if(status != MMAL_SUCCESS)
+			printf("Failed to enable deinterlace control port %s (%x, %s)\n",
+				data->vout->control->name, status, mmal_status_to_string(status));
+
+		mmal_format_copy(data->deint->input[0]->format, format);
+		status = mmal_port_format_commit(data->deint->input[0]);
+		if (status != MMAL_SUCCESS)
+			printf("Failed to commit deinterlace intput format (status=%"PRIx32" %s)\n",
+				status, mmal_status_to_string(status));
+
+		status = mmal_port_parameter_set_uint32(data->deint->input[0],
+			MMAL_PARAMETER_EXTRA_BUFFERS, 5);
+		if (status != MMAL_SUCCESS)
+			printf("Failed to set MMAL_PARAMETER_EXTRA_BUFFERS on input deinterlacer port (status=%"PRIx32" %s)\n",
+					status, mmal_status_to_string(status));
+
+		data->deint->input[0]->buffer_num = data->deint->input[0]->buffer_num_recommended;
+		data->deint->input[0]->buffer_size = data->deint->input[0]->buffer_size_min;
+		status = mmal_port_enable(data->deint->input[0], deint_input_port_cb);
+		if(status != MMAL_SUCCESS)
+			printf("Failed to enable deinterlace input port %s (%d, %s)\n",
+				data->deint->input[0]->name, status, mmal_status_to_string(status));
+
+		mmal_format_copy(data->deint->output[0]->format, format);
+		status = mmal_port_format_commit(data->deint->output[0]);
+		if (status != MMAL_SUCCESS)
+			printf("Failed to commit deinterlace output format (status=%"PRIx32" %s)\n",
+				status, mmal_status_to_string(status));
+
+		status = mmal_component_enable(data->deint);
+		if(status != MMAL_SUCCESS)
+			printf("Failed to enable deinterlace component %s (%d, %s)\n",
+				data->deint->name, status, mmal_status_to_string(status));
+
+		data->deint->output[0]->buffer_num = data->deint->output[0]->buffer_num_recommended;
+		data->deint->output[0]->buffer_size = data->deint->output[0]->buffer_size_min;
+		status = mmal_port_enable(data->deint->output[0], deint_output_port_cb);
+		if(status != MMAL_SUCCESS)
+			printf("Failed to enable deinterlacer output port %s (%d, %s)\n",
+				data->deint->output[0]->name, status, mmal_status_to_string(status));
+
+		data->deint_input_pool = mmal_pool_create_with_allocator(data->deint->input[0]->buffer_num,
+			data->deint->input[0]->buffer_size, data->deint->input[0], pool_allocator_alloc, pool_allocator_free);
+		if(!data->deint_input_pool)
+			printf("Failed to create pool for deinterlacer input port (%d, %s)\n",
+			status, mmal_status_to_string(status));
+	}
+
+	// start vc_dispmanx_vsync_callback
+    if(vc_dispmanx_vsync_callback(data->display, vsync_callback, NULL))
+		fprintf(stderr, "Error: cannot open dispmanx vsync callback\n");
+
+	data->width = format->es->video.width;
+    set_latency_target(MMAL_TRUE);
+}
+
+///
+///	Get MMAL decoder statistics.
+///
+///	@param decoder		MMAL decoder
+///	@param[out] missed	missed frames
+///	@param[out] duped	duped frames
+///	@param[out] dropped	dropped frames
+///	@param[out] count	number of decoded frames
+///
+void MmalGetStats(MmalDecoder * decoder, int *missed, int *duped,
+    int *dropped, int *counter)
+{
+    *missed = decoder->FramesMissed;
+    *duped = decoder->FramesDuped;
+    *dropped = decoder->FramesDropped;
+    *counter = decoder->FrameCounter;
+}
+
+///
+///	Display a video frame.
+///
+static void MmalDisplayFrame(void)
+{
+	MMAL_BUFFER_HEADER_T *buffer, *rbuffer;
+	MMAL_STATUS_T status;
+	MmalDecoder *decoder;
+	decoder = MmalDecoders[0];
+   	struct data_t *data = data_list;
+
+	if(data->buffers_in_queue == 0 ){
+		if(decoder->StartCounter > 0)
+			decoder->FramesMissed++;
+		return;
+	}
+
+dequeue:
+	buffer = mmal_queue_get(data->vout_queue);
+	data->buffers_in_queue--;
+	data->buffers--;
+	if(decoder->Closing > -5){
+		AVFrame * frame = (AVFrame *)buffer->user_data;
+		if(frame)
+			av_frame_free(&frame);
+		mmal_buffer_header_release(buffer);
+		if(data->buffers_in_queue > 0)
+			goto dequeue;
+		return;
+	}
+
+	int64_t audio_clock = AudioGetClock();
+	int64_t video_clock = decoder->PTS = buffer->pts;
+	int diff = video_clock - audio_clock - VideoAudioDelay;
+
+	if(diff > 55 * 90 && decoder->FrameCounter % 2 == 0 && !decoder->TrickSpeed){
+		decoder->FramesDuped++;
+		rbuffer = mmal_queue_get(data->vout_input_pool->queue);
+		memcpy(rbuffer->data, buffer->data, buffer->length);
+		rbuffer->length = buffer->length;
+		rbuffer->user_data = NULL;
+		mmal_queue_put_back(data->vout_queue, buffer);
+		data->buffers_in_queue++;
+		data->buffers++;
+		buffer = rbuffer;
+	}
+	if (diff < -25 * 90 && data->buffers_in_queue > 1 && !decoder->TrickSpeed) {
+		decoder->FramesDropped++;
+		AVFrame * frame = (AVFrame *)buffer->user_data;
+		if(frame)
+			av_frame_free(&frame);
+		mmal_buffer_header_release(buffer);
+			goto dequeue;
+	}
+
+	//Debug
+//	uint32_t newtime = GetMsTicks();
+/*	fprintf(stderr, "vor Dec %3d buffers %2d queue %d deint_in %d deint_out %i Diff %5i Dup %i Drop %i Miss %i Closing %i TSpeed %i TCount %i\n",
+		VideoGetBuffers(decoder->Stream), data->buffers,
+		data->buffers_in_queue, data->buffers_deint_in, data->buffers_deint_out,
+		diff, decoder->FramesDuped, decoder->FramesDropped, decoder->FramesMissed,
+		decoder->Closing, decoder->TrickSpeed, decoder->TrickCounter);*/
+//	data->mytime = newtime;
+
+	if(decoder->StartCounter == 0)
+		AudioVideoReady(video_clock);
+
+	// HDMI phase
+//	usleep(9000); 
+
+	buffer->pts = 1;
+	buffer->cmd = 0;
+	status = mmal_port_send_buffer(data->vout->input[0], buffer);
+	if(status != MMAL_SUCCESS)
+		fprintf(stderr, "Failed send buffer to renderer input port (%d, %s)\n",
+		    status, mmal_status_to_string(status));
+
+//	decoder->FramesDisplayed++;
+	decoder->StartCounter++;
+	decoder->FrameCounter++;
+
+}
+
+///
+///	Debug MMAL decoder frames drop...
+///
+///	@param decoder	MMAL hw decoder
+///
+/*static void MmalPrintFrames(const MmalDecoder * decoder)
+{
+    Debug(3, "video/mmal: %d missed, %d duped, %d dropped frames of %d,%d\n",
+	decoder->FramesMissed, decoder->FramesDuped, decoder->FramesDropped,
+	decoder->FrameCounter, decoder->FramesDisplayed);
+#ifndef DEBUG
+    (void)decoder;
+#endif
+}*/
+
+
+#ifdef USE_VIDEO_THREAD
+///
+///	Handle a MMAL display.
+///
+static void MmalDisplayHandlerThread(void)
+{
+    int err;
+    MmalDecoder *decoder;
+    struct data_t *data = data_list;
+
+    if (!(decoder = MmalDecoders[0])) {	// no stream available
+	fprintf(stderr, "MmalDisplayHandlerThread: no stream available\n");
+	return;
+    }
+
+    if (data->buffers < 7) {
+		err = VideoDecodeInput(decoder->Stream);
+    } else {
+		err = VideoPollInput(decoder->Stream);
+    }
+    if (err) {
+		// FIXME
+		usleep(10 * 1000);		// nothing buffered
+		if (err == -1 && decoder->Closing) {
+			decoder->Closing--;
+			if (!decoder->Closing) {
+				Debug(3, "video/mmal: closing eof\n");
+				decoder->Closing = -1;
+			}
+		}
+    }
+}
+
+#else
+
+
+#define MmalDisplayHandlerThread	NULL
+
+#endif
+
+
+///
+///	Render a ffmpeg frame.
+///
+///	@param decoder		MMAL hw decoder
+///	@param video_ctx	ffmpeg video codec context
+///	@param frame		frame to display
+///
+static void MmalRenderFrame(MmalDecoder * decoder,
+    const AVCodecContext * video_ctx, AVFrame * frame)
+{
+	MMAL_BUFFER_HEADER_T *buffer, *qbuffer;
+	MMAL_ES_FORMAT_T *format;
+    struct data_t *data = data_list;
+
+//	fprintf(stderr, "MmalRenderFrame aspect_ratio.num: %i aspect_ratio.den: %i\n",
+//		video_ctx->sample_aspect_ratio.num, video_ctx->sample_aspect_ratio.den);
+
+	format = (MMAL_ES_FORMAT_T *)frame->data[2];
+
+    // fill no frame to output queue
+	if(decoder->Closing == 1){
+		av_frame_free(&frame);
+		return;
+	}
+
+	// if resolution changed
+	if(format->es->video.width != data->width)
+		MmalChangeResolution(format, frame->interlaced_frame);
+
+	// can always use vout_input_pool?
+	buffer = (MMAL_BUFFER_HEADER_T *)frame->data[3];
+    if(data->interlaced == 0){
+		qbuffer = mmal_queue_get(data->vout_input_pool->queue);
+	}else{
+		qbuffer = mmal_queue_get(data->deint_input_pool->queue);
+	}
+
+	memcpy(qbuffer->data, buffer->data, buffer->length);
+	qbuffer->length = buffer->length;
+	qbuffer->pts = buffer->pts;
+	qbuffer->user_data = frame;
+
+    // fill frame to output queue
+    if(data->interlaced == 0){
+		mmal_queue_put(data->vout_queue, qbuffer);
+		data->buffers_in_queue++;
+		data->buffers++;
+	}else{
+		mmal_port_send_buffer(data->deint->input[0], qbuffer);
+		data->buffers_deint_in++;
+		data->buffers++;
+		data->buffers++;
+	}
+}
+
+///
+///	Callback to negotiate the PixelFormat.
+///
+///	@param fmt	is the list of formats which are supported by the codec,
+///			it is terminated by -1 as 0 is a valid format, the
+///			formats are ordered by quality.
+///
+static enum AVPixelFormat Mmal_get_format(__attribute__ ((unused)) MmalDecoder * decoder,
+		__attribute__ ((unused)) AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
+{
+    while (*fmt != AV_PIX_FMT_NONE) {
+        if (*fmt == AV_PIX_FMT_MMAL)
+			return AV_PIX_FMT_MMAL;
+        fmt++;
+    }
+    fprintf(stderr, "The MMAL pixel format not offered\n");
+    return AV_PIX_FMT_NONE;
+}
+
+///
+///	Reset start of frame counter.
+///
+///	@param decoder	MMAL decoder
+///
+static void MmalResetStart(MmalDecoder * decoder)
+{
+    decoder->StartCounter = 0;
+}
+
+
+///
+///	Set MMAL decoder closing stream flag.
+///
+///	@param decoder	MMAL decoder
+///
+static void MmalSetClosing(MmalDecoder * decoder)
+{
+    decoder->Closing = 1;
+}
+
+
+///
+///	Set trick play speed.
+///
+///	@param decoder	MMAL decoder
+///	@param speed	trick speed (0 = normal)
+///
+static void MmalSetTrickSpeed(MmalDecoder * decoder, int speed)
+{
+    decoder->TrickSpeed = speed;
+    decoder->TrickCounter = speed;
+}
+
+///
+///	MMAL video module.
+///
+static const VideoModule MmalModule = {
+    .Name = "mmal",
+    .Enabled = 1,
+    .NewHwDecoder = (VideoHwDecoder * (*const)(VideoStream *)) MmalNewHwDecoder,
+    .DelHwDecoder = (void (*const) (VideoHwDecoder *))MmalDelHwDecoder,
+    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum AVPixelFormat *))Mmal_get_format,
+    .RenderFrame = (void (*const) (VideoHwDecoder *,
+	    const AVCodecContext *, const AVFrame *))MmalRenderFrame,
+    .GetHwAccelContext = (void *(*const)(int)) MmalGetHwAccelContext,
+    .SetClock = (void (*const) (VideoHwDecoder *, int64_t))MmalSetClock,
+    .GetClock = (int64_t(*const) (const VideoHwDecoder *))MmalGetClock,
+    .SetClosing = (void (*const) (const VideoHwDecoder *))MmalSetClosing,
+    .ResetStart = (void (*const) (const VideoHwDecoder *))MmalResetStart,
+    .SetTrickSpeed =(void (*const) (const VideoHwDecoder *, int))MmalSetTrickSpeed,
+//    .GrabOutput = MmalGrabOutputSurface,
+    .GetStats = (void (*const) (VideoHwDecoder *, int *, int *, int *,
+	    int *))MmalGetStats,
+    .DisplayHandlerThread = MmalDisplayHandlerThread,
+    .OsdClear = MmalOsdClear,
+    .OsdDrawARGB = MmalOsdDrawARGB,
+    .OsdInit = MmalOsdInit,
+    .OsdExit = MmalOsdExit,
+    .Init = MmalInit,
+    .Exit = MmalExit,
+};
 #endif
 
 //----------------------------------------------------------------------------
@@ -9712,8 +10641,8 @@ static const VideoModule NoopModule = {
 #endif
     .ReleaseSurface = NoopReleaseSurface,
 #if 0
-    .get_format = (enum PixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum PixelFormat *))Noop_get_format,
+    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum AVPixelFormat *))Noop_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
 	    const AVCodecContext *, const AVFrame *))NoopSyncRenderFrame,
     .GetHwAccelContext = (void *(*const)(VideoHwDecoder *))
@@ -9890,6 +10819,7 @@ void VideoOsdExit(void)
 /// C callback feed key press
 extern void FeedKeyPress(const char *, const char *, int, int, const char *);
 
+#ifdef USE_XLIB_XCB
 ///
 ///	Handle XLib I/O Errors.
 ///
@@ -10049,6 +10979,7 @@ void VideoPollEvent(void)
 	VideoEvent();
     }
 }
+#endif
 
 //----------------------------------------------------------------------------
 //	Thread
@@ -10112,9 +11043,9 @@ static void *VideoDisplayHandlerThread(void *dummy)
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	pthread_testcancel();
 	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
-
+#ifdef USE_XLIB_XCB
 	VideoPollEvent();
-
+#endif
 	VideoUsedModule->DisplayHandlerThread();
     }
 
@@ -10168,9 +11099,11 @@ static void VideoThreadExit(void)
 ///
 void VideoDisplayWakeup(void)
 {
+	#ifdef USE_XLIB_XCB
     if (!XlibDisplay) {			// not yet started
 	return;
     }
+    #endif
 
     if (!VideoThread) {			// start video thread, if needed
 	VideoThreadInit();
@@ -10200,6 +11133,9 @@ static const VideoModule *VideoModules[] = {
     &VaapiGlxModule,			// FIXME: if working, prefer this
 #endif
 #endif
+#ifdef USE_MMAL
+    &MmalModule,
+#endif
     &NoopModule
 };
 
@@ -10216,6 +11152,9 @@ struct _video_hw_decoder_
 #ifdef USE_VDPAU
 	VdpauDecoder Vdpau;		///< vdpau decoder structure
 #endif
+#ifdef USE_MMAL
+	MmalDecoder Mmal;		    ///< MMAL-API decoder structure
+#endif
     };
 };
 
@@ -10229,7 +11168,6 @@ struct _video_hw_decoder_
 VideoHwDecoder *VideoNewHwDecoder(VideoStream * stream)
 {
     VideoHwDecoder *hw;
-
     VideoThreadLock();
     hw = VideoUsedModule->NewHwDecoder(stream);
     VideoThreadUnlock();
@@ -10293,8 +11231,8 @@ void VideoReleaseSurface(VideoHwDecoder * hw_decoder, unsigned surface)
 ///				valid format, the formats are ordered by
 ///				quality.
 ///
-enum PixelFormat Video_get_format(VideoHwDecoder * hw_decoder,
-    AVCodecContext * video_ctx, const enum PixelFormat *fmt)
+enum AVPixelFormat Video_get_format(VideoHwDecoder * hw_decoder,
+    AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
 #ifdef DEBUG
     int ms_delay;
@@ -10339,9 +11277,9 @@ void VideoRenderFrame(VideoHwDecoder * hw_decoder,
 ///
 ///	@param hw_decoder	video hardware decoder (must be VA-API)
 ///
-void *VideoGetHwAccelContext(VideoHwDecoder * hw_decoder)
+void *VideoGetHwAccelContext(int codec_id)
 {
-    return VideoUsedModule->GetHwAccelContext(hw_decoder);
+    return VideoUsedModule->GetHwAccelContext(codec_id);
 }
 
 #ifdef USE_VDPAU
@@ -10643,8 +11581,8 @@ void VideoGetStats(VideoHwDecoder * hw_decoder, int *missed, int *duped,
 ///	@param[out] aspect_num	video stream aspect numerator
 ///	@param[out] aspect_den	video stream aspect denominator
 ///
-void VideoGetVideoSize(VideoHwDecoder * hw_decoder, int *width, int *height,
-    int *aspect_num, int *aspect_den)
+void VideoGetVideoSize(__attribute__ ((unused))VideoHwDecoder * hw_decoder,
+    int *width, int *height, int *aspect_num, int *aspect_den)
 {
     *width = 1920;
     *height = 1080;
@@ -10807,6 +11745,8 @@ static void X11DPMSReenable(xcb_connection_t * connection)
 //	Setup
 //----------------------------------------------------------------------------
 
+
+#ifdef USE_XLIB_XCB
 ///
 ///	Create main window.
 ///
@@ -10920,6 +11860,7 @@ static void VideoCreateWindow(xcb_window_t parent, xcb_visualid_t visual,
     VideoBlankCursor = cursor;
     VideoBlankTick = 0;
 }
+#endif
 
 ///
 ///	Set video device.
@@ -10949,14 +11890,15 @@ const char *VideoGetDriverName(void)
 ///
 ///	@param geometry	 [=][<width>{xX}<height>][{+-}<xoffset>{+-}<yoffset>]
 ///
-int VideoSetGeometry(const char *geometry)
+/*int VideoSetGeometry(const char *geometry)
 {
+#ifdef USE_XLIB_XCB
     XParseGeometry(geometry, &VideoWindowX, &VideoWindowY, &VideoWindowWidth,
 	&VideoWindowHeight);
-
+#endif
     return 0;
 }
-
+*/
 ///
 ///	Set 60hz display mode.
 ///
@@ -11113,6 +12055,7 @@ void VideoSetOutputPosition(VideoHwDecoder * hw_decoder, int x, int y,
     (void)hw_decoder;
 }
 
+#ifdef USE_XLIB_XCB
 ///
 ///	Set video window position.
 ///
@@ -11255,6 +12198,7 @@ void VideoSetFullscreen(int onoff)
 	    event.data.data32[0], event.data.data32[1]);
     }
 }
+#endif
 
 ///
 ///	Set deinterlace mode.
@@ -11409,6 +12353,7 @@ void VideoSetAutoCrop(int interval, int delay, int tolerance)
 #endif
 }
 
+#ifdef USE_XLIB_XCB
 ///
 ///	Set EnableDPMSatBlackScreen
 ///
@@ -11433,6 +12378,7 @@ int VideoRaiseWindow(void)
 
     return 1;
 }
+#endif
 
 ///
 ///	Initialize video output module.
@@ -11441,8 +12387,9 @@ int VideoRaiseWindow(void)
 ///
 void VideoInit(const char *display_name)
 {
-    int screen_nr;
     int i;
+#ifdef USE_XLIB_XCB
+    int screen_nr;
     xcb_screen_iterator_t screen_iter;
     xcb_screen_t const *screen;
 
@@ -11544,9 +12491,10 @@ void VideoInit(const char *display_name)
     }
 
     Debug(3, "video: window prepared\n");
+#endif
 
     //
-    //	prepare hardware decoder VA-API/VDPAU
+    //	prepare hardware decoder VA-API/VDPAU/MMAL
     //
     for (i = 0; i < (int)(sizeof(VideoModules) / sizeof(*VideoModules)); ++i) {
 	// FIXME: support list of drivers and include display name
@@ -11571,12 +12519,14 @@ void VideoInit(const char *display_name)
     if (getenv("NO_HW")) {
 	VideoHardwareDecoder = 0;
     }
+#ifdef USE_XLIB_XCB
     // disable x11 screensaver
     X11SuspendScreenSaver(Connection, 1);
     X11DPMSDisable(Connection);
 
     //xcb_prefetch_maximum_request_length(Connection);
     xcb_flush(Connection);
+#endif
 
     // I would like to start threads here, but this produces:
     // [xcb] Unknown sequence number while processing queue
@@ -11591,6 +12541,7 @@ void VideoInit(const char *display_name)
 ///
 void VideoExit(void)
 {
+#ifdef USE_XLIB_XCB
     if (!XlibDisplay) {			// no init or failed
 	return;
     }
@@ -11599,7 +12550,7 @@ void VideoExit(void)
     //
     X11DPMSReenable(Connection);
     X11SuspendScreenSaver(Connection, 0);
-
+#endif
 #ifdef USE_VIDEO_THREAD
     VideoThreadExit();
     // VDPAU cleanup hangs in XLockDisplay every 100 exits
@@ -11619,6 +12570,7 @@ void VideoExit(void)
     //
     //RandrExit();
 
+#ifdef USE_XLIB_XCB
     //
     //	X11/xcb cleanup
     //
@@ -11646,9 +12598,10 @@ void VideoExit(void)
 	XlibDisplay = NULL;
 	Connection = 0;
     }
+#endif
 }
 
-#endif
+//#endif
 
 #ifdef VIDEO_TEST
 

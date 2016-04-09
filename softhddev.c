@@ -2884,7 +2884,7 @@ const char *CommandLineHelp(void)
 	"  -d display\tdisplay of x11 server (fe. :0.0)\n"
 	"  -f\t\tstart with fullscreen window (only with window manager)\n"
 	"  -g geometry\tx11 window geometry wxh+x+y\n"
-	"  -v device\tvideo driver device (va-api, vdpau, noop)\n"
+	"  -v device\tvideo driver device (va-api, vdpau, mmal, noop)\n"
 	"  -s\t\tstart in suspended mode\n"
 	"  -x\t\tstart x11 server, with -xx try to connect, if this fails\n"
 	"  -X args\tX11 server arguments (f.e. -nocursor)\n"
@@ -2930,6 +2930,7 @@ int ProcessArgs(int argc, char *const argv[])
 	    case 'p':			// pass-through audio device
 		AudioSetPassthroughDevice(optarg);
 		continue;
+#ifdef USE_XLIB_XCB
 	    case 'd':			// x11 display name
 		X11DisplayName = optarg;
 		continue;
@@ -2944,15 +2945,18 @@ int ProcessArgs(int argc, char *const argv[])
 		    return 0;
 		}
 		continue;
+#endif
 	    case 'v':			// video driver
 		VideoSetDevice(optarg);
 		continue;
+#ifdef USE_XLIB_XCB
 	    case 'x':			// x11 server
 		ConfigStartX11Server++;
 		continue;
 	    case 'X':			// x11 server arguments
 		X11ServerArguments = optarg;
 		continue;
+#endif
 	    case 's':			// start in suspend mode
 		ConfigStartSuspended = 1;
 		continue;

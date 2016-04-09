@@ -93,14 +93,19 @@ static char ConfigSuspendX11;		///< suspend should stop x11
 static char Config4to3DisplayFormat = 1;	///< config 4:3 display format
 static char ConfigOtherDisplayFormat = 1;	///< config other display format
 static uint32_t ConfigVideoBackground;	///< config video background color
+
+#ifdef USE_XLIB_XCB
 static int ConfigOsdWidth;		///< config OSD width
 static int ConfigOsdHeight;		///< config OSD height
 static char ConfigVideoStudioLevels;	///< config use studio levels
 static char ConfigVideo60HzMode;	///< config use 60Hz display mode
 static char ConfigVideoSoftStartSync;	///< config use softstart sync
 static char ConfigVideoBlackPicture;	///< config enable black picture mode
+#endif
+
 char ConfigVideoClearOnSwitch;		///< config enable Clear on channel switch
 
+#ifdef USE_XLIB_XCB
 static int ConfigVideoBrightness;	///< config video brightness
 static int ConfigVideoContrast = 1000;	///< config video contrast
 static int ConfigVideoSaturation = 1000;	///< config video saturation
@@ -134,6 +139,7 @@ static int ConfigAutoCropEnabled;	///< auto crop detection enabled
 static int ConfigAutoCropInterval;	///< auto crop detection interval
 static int ConfigAutoCropDelay;		///< auto crop detection delay
 static int ConfigAutoCropTolerance;	///< auto crop detection tolerance
+#endif
 
 static int ConfigVideoAudioDelay;	///< config audio delay
 static char ConfigAudioDrift;		///< config audio drift
@@ -831,6 +837,7 @@ void cMenuSetupSoft::Create(void)
     static const char *const osd_size[] = {
 	"auto", "1920x1080", "1280x720", "custom",
     };
+#ifndef USE_MMAL
     static const char *const video_display_formats_4_3[] = {
 	"pan&scan", "letterbox", "center cut-out",
     };
@@ -850,6 +857,7 @@ void cMenuSetupSoft::Create(void)
     static const char *const scaling_short[] = {
 	"N", "F", "HQ", "A"
     };
+#endif
     static const char *const audiodrift[] = {
 	"None", "PCM", "AC-3", "PCM + AC-3"
     };
@@ -894,6 +902,7 @@ void cMenuSetupSoft::Create(void)
     //
     //	video
     //
+#ifndef USE_MMAL
     Add(CollapsedItem(tr("Video"), Video));
     if (Video) {
 #ifdef USE_SCREENSAVER
@@ -974,6 +983,7 @@ void cMenuSetupSoft::Create(void)
 	Add(new cMenuEditIntItem(tr("Autocrop tolerance (pixel)"),
 		&AutoCropTolerance, 0, 32));
     }
+#endif
     //
     //	audio
     //
@@ -1119,6 +1129,9 @@ cMenuSetupSoft::cMenuSetupSoft(void)
     //
     //	osd
     //
+
+
+#ifdef USE_XLIB_XCB
     OsdWidth = ConfigOsdWidth;
     OsdHeight = ConfigOsdHeight;
     if (!OsdWidth && !OsdHeight) {
@@ -1149,8 +1162,11 @@ cMenuSetupSoft::cMenuSetupSoft(void)
     _60HzMode = ConfigVideo60HzMode;
     SoftStartSync = ConfigVideoSoftStartSync;
     BlackPicture = ConfigVideoBlackPicture;
+#endif
+
     ClearOnSwitch = ConfigVideoClearOnSwitch;
 
+#ifdef USE_XLIB_XCB
     Brightness = ConfigVideoBrightness;
     Contrast = ConfigVideoContrast;
     Saturation = ConfigVideoSaturation;
@@ -1174,6 +1190,7 @@ cMenuSetupSoft::cMenuSetupSoft(void)
     AutoCropInterval = ConfigAutoCropInterval;
     AutoCropDelay = ConfigAutoCropDelay;
     AutoCropTolerance = ConfigAutoCropTolerance;
+#endif
 
     //
     //	audio
@@ -1252,6 +1269,8 @@ void cMenuSetupSoft::Store(void)
 	default:
 	    break;
     }
+
+#ifdef USE_XLIB_XCB
     if (ConfigOsdWidth != OsdWidth || ConfigOsdHeight != OsdHeight) {
 	VideoSetOsdSize(ConfigOsdWidth = OsdWidth, ConfigOsdHeight =
 	    OsdHeight);
@@ -1281,8 +1300,11 @@ void cMenuSetupSoft::Store(void)
     VideoSetSoftStartSync(ConfigVideoSoftStartSync);
     SetupStore("BlackPicture", ConfigVideoBlackPicture = BlackPicture);
     VideoSetBlackPicture(ConfigVideoBlackPicture);
+#endif
+
     SetupStore("ClearOnSwitch", ConfigVideoClearOnSwitch = ClearOnSwitch);
 
+#ifdef USE_XLIB_XCB
     SetupStore("Brightness", ConfigVideoBrightness = Brightness);
     VideoSetBrightness(ConfigVideoBrightness);
     SetupStore("Contrast", ConfigVideoContrast = Contrast);
@@ -1331,6 +1353,7 @@ void cMenuSetupSoft::Store(void)
     VideoSetAutoCrop(ConfigAutoCropInterval, ConfigAutoCropDelay,
 	ConfigAutoCropTolerance);
     ConfigAutoCropEnabled = ConfigAutoCropInterval != 0;
+#endif
 
     SetupStore("AudioDelay", ConfigVideoAudioDelay = AudioDelay);
     VideoSetAudioDelay(ConfigVideoAudioDelay);
@@ -2035,6 +2058,7 @@ static void HandleHotkey(int code)
 	    ResetChannelId();
 	    break;
 
+#ifdef USE_XLIB_XCB
 	case 20:			// disable full screen
 	    VideoSetFullscreen(0);
 	    break;
@@ -2089,6 +2113,7 @@ static void HandleHotkey(int code)
 	case 49:			// rotate 16:9 -> window mode
 	    VideoSetOtherDisplayFormat(-1);
 	    break;
+#endif
 
 #ifdef USE_PIP
 	case 102:			// PIP toggle
@@ -3020,6 +3045,8 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 	ConfigDetachFromMainMenu = atoi(value);
 	return true;
     }
+
+#ifdef USE_XLIB_XCB
     if (!strcasecmp(name, "Osd.Width")) {
 	ConfigOsdWidth = atoi(value);
 	VideoSetOsdSize(ConfigOsdWidth, ConfigOsdHeight);
@@ -3069,10 +3096,13 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 	VideoSetBlackPicture(ConfigVideoBlackPicture = atoi(value));
 	return true;
     }
+#endif
     if (!strcasecmp(name, "ClearOnSwitch")) {
 	ConfigVideoClearOnSwitch = atoi(value);
 	return true;
     }
+
+#ifdef USE_XLIB_XCB
     if (!strcasecmp(name, "Brightness")) {
 	VideoSetBrightness(ConfigVideoBrightness = atoi(value));
 	return true;
@@ -3160,6 +3190,7 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 	    ConfigAutoCropTolerance = atoi(value));
 	return true;
     }
+#endif
 
     if (!strcasecmp(name, "AudioDelay")) {
 	VideoSetAudioDelay(ConfigVideoAudioDelay = atoi(value));
@@ -3621,7 +3652,7 @@ cString cPluginSoftHdDevice::SVDRPCommand(const char *command,
 	VideoSetOsd3DMode(2);
 	return "3d tb";
     }
-
+#ifdef USE_XLIB_XCB
     if (!strcasecmp(command, "RAIS")) {
 	if (!ConfigStartX11Server) {
 	    VideoRaiseWindow();
@@ -3630,7 +3661,7 @@ cString cPluginSoftHdDevice::SVDRPCommand(const char *command,
 	}
 	return "Window raised";
     }
-
+#endif
     return NULL;
 }
 

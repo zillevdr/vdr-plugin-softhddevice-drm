@@ -60,15 +60,15 @@ extern unsigned VideoGetSurface(VideoHwDecoder *, const AVCodecContext *);
 extern void VideoReleaseSurface(VideoHwDecoder *, unsigned);
 
     /// Callback to negotiate the PixelFormat.
-extern enum PixelFormat Video_get_format(VideoHwDecoder *, AVCodecContext *,
-    const enum PixelFormat *);
+extern enum AVPixelFormat Video_get_format(VideoHwDecoder *, AVCodecContext *,
+    const enum AVPixelFormat *);
 
     /// Render a ffmpeg frame.
 extern void VideoRenderFrame(VideoHwDecoder *, const AVCodecContext *,
     const AVFrame *);
 
     /// Get hwaccel context for ffmpeg.
-extern void *VideoGetHwAccelContext(VideoHwDecoder *);
+extern void *VideoGetHwAccelContext(int);
 
 #ifdef AVCODEC_VDPAU_H
     /// Draw vdpau render state.
@@ -77,9 +77,10 @@ extern void VideoDrawRenderState(VideoHwDecoder *,
 #endif
 #endif
 
+#ifdef USE_XLIB_XCB
     /// Poll video events.
 extern void VideoPollEvent(void);
-
+#endif
     /// Wakeup display handler.
 extern void VideoDisplayWakeup(void);
 
