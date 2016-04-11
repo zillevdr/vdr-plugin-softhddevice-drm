@@ -137,6 +137,7 @@ LIBS += $(shell pkg-config --libs libavresample)
 endif
 ifeq ($(MMAL),1)
 CONFIG += -DUSE_MMAL
+INCLUDES += -I /opt/vc/include -I /opt/vc/lib
 _CFLAGS += $(shell pkg-config --cflags libavcodec)
 LIBS += -lrt -lmmal -lmmal_core -lvcos $(shell pkg-config --libs libavcodec)
 else
