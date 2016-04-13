@@ -137,9 +137,10 @@ LIBS += $(shell pkg-config --libs libavresample)
 endif
 ifeq ($(MMAL),1)
 CONFIG += -DUSE_MMAL
-INCLUDES += -I /opt/vc/include -I /opt/vc/lib
+INCLUDES += -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux
+LDFLAGS += -L/opt/vc/lib
 _CFLAGS += $(shell pkg-config --cflags libavcodec)
-LIBS += -lrt -lmmal -lmmal_core -lvcos $(shell pkg-config --libs libavcodec)
+LIBS += -lrt -lmmal -lmmal_core -lbcm_host -lvcos $(shell pkg-config --libs libavcodec)
 else
 _CFLAGS += $(shell pkg-config --cflags libavcodec x11 x11-xcb xcb xcb-icccm)
 LIBS += -lrt $(shell pkg-config --libs libavcodec x11 x11-xcb xcb xcb-icccm)
