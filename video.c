@@ -9927,14 +9927,17 @@ static void MmalOsdDrawARGB( __attribute__ ((unused)) int xi, __attribute__ ((un
 		data->osd_height = h;
 		data->osd_x = x;
 		data->osd_y = y;
-		memcpy(data->osd_buf, argb, height * pitch);
 
-		data->resource = vc_dispmanx_resource_create( type, width, height,
+		for (i = 0; i < height; ++i){
+			memcpy(data->osd_buf + i * data->osd_width * 4, argb + i * width * 4, width * 4);
+		}
+
+		data->resource = vc_dispmanx_resource_create( type, w, h,
                                                   &data->vc_image_ptr );
 		assert(data->resource);
 
-		vc_dispmanx_rect_set(&dst_rect, 0, 0, width, height);
-		
+		vc_dispmanx_rect_set(&dst_rect, 0, 0, w, h);
+
 		ret = vc_dispmanx_resource_write_data(data->resource, type,
                           data->osd_width * 4, data->osd_buf, &dst_rect);
 		assert(ret == 0);
@@ -9942,9 +9945,9 @@ static void MmalOsdDrawARGB( __attribute__ ((unused)) int xi, __attribute__ ((un
 		data->update = vc_dispmanx_update_start(10);
 		assert(data->update);
 
-		vc_dispmanx_rect_set(&src_rect, 0, 0, width << 16, height << 16);
+		vc_dispmanx_rect_set(&src_rect, 0, 0, w << 16, h << 16);
 
-		vc_dispmanx_rect_set(&dst_rect, data->osd_x, data->osd_y, width, height);
+		vc_dispmanx_rect_set(&dst_rect, data->osd_x, data->osd_y, w, h);
 
 		data->element = vc_dispmanx_element_add(data->update, data->display,
                                   2000, &dst_rect, data->resource, &src_rect,
@@ -9970,7 +9973,7 @@ static void MmalOsdDrawARGB( __attribute__ ((unused)) int xi, __attribute__ ((un
 		data->update = vc_dispmanx_update_start(10);
 		assert(data->update);
 
-		vc_dispmanx_rect_set(&rect, x - data->osd_x, y - data->osd_y, width, height);
+		vc_dispmanx_rect_set(&rect, x - data->osd_x, y - data->osd_y, data->osd_width, data->osd_height);
 
 		ret = vc_dispmanx_element_modified(data->update, data->element, &rect);
 		assert(ret == 0);
