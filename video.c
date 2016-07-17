@@ -9650,7 +9650,6 @@ struct data_t {
 
 	uint32_t width;
 	int interlaced;
-	int64_t lastpts_d;
 	unsigned buffers_in_queue;
 	unsigned buffers_deint_in;
 	unsigned buffers_deint_out;
@@ -9750,10 +9749,8 @@ static void deint_output_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
 	if (buffer->cmd == 0) {
 		if (buffer->length > 0) {
 			buffer->user_data = NULL;
-			// Correct PTS
-			if((buffer->pts - data->lastpts_d) == 20000)
-				buffer->pts = (buffer->pts -18200);
-			data->lastpts_d = buffer->pts;
+			// Correct PTS MMAL use microseconds
+			buffer->pts = (buffer->pts * 90 / 1000);
 			mmal_queue_put(data->vout_queue, buffer);
             data->buffers_deint_out--;
 			++data->buffers_in_queue;
@@ -10406,7 +10403,8 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 
 	memcpy(qbuffer->data, buffer->data, buffer->length);
 	qbuffer->length = buffer->length;
-	qbuffer->pts = buffer->pts;
+	// MMAL use microseconds
+	qbuffer->pts = buffer->pts / 90 * 1000;
 	qbuffer->user_data = frame;
 
     // fill frame to output queue
