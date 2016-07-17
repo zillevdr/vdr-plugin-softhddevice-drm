@@ -10403,16 +10403,17 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 
 	memcpy(qbuffer->data, buffer->data, buffer->length);
 	qbuffer->length = buffer->length;
-	// MMAL use microseconds
-	qbuffer->pts = buffer->pts / 90 * 1000;
 	qbuffer->user_data = frame;
 
     // fill frame to output queue
     if(data->interlaced == 0){
+		qbuffer->pts = buffer->pts;
 		mmal_queue_put(data->vout_queue, qbuffer);
 		data->buffers_in_queue++;
 		data->buffers++;
 	}else{
+		// MMAL use microseconds
+		qbuffer->pts = buffer->pts / 90 * 1000;
 		mmal_port_send_buffer(data->deint->input[0], qbuffer);
 		data->buffers_deint_in++;
 		data->buffers++;
