@@ -9649,9 +9649,11 @@ struct data_t {
 	int osd_y;
 
 	uint32_t width;
+	int32_t par_num;
+	int32_t par_den;
 	int interlaced;
 	unsigned buffers_in_queue;
-	unsigned buffers_deint_in;
+//	unsigned buffers_deint_in;
 	unsigned buffers_deint_out;
 	unsigned buffers;
 };
@@ -9738,7 +9740,7 @@ static void deint_input_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
 	mmal_buffer_header_release(buffer);
 	if(frame)
 		av_frame_free(&frame);
-	data->buffers_deint_in--;
+//	data->buffers_deint_in--;
 }
 
 static void deint_output_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
@@ -9753,7 +9755,7 @@ static void deint_output_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
 			buffer->pts = (buffer->pts * 90 / 1000);
 			mmal_queue_put(data->vout_queue, buffer);
             data->buffers_deint_out--;
-			++data->buffers_in_queue;
+			data->buffers_in_queue++;
 		} else {
 			mmal_buffer_header_release(buffer);
 		}
@@ -10026,6 +10028,8 @@ static int MmalInit(__attribute__ ((unused)) const char *display_name)
 	memset(data, 0, sizeof(struct data_t));
 
 	data->width = 0;
+	data->par_num = 0;
+	data->par_den = 0;
 	OsdConfigWidth = 1920; // default
 	OsdConfigHeight = 1080;
 
@@ -10065,7 +10069,7 @@ static void MmalExit(void)
 
 	data->interlaced = 0;
 	data->buffers_in_queue = 0;
-	data->buffers_deint_in = 0;
+//	data->buffers_deint_in = 0;
 	data->buffers_deint_out = 0;
 	data->buffers = 0;
 }
@@ -10203,6 +10207,8 @@ static void MmalChangeResolution(MMAL_ES_FORMAT_T *format, int interlaced_frame)
 		fprintf(stderr, "Error: cannot open dispmanx vsync callback\n");
 
 	data->width = format->es->video.width;
+	data->par_num = format->es->video.par.num;
+	data->par_den = format->es->video.par.den;
     set_latency_target(MMAL_TRUE);
 }
 
@@ -10233,6 +10239,7 @@ static void MmalDisplayFrame(void)
 	MMAL_STATUS_T status;
 	MmalDecoder *decoder;
 	decoder = MmalDecoders[0];
+	AVFrame *frame;
    	struct data_t *data = data_list;
 
 	if(data->buffers_in_queue == 0 ){
@@ -10243,10 +10250,11 @@ static void MmalDisplayFrame(void)
 
 dequeue:
 	buffer = mmal_queue_get(data->vout_queue);
+	frame = (AVFrame *)buffer->user_data;
 	data->buffers_in_queue--;
 	data->buffers--;
 	if(decoder->Closing > -5){
-		AVFrame * frame = (AVFrame *)buffer->user_data;
+//		AVFrame * frame = (AVFrame *)buffer->user_data;
 		if(frame)
 			av_frame_free(&frame);
 		mmal_buffer_header_release(buffer);
@@ -10272,11 +10280,11 @@ dequeue:
 	}
 	if (diff < -25 * 90 && data->buffers_in_queue > 1 && !decoder->TrickSpeed) {
 		decoder->FramesDropped++;
-		AVFrame * frame = (AVFrame *)buffer->user_data;
+//		AVFrame * frame = (AVFrame *)buffer->user_data;
 		if(frame)
 			av_frame_free(&frame);
 		mmal_buffer_header_release(buffer);
-			goto dequeue;
+		goto dequeue;
 	}
 
 	//Debug
@@ -10376,11 +10384,8 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 {
 	MMAL_BUFFER_HEADER_T *buffer, *qbuffer;
 	MMAL_ES_FORMAT_T *format;
+	MMAL_STATUS_T status;
     struct data_t *data = data_list;
-
-//	fprintf(stderr, "MmalRenderFrame aspect_ratio.num: %i aspect_ratio.den: %i\n",
-//		video_ctx->sample_aspect_ratio.num, video_ctx->sample_aspect_ratio.den);
-
 	format = (MMAL_ES_FORMAT_T *)frame->data[2];
 
     // fill no frame to output queue
@@ -10392,6 +10397,20 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 	// if resolution changed
 	if(format->es->video.width != data->width)
 		MmalChangeResolution(format, frame->interlaced_frame);
+
+	if(data->par_num != format->es->video.par.num ||
+		data->par_den != format->es->video.par.den) {
+		data->vout->input[0]->format->es->video.par.num = format->es->video.par.num;
+		data->vout->input[0]->format->es->video.par.den = format->es->video.par.den;
+		status = mmal_port_format_commit(data->vout->input[0]);
+		if (status != MMAL_SUCCESS){
+			fprintf(stderr, "Failed to commit format for render input port %s (status=%"PRIx32" %s)\n",
+			data->vout->input[0]->name, status, mmal_status_to_string(status));
+		} else {
+			data->par_num = format->es->video.par.num;
+			data->par_den = format->es->video.par.den;
+		}
+	}
 
 	// can always use vout_input_pool?
 	buffer = (MMAL_BUFFER_HEADER_T *)frame->data[3];
@@ -10415,7 +10434,7 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 		// MMAL use microseconds
 		qbuffer->pts = buffer->pts / 90 * 1000;
 		mmal_port_send_buffer(data->deint->input[0], qbuffer);
-		data->buffers_deint_in++;
+//		data->buffers_deint_in++;
 		data->buffers++;
 		data->buffers++;
 	}
