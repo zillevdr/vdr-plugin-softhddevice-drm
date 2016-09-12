@@ -9734,7 +9734,7 @@ static void deint_control_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
 static void deint_input_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
 									MMAL_BUFFER_HEADER_T *buffer)
 {
-    struct data_t *data = data_list;
+//    struct data_t *data = data_list;
 	AVFrame * frame = (AVFrame *)buffer->user_data;
 
 	mmal_buffer_header_release(buffer);
@@ -10074,10 +10074,9 @@ static void MmalExit(void)
 	data->buffers = 0;
 }
 
-static void MmalChangeResolution(MMAL_ES_FORMAT_T *format, int interlaced_frame)
+static void MmalChangeResolution(const AVCodecContext * video_ctx, int interlaced_frame)
 {
 	MMAL_STATUS_T status;
-
    	struct data_t *data = data_list;
 
 	// Test if first time
@@ -10095,8 +10094,21 @@ static void MmalChangeResolution(MMAL_ES_FORMAT_T *format, int interlaced_frame)
 		fprintf(stderr, "Failed to enable render control port %s (%x, %s)\n",
 		    data->vout->control->name, status, mmal_status_to_string(status));
 
-	mmal_format_copy(data->vout->input[0]->format, format);
+	data->vout->input[0]->format->type = MMAL_ES_TYPE_VIDEO;
 	data->vout->input[0]->format->encoding = MMAL_ENCODING_OPAQUE;
+	data->vout->input[0]->format->es->video.width = video_ctx->width;
+	data->vout->input[0]->format->es->video.height = video_ctx->height;
+	data->vout->input[0]->format->es->video.crop.x = 0;
+	data->vout->input[0]->format->es->video.crop.y = 0;
+	data->vout->input[0]->format->es->video.crop.width = video_ctx->width;
+	data->vout->input[0]->format->es->video.crop.height = video_ctx->height;
+	data->vout->input[0]->format->es->video.frame_rate.num = video_ctx->framerate.num;
+	data->vout->input[0]->format->es->video.frame_rate.den = video_ctx->framerate.den;
+	data->vout->input[0]->format->es->video.par.num = video_ctx->sample_aspect_ratio.num;
+	data->vout->input[0]->format->es->video.par.den = video_ctx->sample_aspect_ratio.den;
+	//data->vout->input[0]->format->es->video.color_space
+	//data->vout->input[0]->format->bitrate
+	data->vout->input[0]->format->flags = MMAL_ES_FORMAT_FLAG_FRAMED;
 	status = mmal_port_format_commit(data->vout->input[0]);
 	if (status != MMAL_SUCCESS)
 		fprintf(stderr, "Failed to commit format for render input port %s (status=%"PRIx32" %s)\n",
@@ -10158,7 +10170,7 @@ static void MmalChangeResolution(MMAL_ES_FORMAT_T *format, int interlaced_frame)
 			printf("Failed to enable deinterlace control port %s (%x, %s)\n",
 				data->vout->control->name, status, mmal_status_to_string(status));
 
-		mmal_format_copy(data->deint->input[0]->format, format);
+		mmal_format_copy(data->deint->input[0]->format, data->vout->input[0]->format);
 		status = mmal_port_format_commit(data->deint->input[0]);
 		if (status != MMAL_SUCCESS)
 			printf("Failed to commit deinterlace intput format (status=%"PRIx32" %s)\n",
@@ -10177,7 +10189,7 @@ static void MmalChangeResolution(MMAL_ES_FORMAT_T *format, int interlaced_frame)
 			printf("Failed to enable deinterlace input port %s (%d, %s)\n",
 				data->deint->input[0]->name, status, mmal_status_to_string(status));
 
-		mmal_format_copy(data->deint->output[0]->format, format);
+		mmal_format_copy(data->deint->output[0]->format, data->vout->input[0]->format);
 		status = mmal_port_format_commit(data->deint->output[0]);
 		if (status != MMAL_SUCCESS)
 			printf("Failed to commit deinterlace output format (status=%"PRIx32" %s)\n",
@@ -10206,9 +10218,9 @@ static void MmalChangeResolution(MMAL_ES_FORMAT_T *format, int interlaced_frame)
     if(vc_dispmanx_vsync_callback(data->display, vsync_callback, NULL))
 		fprintf(stderr, "Error: cannot open dispmanx vsync callback\n");
 
-	data->width = format->es->video.width;
-	data->par_num = format->es->video.par.num;
-	data->par_den = format->es->video.par.den;
+	data->width = video_ctx->width;
+	data->par_num = video_ctx->sample_aspect_ratio.num;
+	data->par_den = video_ctx->sample_aspect_ratio.den;
     set_latency_target(MMAL_TRUE);
 }
 
@@ -10383,10 +10395,10 @@ static void MmalRenderFrame(MmalDecoder * decoder,
     const AVCodecContext * video_ctx, AVFrame * frame)
 {
 	MMAL_BUFFER_HEADER_T *buffer, *qbuffer;
-	MMAL_ES_FORMAT_T *format;
+//	MMAL_ES_FORMAT_T *format;
 	MMAL_STATUS_T status;
     struct data_t *data = data_list;
-	format = (MMAL_ES_FORMAT_T *)frame->data[2];
+//	format = (MMAL_ES_FORMAT_T *)frame->data[2];
 
     // fill no frame to output queue
 	if(decoder->Closing == 1){
@@ -10395,20 +10407,20 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 	}
 
 	// if resolution changed
-	if(format->es->video.width != data->width)
-		MmalChangeResolution(format, frame->interlaced_frame);
+	if(video_ctx->width != data->width)
+		MmalChangeResolution(video_ctx, frame->interlaced_frame);
 
-	if(data->par_num != format->es->video.par.num ||
-		data->par_den != format->es->video.par.den) {
-		data->vout->input[0]->format->es->video.par.num = format->es->video.par.num;
-		data->vout->input[0]->format->es->video.par.den = format->es->video.par.den;
+	if(data->par_num != video_ctx->sample_aspect_ratio.num ||
+		data->par_den != video_ctx->sample_aspect_ratio.den) {
+		data->vout->input[0]->format->es->video.par.num = video_ctx->sample_aspect_ratio.num;
+		data->vout->input[0]->format->es->video.par.den = video_ctx->sample_aspect_ratio.den;
 		status = mmal_port_format_commit(data->vout->input[0]);
 		if (status != MMAL_SUCCESS){
 			fprintf(stderr, "Failed to commit format for render input port %s (status=%"PRIx32" %s)\n",
 			data->vout->input[0]->name, status, mmal_status_to_string(status));
 		} else {
-			data->par_num = format->es->video.par.num;
-			data->par_den = format->es->video.par.den;
+			data->par_num = video_ctx->sample_aspect_ratio.num;
+			data->par_den = video_ctx->sample_aspect_ratio.den;
 		}
 	}
 
