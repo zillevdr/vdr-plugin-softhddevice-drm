@@ -10254,13 +10254,13 @@ static void MmalDisplayFrame(void)
 	AVFrame *frame;
    	struct data_t *data = data_list;
 
+dequeue:
 	if(data->buffers_in_queue == 0 ){
 		if(decoder->StartCounter > 0)
 			decoder->FramesMissed++;
 		return;
 	}
 
-dequeue:
 	buffer = mmal_queue_get(data->vout_queue);
 	frame = (AVFrame *)buffer->user_data;
 	data->buffers_in_queue--;
