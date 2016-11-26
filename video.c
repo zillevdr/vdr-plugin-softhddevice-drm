@@ -10254,19 +10254,25 @@ static void MmalDisplayFrame(void)
 	AVFrame *frame;
    	struct data_t *data = data_list;
 
-dequeue:
 	if(data->buffers_in_queue == 0 ){
 		if(decoder->StartCounter > 0)
 			decoder->FramesMissed++;
 		return;
 	}
 
+dequeue:
 	buffer = mmal_queue_get(data->vout_queue);
+	// Debug segfault
+	if (buffer == NULL){
+		syslog(LOG_INFO, "MmalDisplayFrame: buffer are NULL!!! buffers in queue: %i buffers: %i\n",
+			data->buffers_in_queue, data->buffers);
+		return;
+	}
+
 	frame = (AVFrame *)buffer->user_data;
 	data->buffers_in_queue--;
 	data->buffers--;
 	if(decoder->Closing > -5){
-//		AVFrame * frame = (AVFrame *)buffer->user_data;
 		if(frame)
 			av_frame_free(&frame);
 		mmal_buffer_header_release(buffer);
@@ -10292,7 +10298,6 @@ dequeue:
 	}
 	if (diff < -25 * 90 && data->buffers_in_queue > 1 && !decoder->TrickSpeed) {
 		decoder->FramesDropped++;
-//		AVFrame * frame = (AVFrame *)buffer->user_data;
 		if(frame)
 			av_frame_free(&frame);
 		mmal_buffer_header_release(buffer);
@@ -10426,6 +10431,12 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 
 	// can always use vout_input_pool?
 	buffer = (MMAL_BUFFER_HEADER_T *)frame->data[3];
+
+	if (buffer == NULL){
+		syslog(LOG_INFO, "MmalRenderFrame: buffer are NULL!!!\n");
+		return;
+	}
+
     if(data->interlaced == 0){
 		qbuffer = mmal_queue_get(data->vout_input_pool->queue);
 	}else{
@@ -10435,6 +10446,11 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 	memcpy(qbuffer->data, buffer->data, buffer->length);
 	qbuffer->length = buffer->length;
 	qbuffer->user_data = frame;
+
+	if (qbuffer == NULL){
+		syslog(LOG_INFO, "MmalRenderFrame: qbuffer are NULL!!!\n");
+		return;
+	}
 
     // fill frame to output queue
     if(data->interlaced == 0){
