@@ -195,7 +195,7 @@ static enum AVPixelFormat Codec_get_format(AVCodecContext * video_ctx,
 **	@param video_ctx	Codec context
 **	@param frame		Get buffer for this frame
 */
-static int Codec_get_buffer(AVCodecContext * video_ctx, AVFrame * frame, int flags)
+/*static int Codec_get_buffer(AVCodecContext * video_ctx, AVFrame * frame)
 {
     VideoDecoder *decoder;
 
@@ -251,7 +251,7 @@ static int Codec_get_buffer(AVCodecContext * video_ctx, AVFrame * frame, int fla
     }
 #endif
     // VA-API:
-/*    if (video_ctx->hwaccel_context) {
+    if (video_ctx->hwaccel_context) {
 	unsigned surface;
 
 	surface = VideoGetSurface(decoder->HwDecoder, video_ctx);
@@ -277,8 +277,15 @@ static int Codec_get_buffer(AVCodecContext * video_ctx, AVFrame * frame, int fla
 	}
 #endif
 	return 0;
-    }*/
+    }
     //Debug(3, "codec: fallback to default get_buffer\n");
+    return avcodec_default_get_buffer(video_ctx, frame);
+}*/
+
+static int Codec_get_buffer2(AVCodecContext * video_ctx, AVFrame * frame)
+{
+//	fprintf(stderr, "Codec_get_buffer2\n");
+
     return avcodec_default_get_buffer2(video_ctx, frame, 0);
 }
 
@@ -289,7 +296,7 @@ static int Codec_get_buffer(AVCodecContext * video_ctx, AVFrame * frame, int fla
 **	@param video_ctx	Codec context
 **	@param frame		Release buffer for this frame
 */
-static void Codec_release_buffer(AVCodecContext * video_ctx, AVFrame * frame)
+/*static void Codec_release_buffer(AVCodecContext * video_ctx, AVFrame * frame)
 {
 #ifdef USE_VDPAU
     // VDPAU: PIX_FMT_VDPAU_H264 .. PIX_FMT_VDPAU_VC1 PIX_FMT_VDPAU_MPEG4
@@ -332,13 +339,14 @@ static void Codec_release_buffer(AVCodecContext * video_ctx, AVFrame * frame)
     }
     //Debug(3, "codec: fallback to default release_buffer\n");
     return avcodec_default_release_buffer(video_ctx, frame);
-}
+}*/
 
 /// libav: compatibility hack
 #ifndef AV_NUM_DATA_POINTERS
 #define AV_NUM_DATA_POINTERS	4
 #endif
 
+#ifndef USE_DRM
 /**
 **	Draw a horizontal band.
 **
@@ -382,7 +390,7 @@ static void Codec_draw_horiz_band(AVCodecContext * video_ctx,
     (void)frame;
 #endif
 }
-
+#endif
 //----------------------------------------------------------------------------
 //	Test
 //----------------------------------------------------------------------------
@@ -416,17 +424,6 @@ void CodecVideoDelDecoder(VideoDecoder * decoder)
     free(decoder);
 }
 
-static int get_format(AVCodecContext *video_ctx, const enum AVPixelFormat *pix_fmts)
-{
-    while (*pix_fmts != AV_PIX_FMT_NONE) {
-        if (*pix_fmts == AV_PIX_FMT_MMAL)
-            return AV_PIX_FMT_MMAL;
-        pix_fmts++;
-    }
-    fprintf(stderr, "The MMAL pixel format not offered in get_format()\n");
-    return AV_PIX_FMT_NONE;
-}
-
 /**
 **	Open video decoder.
 **
@@ -436,250 +433,89 @@ static int get_format(AVCodecContext *video_ctx, const enum AVPixelFormat *pix_f
 void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 {
     AVCodec *video_codec;
-    const char *name;
     AVHWAccel *hwaccel = NULL, *hw = NULL;
-    int ret;   //, i, err;
-    unsigned int i;
 
-    av_log_set_level(56);
-
-    while((hw = av_hwaccel_next(hw))){
+    while((hw = av_hwaccel_next(hw)))
         if (hw->id == codec_id)
 			hwaccel = hw;
-    }
-	if (hwaccel){
-//		fprintf(stderr, "HW Accel used: %s\n",hwaccel->name);
-		video_codec = avcodec_find_decoder_by_name(hwaccel->name);
-		if (!video_codec) {
-			fprintf(stderr, "The MMAL video_codec is not present in libavcodec\n");
-//			goto finish;
+
+	if (hwaccel) {
+		fprintf(stderr, "HW Accel used: %s\n",hwaccel->name);
+		av_log_set_level(AV_LOG_DEBUG);
+		if (!(video_codec = avcodec_find_decoder_by_name(hwaccel->name))) {
+			fprintf(stderr, "The HW video_codec is not present in libavcodec\n");
+		}
+	} else {
+		fprintf(stderr, "No HW Accel found for %s!\n",
+			avcodec_get_name(codec_id));
+		av_log_set_level(AV_LOG_ERROR );
+		if (!(video_codec = avcodec_find_decoder(codec_id))) {
+			Fatal(_("codec: codec ID %#06x not found\n"), codec_id);
+			fprintf(stderr, "codec: codec ID %#06x not found\n", codec_id);
 		}
 	}
-	else{
-		fprintf(stderr, "No HW Accel found!\n");
-		video_codec = avcodec_find_decoder(AV_CODEC_ID_H264);
-		if (!video_codec) {
-			fprintf(stderr, "The H264 video_codec is not present in libavcodec\n");
-//			goto finish;
-		}
-	}
 
-    decoder->VideoCtx = avcodec_alloc_context3(video_codec);
-    if (!decoder->VideoCtx) {
-        ret = AVERROR(ENOMEM);
-//        goto finish;
-    }
-
-    decoder->VideoCtx->hwaccel_context = hwaccel;
-    decoder->VideoCtx->refcounted_frames = 1;
-
-/*    fprintf(stderr, "codec: video '%s'\n", video_codec->long_name);
-    if (video_codec->capabilities & AV_CODEC_CAP_TRUNCATED)
-		fprintf(stderr, "codec: codec supports frame threads\n");
-    if (video_codec->capabilities & AV_CODEC_CAP_DR1)
-		fprintf(stderr, "codec: can use own buffer management\n");
-	if (video_codec->capabilities & AV_CODEC_CAP_DELAY)
-		fprintf(stderr, "codec: AV_CODEC_CAP_DELAY\n");
-    if (video_codec->type != AVMEDIA_TYPE_VIDEO)
-		fprintf(stderr, "codec: video_codec->type != AVMEDIA_TYPE_VIDEO\n");
-    if (!decoder->VideoCtx->codec)
-		fprintf(stderr, "codec: !decoder->VideoCtx->codec\n");
-    if (decoder->VideoCtx->codec_id & AV_CODEC_ID_H264)
-		fprintf(stderr, "codec: AV_CODEC_ID_H264\n");
-*/
-/*    if (video_st->codec->extradata_size) {
-        video_ctx->extradata = av_mallocz(video_st->codec->extradata_size +
-                                            AV_INPUT_BUFFER_PADDING_SIZE);
-        if (!video_ctx->extradata) {
-            ret = AVERROR(ENOMEM);
-            goto finish;
-        }
-        memcpy(video_ctx->extradata, video_st->codec->extradata,
-               video_st->codec->extradata_size);
-        video_ctx->extradata_size = video_st->codec->extradata_size;
-    }*/
-
-//    video_ctx->opaque      = &decode;
-    decoder->VideoCtx->get_buffer2 = Codec_get_buffer;
-    decoder->VideoCtx->get_format  = get_format;
-
-    ret = avcodec_open2(decoder->VideoCtx, video_codec, NULL);
-    if (ret < 0) {
-        fprintf(stderr, "Error opening the decoder: ");
-//        goto finish;
-    }
-
-/*    Debug(3, "codec: using video codec ID %#06x (%s)\n", codec_id,
-	avcodec_get_name(codec_id));
+	Debug(3, "codec: using video codec ID %#06x (%s)\n", codec_id, 
+		avcodec_get_name(codec_id));
 
     if (decoder->VideoCtx) {
 	Error(_("codec: missing close\n"));
+	fprintf(stderr, "codec: missing close\n");
     }
-#if 1
-    // FIXME: old vdpau API: should be updated to new API
-    name = NULL;
-    if (!strcasecmp(VideoGetDriverName(), "vdpau")) {
-	switch (codec_id) {
-	    case AV_CODEC_ID_MPEG2VIDEO:
-		name = VideoHardwareDecoder < 0 ? "mpegvideo_vdpau" : NULL;
-		break;
-	    case AV_CODEC_ID_H264:
-		name = VideoHardwareDecoder ? "h264_vdpau" : NULL;
-		break;
-	}
-    }
-    // Fixme !!!
-	name = "mpeg2_mmal";
-	if (codec_id == AV_CODEC_ID_H264)
-		name = "h264_mmal";
-    if (name && (video_codec = avcodec_find_decoder_by_name(name))) {
-	fprintf(stderr, "codec: h264_mmal decoder found\n");
-	Debug(3, "codec: vdpau decoder found\n");
-    } else
-#endif
 
-    if (!(video_codec = avcodec_find_decoder(codec_id))) {
-	Fatal(_("codec: codec ID %#06x not found\n"), codec_id);
-	fprintf(stderr, "codec: codec ID %#06x not found\n", codec_id);
-// FIXME: none fatal
-    }
     decoder->VideoCodec = video_codec;
 
     if (!(decoder->VideoCtx = avcodec_alloc_context3(video_codec))) {
-	Fatal(_("codec: can't allocate video codec context\n"));
-    }
-    // FIXME: for software decoder use all cpus, otherwise 1
-    decoder->VideoCtx->thread_count = 1;
-    pthread_mutex_lock(&CodecLockMutex);
-    // open codec
-#if LIBAVCODEC_VERSION_INT <= AV_VERSION_INT(53,5,0)
-    if (avcodec_open(decoder->VideoCtx, video_codec) < 0) {
-	pthread_mutex_unlock(&CodecLockMutex);
-	Fatal(_("codec: can't open video codec!\n"));
-    }
-#else
-    if (video_codec->capabilities & (CODEC_CAP_HWACCEL_VDPAU |
-	    CODEC_CAP_HWACCEL)) {
-	Debug(3, "codec: video mpeg hack active\n");
-	fprintf(stderr, "codec: video mpeg hack active\n");
-	// HACK around badly placed checks in mpeg_mc_decode_init
-	// taken from mplayer vd_ffmpeg.c
-	decoder->VideoCtx->slice_flags =
-	    SLICE_FLAG_CODED_ORDER | SLICE_FLAG_ALLOW_FIELD;
-	decoder->VideoCtx->thread_count = 1;
-	decoder->VideoCtx->active_thread_type = 0;
+		Fatal(_("codec: can't allocate video codec context\n"));
+		fprintf(stderr, "codec: can't allocate video codec context\n");
     }
 
-#ifdef USE_MMAL
+	decoder->VideoCtx->hwaccel_context = hwaccel;
 	decoder->VideoCtx->refcounted_frames = 1;
-//    fprintf(stderr, "codec: refcounted_frames: %i\n", decoder->VideoCtx->refcounted_frames);
-#endif
-
-    if (avcodec_open2(decoder->VideoCtx, video_codec, NULL) < 0) {
-	pthread_mutex_unlock(&CodecLockMutex);
-	Fatal(_("codec: can't open video codec!\n"));
+    if (video_codec->capabilities & CODEC_CAP_DR1) {
+		Debug(3, "codec: use callback buffer2 management\n");
+		decoder->VideoCtx->get_buffer2 = Codec_get_buffer2;
     }
-#endif
-    pthread_mutex_unlock(&CodecLockMutex);
+	decoder->VideoCtx->get_format = Codec_get_format;
 
     decoder->VideoCtx->opaque = decoder;	// our structure
 
-    Debug(3, "codec: video '%s'\n", decoder->VideoCodec->long_name);
-    fprintf(stderr, "codec: video '%s'\n", decoder->VideoCodec->long_name);
+    pthread_mutex_lock(&CodecLockMutex);
+    // open codec
+    if (avcodec_open2(decoder->VideoCtx, video_codec, NULL) < 0) {
+		Fatal(_("codec: can't open video codec!\n"));
+		fprintf(stderr, "codec: can't open video codec!\n");
+    }
+    pthread_mutex_unlock(&CodecLockMutex);
 
-    if (codec_id == AV_CODEC_ID_H264) {
-	// 2.53 Ghz CPU is too slow for this codec at 1080i
-	//decoder->VideoCtx->skip_loop_filter = AVDISCARD_ALL;
-	//decoder->VideoCtx->skip_loop_filter = AVDISCARD_BIDIR;
-    }
     if (video_codec->capabilities & CODEC_CAP_TRUNCATED) {
-	Debug(3, "codec: video can use truncated packets\n");
-    fprintf(stderr, "codec: codec supports frame threads\n");
+		Debug(3, "codec: video can use truncated packets\n");
 #ifndef USE_MPEG_COMPLETE
-	// we send incomplete frames, for old PES recordings
-	// this breaks the decoder for some stations
-	decoder->VideoCtx->flags |= CODEC_FLAG_TRUNCATED;
+		// we send incomplete frames, for old PES recordings
+		// this breaks the decoder for some stations
+		fprintf(stderr, "CodecVideoOpen CODEC_CAP_TRUNCATED 1\n");
+		decoder->VideoCtx->flags |= CODEC_FLAG_TRUNCATED;
 #endif
-    }
-    // FIXME: own memory management for video frames.
-    if (video_codec->capabilities & CODEC_CAP_DR1) {
-	Debug(3, "codec: can use own buffer management\n");
-    fprintf(stderr, "codec: can use own buffer management\n");
-    }
-    if (video_codec->capabilities & CODEC_CAP_HWACCEL_VDPAU) {
-	Debug(3, "codec: can export data for HW decoding (VDPAU)\n");
-    fprintf(stderr, "codec: can export data for HW decoding (VDPAU)\n");
     }
 #ifdef CODEC_CAP_FRAME_THREADS
     if (video_codec->capabilities & CODEC_CAP_FRAME_THREADS) {
-	Debug(3, "codec: codec supports frame threads\n");
-    fprintf(stderr, "codec: codec supports frame threads\n");
+		fprintf(stderr, "codec: codec supports frame threads\n");
+		Debug(3, "codec: codec supports frame threads\n");
     }
 #endif
 
-	if (video_codec->capabilities & CODEC_CAP_DELAY)
-    fprintf(stderr, "codec: CODEC_CAP_DELAY\n");
-    if (!decoder->VideoCtx->codec)
-    fprintf(stderr, "codec: !avctx->codec\n");
-    if (video_codec->type != AVMEDIA_TYPE_VIDEO)
-    fprintf(stderr, "codec: video_codec->type != AVMEDIA_TYPE_VIDEO\n");
-
     //decoder->VideoCtx->debug = FF_DEBUG_STARTCODE;
     //decoder->VideoCtx->err_recognition |= AV_EF_EXPLODE;
-
-//    if (video_codec->capabilities & CODEC_CAP_HWACCEL_VDPAU) {
-	// FIXME: get_format never called.
-//	decoder->VideoCtx->get_format = Codec_get_format;
-//	decoder->VideoCtx->get_buffer = Codec_get_buffer;
-//	decoder->VideoCtx->release_buffer = Codec_release_buffer;
-//	decoder->VideoCtx->reget_buffer = Codec_get_buffer;
-//	decoder->VideoCtx->draw_horiz_band = Codec_draw_horiz_band;
 //	decoder->VideoCtx->slice_flags =
 //	    SLICE_FLAG_CODED_ORDER | SLICE_FLAG_ALLOW_FIELD;
 //	decoder->VideoCtx->thread_count = 1;
 //	decoder->VideoCtx->active_thread_type = 0;
-//    } else {
-	decoder->VideoCtx->get_format = Codec_get_format;
-	decoder->VideoCtx->hwaccel_context =
-	    VideoGetHwAccelContext(codec_id);
-//    }
-
-    // our pixel format video hardware decoder hook
-    if (decoder->VideoCtx->hwaccel_context) {
-
-    fprintf(stderr, "codec: decoder->VideoCtx->hwaccel_context\n");
-
-	decoder->VideoCtx->get_format = get_format;
-	decoder->VideoCtx->get_buffer2 = Codec_get_buffer;
-//	decoder->VideoCtx->release_buffer = Codec_release_buffer;
-//	decoder->VideoCtx->reget_buffer = Codec_get_buffer;
-#if 0
-	decoder->VideoCtx->thread_count = 1;
-	decoder->VideoCtx->draw_horiz_band = NULL;
-	decoder->VideoCtx->slice_flags =
-	    SLICE_FLAG_CODED_ORDER | SLICE_FLAG_ALLOW_FIELD;
+//	decoder->VideoCtx->hwaccel_context =
+//	    VideoGetHwAccelContext(decoder->HwDecoder);
+//	decoder->VideoCtx->draw_horiz_band = NULL;
+//	decoder->VideoCtx->slice_flags =
+//	    SLICE_FLAG_CODED_ORDER | SLICE_FLAG_ALLOW_FIELD;
 	//decoder->VideoCtx->flags |= CODEC_FLAG_EMU_EDGE;
-#endif
-    }
-#ifndef USE_MMAL
-    //
-    //	Prepare frame buffer for decoder
-    //
-#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(56,28,1)
-    if (!(decoder->Frame = av_frame_alloc())) {
-	Fatal(_("codec: can't allocate video decoder frame buffer\n"));
-    }
-#else
-    if (!(decoder->Frame = avcodec_alloc_frame())) {
-	Fatal(_("codec: can't allocate video decoder frame buffer\n"));
-    }
-#endif
-#endif
-    // reset buggy ffmpeg/libav flag
-    decoder->GetFormatDone = 0;
-#ifdef FFMPEG_WORKAROUND_ARTIFACTS
-    decoder->FirstKeyFrame = 1;
-#endif*/
 }
 
 /**
@@ -689,7 +525,20 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 */
 void CodecVideoClose(VideoDecoder * video_decoder)
 {
-#ifndef USE_MMAL
+	if (video_decoder->VideoCodec->capabilities & AV_CODEC_CAP_DELAY) {
+		fprintf(stderr, "CodecVideoClose: AV_CODEC_CAP_DELAY > must send null avpkt\n");
+		AVPacket avpkt;
+
+		av_init_packet(&avpkt);
+		avpkt.data = NULL;
+		avpkt.size = 0;
+
+		CodecVideoDecode(video_decoder, &avpkt);
+
+		av_packet_free(&avpkt);
+		fprintf(stderr, "codec: CodecVideoDecode av_packet_free(avpkt) done\n");
+	}
+#ifndef USE_DRM
     // FIXME: play buffered data
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(56,28,1)
     av_frame_free(&video_decoder->Frame);	// callee does checks
@@ -700,7 +549,9 @@ void CodecVideoClose(VideoDecoder * video_decoder)
     if (video_decoder->VideoCtx) {
 	pthread_mutex_lock(&CodecLockMutex);
 	avcodec_close(video_decoder->VideoCtx);
-	av_freep(&video_decoder->VideoCtx);
+	fprintf(stderr, "CodecVideoClose avcodec_free_context(VideoCtx)\n");
+	avcodec_free_context(&video_decoder->VideoCtx);
+//	av_freep(&video_decoder->VideoCtx);
 	pthread_mutex_unlock(&CodecLockMutex);
     }
 }
@@ -754,9 +605,8 @@ void CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
     AVFrame *frame;
     int used;
     int got_frame;
-    AVPacket pkt[1];
 
-#ifdef USE_MMAL
+#ifdef USE_DRM
     if (!(decoder->Frame = av_frame_alloc())) {
 	Fatal(_("codec: can't allocate decoder frame\n"));
     }
@@ -764,81 +614,27 @@ void CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 
     video_ctx = decoder->VideoCtx;
     frame = decoder->Frame;
-    *pkt = *avpkt;			// use copy
 
-	video_ctx->debug = FF_DEBUG_BUFFERS;
-
-  next_part:
     // FIXME: this function can crash with bad packets
-    used = avcodec_decode_video2(video_ctx, frame, &got_frame, pkt);
-    Debug(4, "%s: %p %d -> %d %d\n", __FUNCTION__, pkt->data, pkt->size, used,
+    used = avcodec_decode_video2(video_ctx, frame, &got_frame, avpkt);
+    Debug(4, "%s: %p %d -> %d %d\n", __FUNCTION__, avpkt->data, avpkt->size, used,
 	got_frame);
 
     if (used < 0) {
 	Debug(3, "codec: bad video frame\n");
-    fprintf(stderr, "codec: bad video frame used: %i got_frame: %i\n",
-       used, got_frame);
+	av_frame_free(&frame);
 	return;
     }
 
-    if (got_frame) {			// frame completed
-
-//	printf("CodecVideoDecode: frame completed\n");
-//#ifdef FFMPEG_WORKAROUND_ARTIFACTS
-//	if (!CodecUsePossibleDefectFrames && decoder->FirstKeyFrame) {
-//	    decoder->FirstKeyFrame++;
-//	    if (frame->key_frame) {
-//		Debug(3, "codec: key frame after %d frames\n",
-//		    decoder->FirstKeyFrame);
-//		decoder->FirstKeyFrame = 0;
-//	    }
-//	} else {
-	    //DisplayPts(video_ctx, frame);
-	    VideoRenderFrame(decoder->HwDecoder, video_ctx, frame);
-//	}
-//#else
-	//DisplayPts(video_ctx, frame);
-//	VideoRenderFrame(decoder->HwDecoder, video_ctx, frame);
-//#endif
-    } else {
-	// some frames are needed for references, interlaced frames ...
-	// could happen with h264 dvb streams, just drop data.
-
-//	Debug(4, "codec: %8d incomplete interlaced frame %d bytes used\n",
-//	    video_ctx->frame_number, used);
-//    fprintf(stderr, "codec: %8d incomplete interlaced frame %d bytes used\n",
-//	    video_ctx->frame_number, used);
+    if (got_frame && !frame->width == 0 && avpkt->data) {
+		VideoRenderFrame(decoder->HwDecoder, video_ctx, frame);
+	} else {
+		fprintf(stderr, "CodecVideoDecode used %i frame %i x %i ctx %i x %i frame %p\n",
+			used, frame->width, frame->height,
+			video_ctx->width, video_ctx->height, frame);
+		av_frame_free(&frame);
+		return;
     }
-
-/*#if 1
-    // old code to support truncated or multi frame packets
-//	fprintf(stderr, "CodecVideoDecode used %d of %d\n",	used, pkt->size);
-    if (used != pkt->size) {
-//		fprintf(stderr, "codec: used != pkt->size\n");
-	// ffmpeg 0.8.7 dislikes our seq_end_h264 and enters endless loop here
-	if (used == 0 && pkt->size == 5 && pkt->data[4] == 0x0A) {
-	    Warning("codec: ffmpeg 0.8.x workaround used\n");
-	    return;
-	}
-	if (used >= 0 && used < pkt->size) {
-	    // some tv channels, produce this
-	    Debug(4,
-		"codec: ooops didn't use complete video packet used %d of %d\n",
-		used, pkt->size);
-//		fprintf(stderr, "codec: ooops didn't use complete video packet used %d of %d\n",
-//		used, pkt->size);
-	    pkt->size -= used;
-	    pkt->data += used;
-	    // FIXME: align problem?
-	    goto next_part;
-	}
-    }
-#endif
-
-    // new AVFrame API
-#if (LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(56,28,1) && !USE_MMAL)
-    av_frame_unref(frame);
-#endif*/
 }
 
 /**
@@ -2160,7 +1956,7 @@ void CodecInit(void)
     pthread_mutex_init(&CodecLockMutex, NULL);
 #ifndef DEBUG
     // disable display ffmpeg error messages
-    av_log_set_callback(CodecNoopCallback);
+//    av_log_set_callback(CodecNoopCallback);
 #else
     (void)CodecNoopCallback;
 #endif

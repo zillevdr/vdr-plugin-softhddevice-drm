@@ -68,7 +68,7 @@ extern void VideoRenderFrame(VideoHwDecoder *, const AVCodecContext *,
     const AVFrame *);
 
     /// Get hwaccel context for ffmpeg.
-extern void *VideoGetHwAccelContext(int);
+extern void *VideoGetHwAccelContext(VideoHwDecoder *);
 
 #ifdef AVCODEC_VDPAU_H
     /// Draw vdpau render state.
@@ -188,7 +188,7 @@ extern void VideoSetClock(VideoHwDecoder *, int64_t);
 extern int64_t VideoGetClock(const VideoHwDecoder *);
 
     /// Set closing flag.
-extern void VideoSetClosing(VideoHwDecoder *);
+extern void VideoSetClosing(VideoHwDecoder *, int);
 
     /// Reset start of frame counter
 extern void VideoResetStart(VideoHwDecoder *);

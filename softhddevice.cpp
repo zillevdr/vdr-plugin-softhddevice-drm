@@ -837,7 +837,7 @@ void cMenuSetupSoft::Create(void)
     static const char *const osd_size[] = {
 	"auto", "1920x1080", "1280x720", "custom",
     };
-#ifndef USE_MMAL
+#ifndef USE_DRM
     static const char *const video_display_formats_4_3[] = {
 	"pan&scan", "letterbox", "center cut-out",
     };
@@ -883,6 +883,7 @@ void cMenuSetupSoft::Create(void)
 	//
 	//	osd
 	//
+#ifndef USE_DRM
 	Add(new cMenuEditStraItem(tr("Osd size"), &OsdSize, 4, osd_size));
 	if (OsdSize == 3) {
 	    Add(new cMenuEditIntItem(tr("Osd width"), &OsdWidth, 0, 4096));
@@ -898,11 +899,12 @@ void cMenuSetupSoft::Create(void)
 		&SuspendClose, trVDR("no"), trVDR("yes")));
 	Add(new cMenuEditBoolItem(tr("Suspend stops x11"), &SuspendX11,
 		trVDR("no"), trVDR("yes")));
+#endif
     }
     //
     //	video
     //
-#ifndef USE_MMAL
+#ifndef USE_DRM
     Add(CollapsedItem(tr("Video"), Video));
     if (Video) {
 #ifdef USE_SCREENSAVER
@@ -1022,6 +1024,7 @@ void cMenuSetupSoft::Create(void)
 		trVDR("no"), trVDR("yes")));
     }
 #ifdef USE_PIP
+#ifndef USE_DRM
     //
     //	PIP
     //
@@ -1055,6 +1058,7 @@ void cMenuSetupSoft::Create(void)
 	Add(new cMenuEditIntItem(tr("Alternative Video Height (%)"),
 		&PipAltVideoHeight, 0, 100));
     }
+#endif
 #endif
 
     SetCurrent(Get(current));		// restore selected menu entry

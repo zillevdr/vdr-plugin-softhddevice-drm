@@ -21,8 +21,8 @@ VDPAU ?= $(shell pkg-config --exists vdpau && echo 1)
 VAAPI ?= $(shell pkg-config --exists libva && echo 1)
     # support glx output
 OPENGL ?= $(shell pkg-config --exists gl glu && echo 1)
-    # support MMAL output
-MMAL ?= 1
+    # support DRM/DRI output
+DRM ?= 1
     # screensaver disable/enable
 SCREENSAVER ?= 0
     # use ffmpeg libswresample
@@ -36,7 +36,7 @@ CONFIG := # -DDEBUG #-DOSD_DEBUG	# enable debug output+functions
 #CONFIG += -DSTILL_DEBUG=2		# still picture debug verbose level
 
 CONFIG += -DAV_INFO -DAV_INFO_TIME=3000	# info/debug a/v sync
-#CONFIG += -DUSE_PIP			# PIP support
+CONFIG += -DUSE_PIP			# PIP support
 #CONFIG += -DHAVE_PTHREAD_NAME		# supports new pthread_setname_np
 #CONFIG += -DNO_TS_AUDIO		# disable ts audio parser
 #CONFIG += -DUSE_TS_VIDEO		# build new ts video parser
@@ -135,12 +135,10 @@ CONFIG += -DUSE_AVRESAMPLE
 _CFLAGS += $(shell pkg-config --cflags libavresample)
 LIBS += $(shell pkg-config --libs libavresample)
 endif
-ifeq ($(MMAL),1)
-CONFIG += -DUSE_MMAL
-INCLUDES += -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux
-LDFLAGS += -L/opt/vc/lib
-_CFLAGS += $(shell pkg-config --cflags libavcodec)
-LIBS += -lrt -lmmal -lmmal_core -lbcm_host -lvcos $(shell pkg-config --libs libavcodec)
+ifeq ($(DRM),1)
+CONFIG += -DUSE_DRM
+_CFLAGS += $(shell pkg-config --cflags libavcodec libdrm)
+LIBS += $(shell pkg-config --libs libavcodec libdrm)
 else
 _CFLAGS += $(shell pkg-config --cflags libavcodec x11 x11-xcb xcb xcb-icccm)
 LIBS += -lrt $(shell pkg-config --libs libavcodec x11 x11-xcb xcb xcb-icccm)
@@ -158,7 +156,9 @@ DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"' -D_GNU_SOURCE $(CONFIG) \
 override CXXFLAGS += $(_CFLAGS) $(DEFINES) $(INCLUDES) \
     -g -W -Wall -Wextra -Winit-self -Werror=overloaded-virtual
 override CFLAGS	  += $(_CFLAGS) $(DEFINES) $(INCLUDES) \
-    -g -W -Wall -Wextra -Winit-self -Wdeclaration-after-statement
+    -g -W -Wall -Wextra -Winit-self
+    
+# -Wdeclaration-after-statement
 
 ### The object files (add further files here):
 

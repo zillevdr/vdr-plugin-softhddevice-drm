@@ -152,14 +152,16 @@ typedef enum
 #include <libavcodec/vdpau.h>
 #endif
 
-#ifdef USE_MMAL
+#ifdef USE_DRM
+#include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
-#include <bcm_host.h>
-#include <interface/mmal/mmal.h>
-#include <interface/mmal/util/mmal_default_components.h>
-#include <interface/mmal/util/mmal_util.h>
-#include <interface/mmal/util/mmal_util_params.h>
-#include <interface/mmal/mmal_parameters_video.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#include <drm_fourcc.h>
+#include <libavcodec/drmprime.h>
 #endif
 
 #include <libavcodec/avcodec.h>
@@ -195,6 +197,9 @@ typedef enum
 //----------------------------------------------------------------------------
 //	Declarations
 //----------------------------------------------------------------------------
+
+int FramesCount;
+uint64_t last_page_flip;
 
 ///
 ///	Video resolutions selector.
@@ -271,10 +276,10 @@ typedef struct _video_module_
 	const enum AVPixelFormat *);
     void (*const RenderFrame) (VideoHwDecoder *, const AVCodecContext *,
 	const AVFrame *);
-    void *(*const GetHwAccelContext)(int);
+    void *(*const GetHwAccelContext)(VideoHwDecoder *);
     void (*const SetClock) (VideoHwDecoder *, int64_t);
      int64_t(*const GetClock) (const VideoHwDecoder *);
-    void (*const SetClosing) (const VideoHwDecoder *);
+    void (*const SetClosing) (const VideoHwDecoder *, int);
     void (*const ResetStart) (const VideoHwDecoder *);
     void (*const SetTrickSpeed) (const VideoHwDecoder *, int);
     uint8_t *(*const GrabOutput)(int *, int *, int *);
@@ -391,10 +396,10 @@ static VideoScalingModes VideoScaling[VideoResolutionMax];
 int VideoAudioDelay;
 
     /// Default zoom mode for 4:3
-//static VideoZoomModes Video4to3ZoomMode;
+static VideoZoomModes Video4to3ZoomMode;
 
     /// Default zoom mode for 16:9 and others
-//static VideoZoomModes VideoOtherZoomMode;
+static VideoZoomModes VideoOtherZoomMode;
 
 static char Video60HzMode;		///< handle 60hz displays
 static char VideoSoftStartSync;		///< soft start sync audio/video
@@ -441,7 +446,7 @@ static int OsdDirtyY;			///< osd dirty area y
 static int OsdDirtyWidth;		///< osd dirty area width
 static int OsdDirtyHeight;		///< osd dirty area height
 
-//static int64_t VideoDeltaPTS;		///< FIXME: fix pts
+static int64_t VideoDeltaPTS;		///< FIXME: fix pts
 
 #ifdef USE_SCREENSAVER
 static char DPMSDisabled;		///< flag we have disabled dpms
@@ -472,7 +477,7 @@ static void X11DPMSDisable(xcb_connection_t *);
 ///
 ///	@note frame->interlaced_frame can't be used for interlace detection
 ///
-/*static void VideoSetPts(int64_t * pts_p, int interlaced,
+static void VideoSetPts(int64_t * pts_p, int interlaced,
     const AVCodecContext * video_ctx, const AVFrame * frame)
 {
     int64_t pts;
@@ -495,8 +500,10 @@ static void X11DPMSDisable(xcb_connection_t *);
 	video_ctx->time_base.num, av_frame_get_pkt_duration(frame), duration);
 #else
     if (video_ctx->framerate.num && video_ctx->framerate.den) {
+//	fprintf(stderr, "VideoSetPts 0\n");
 	duration = 1000 * video_ctx->framerate.den / video_ctx->framerate.num;
     } else {
+//	fprintf(stderr, "VideoSetPts 1\n");
 	duration = interlaced ? 40 : 20;	// 50Hz -> 20ms default
     }
     Debug(4, "video: %d/%d %" PRIx64 " -> %d\n", video_ctx->framerate.den,
@@ -505,19 +512,22 @@ static void X11DPMSDisable(xcb_connection_t *);
 
     // update video clock
     if (*pts_p != (int64_t) AV_NOPTS_VALUE) {
+//	fprintf(stderr, "VideoSetPts 2\n");
 	*pts_p += duration * 90;
 	//Info("video: %s +pts\n", Timestamp2String(*pts_p));
     }
     //av_opt_ptr(avcodec_get_frame_class(), frame, "best_effort_timestamp");
     //pts = frame->best_effort_timestamp;
-    pts = frame->pkt_pts;
+    pts = frame->pts;
     if (pts == (int64_t) AV_NOPTS_VALUE || !pts) {
+//	fprintf(stderr, "VideoSetPts 3\n");
 	// libav: 0.8pre didn't set pts
 	pts = frame->pkt_dts;
     }
     // libav: sets only pkt_dts which can be 0
     if (pts && pts != (int64_t) AV_NOPTS_VALUE) {
 	// build a monotonic pts
+//	fprintf(stderr, "VideoSetPts 4\n");
 	if (*pts_p != (int64_t) AV_NOPTS_VALUE) {
 	    int64_t delta;
 
@@ -533,6 +543,7 @@ static void X11DPMSDisable(xcb_connection_t *);
 		return;
 	    }
 	} else {			// first new clock value
+//	fprintf(stderr, "VideoSetPts: first new clock value\n");
 	    AudioVideoReady(pts);
 	}
 	if (*pts_p != pts) {
@@ -543,13 +554,13 @@ static void X11DPMSDisable(xcb_connection_t *);
 	}
     }
 }
-*/
+
 ///
 ///	Update output for new size or aspect ratio.
 ///
 ///	@param input_aspect_ratio	video stream aspect
 ///
-/*static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
+static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
     int input_height, VideoResolutions resolution, int video_x, int video_y,
     int video_width, int video_height, int *output_x, int *output_y,
     int *output_width, int *output_height, int *crop_x, int *crop_y,
@@ -702,7 +713,7 @@ static void X11DPMSDisable(xcb_connection_t *);
 	*crop_x, *crop_y);
     return;
 }
-*/
+
 #ifdef USE_XLIB_XCB
 //----------------------------------------------------------------------------
 //	GLX
@@ -1570,7 +1581,7 @@ struct _vaapi_decoder_
     /// flags for put surface for different resolutions groups
     unsigned SurfaceFlagsTable[VideoResolutionMax];
 
-    enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
+    enum PixelFormat PixFmt;		///< ffmpeg frame pixfmt
     int WrongInterlacedWarned;		///< warning about interlace flag issued
     int Interlaced;			///< ffmpeg interlaced flag
     int TopFieldFirst;			///< ffmpeg top field displayed first
@@ -2564,7 +2575,7 @@ static void VaapiUpdateOutput(VaapiDecoder * decoder)
 ///	FIXME: must check if put/get with this format is supported (see intel)
 ///
 static int VaapiFindImageFormat(VaapiDecoder * decoder,
-    enum AVPixelFormat pix_fmt, VAImageFormat * format)
+    enum PixelFormat pix_fmt, VAImageFormat * format)
 {
     VAImageFormat *imgfrmts;
     int imgfrmt_n;
@@ -2927,10 +2938,10 @@ static VAEntrypoint VaapiFindEntrypoint(const VAEntrypoint * entrypoints,
 ///
 ///	@note + 2 surface for software deinterlace
 ///
-static enum AVPixelFormat Vaapi_get_format(VaapiDecoder * decoder,
-    AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
+static enum PixelFormat Vaapi_get_format(VaapiDecoder * decoder,
+    AVCodecContext * video_ctx, const enum PixelFormat *fmt)
 {
-    const enum AVPixelFormat *fmt_idx;
+    const enum PixelFormat *fmt_idx;
     VAProfile profiles[vaMaxNumProfiles(VaDisplay)];
     int profile_n;
     VAEntrypoint entrypoints[vaMaxNumEntrypoints(VaDisplay)];
@@ -5724,8 +5735,8 @@ static const VideoModule VaapiModule = {
 	    const AVCodecContext *))VaapiGetSurface,
     .ReleaseSurface =
 	(void (*const) (VideoHwDecoder *, unsigned))VaapiReleaseSurface,
-    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum AVPixelFormat *))Vaapi_get_format,
+    .get_format = (enum PixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum PixelFormat *))Vaapi_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
 	    const AVCodecContext *, const AVFrame *))VaapiSyncRenderFrame,
     .GetHwAccelContext = (void *(*const)(VideoHwDecoder *))
@@ -5766,8 +5777,8 @@ static const VideoModule VaapiGlxModule = {
 	    const AVCodecContext *))VaapiGetSurface,
     .ReleaseSurface =
 	(void (*const) (VideoHwDecoder *, unsigned))VaapiReleaseSurface,
-    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum AVPixelFormat *))Vaapi_get_format,
+    .get_format = (enum PixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum PixelFormat *))Vaapi_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
 	    const AVCodecContext *, const AVFrame *))VaapiSyncRenderFrame,
     .GetHwAccelContext = (void *(*const)(VideoHwDecoder *))
@@ -5822,7 +5833,7 @@ typedef struct _vdpau_decoder_
     int OutputWidth;			///< real video output width
     int OutputHeight;			///< real video output height
 
-    enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
+    enum PixelFormat PixFmt;		///< ffmpeg frame pixfmt
     int WrongInterlacedWarned;		///< warning about interlace flag issued
     int Interlaced;			///< ffmpeg interlaced flag
     int TopFieldFirst;			///< ffmpeg top field displayed first
@@ -7403,10 +7414,10 @@ static VdpDecoderProfile VdpauCheckProfile(VdpauDecoder * decoder,
 ///			it is terminated by -1 as 0 is a valid format, the
 ///			formats are ordered by quality.
 ///
-static enum AVPixelFormat Vdpau_get_format(VdpauDecoder * decoder,
-    AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
+static enum PixelFormat Vdpau_get_format(VdpauDecoder * decoder,
+    AVCodecContext * video_ctx, const enum PixelFormat *fmt)
 {
-    const enum AVPixelFormat *fmt_idx;
+    const enum PixelFormat *fmt_idx;
     VdpDecoderProfile profile;
     int max_refs;
 
@@ -9563,8 +9574,8 @@ static const VideoModule VdpauModule = {
 	    const AVCodecContext *))VdpauGetSurface,
     .ReleaseSurface =
 	(void (*const) (VideoHwDecoder *, unsigned))VdpauReleaseSurface,
-    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum AVPixelFormat *))Vdpau_get_format,
+    .get_format = (enum PixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum PixelFormat *))Vdpau_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
 	    const AVCodecContext *, const AVFrame *))VdpauSyncRenderFrame,
     .GetHwAccelContext = (void *(*const)(VideoHwDecoder *))
@@ -9594,271 +9605,676 @@ static const VideoModule VdpauModule = {
 
 #endif
 
-#ifdef USE_MMAL
+#ifdef USE_DRM
 
 //----------------------------------------------------------------------------
-//	MMAL
+//	DRM
 //----------------------------------------------------------------------------
 
-typedef struct _Mmal_decoder_
+typedef struct _Drm_decoder_ DrmDecoder;
+
+struct _Drm_decoder_
 {
+
     enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
-//    int Interlaced;			///< ffmpeg interlaced flag
 
-//    int CropX;				///< video crop x
-//    int CropY;				///< video crop y
-//    int CropWidth;			///< video crop width
-//    int CropHeight;			///< video crop height
-
+    int SurfacesNeeded;			///< number of surface to request
+    int SurfaceUsedN;			///< number of used video surfaces
+    AVFrame  SurfacesUsed[CODEC_SURFACES_MAX];
+    int SurfaceFreeN;			///< number of free surfaces
+    AVFrame  SurfacesFree[CODEC_SURFACES_MAX];
+    AVFrame  *SurfacesRb[CODEC_SURFACES_MAX];
+    int SurfaceWrite;			///< write pointer
+    int SurfaceRead;			///< read pointer
+    atomic_t SurfacesFilled;		///< how many of the buffer is used
 
     int TrickSpeed;			///< current trick speed
     int TrickCounter;			///< current trick speed counter
+    struct timespec FrameTime;		///< time of last display
     VideoStream *Stream;		///< video stream
     int Closing;			///< flag about closing current stream
+    int SyncOnAudio;			///< flag sync to audio
     int64_t PTS;			///< video PTS clock
+    int64_t PTS_A;			///< audio PTS clock
+    uint32_t time;
 
+    int LastAVDiff;			///< last audio - video difference
+    int SyncCounter;			///< counter to sync frames
     int StartCounter;			///< counter for video start
-    int FramesDuped;			///< number of frames duplicated
     int FramesMissed;			///< number of frames missed
+    int FramesDuped;			///< number of frames duplicated
     int FramesDropped;			///< number of frames dropped
-    int FrameCounter;			///< number of frames decoded
+//    int FrameCounter;			///< number of frames decoded
 //    int FramesDisplayed;		///< number of frames displayed
-} MmalDecoder;
-
-static MmalDecoder *MmalDecoders[1];	///< open decoder streams
-static int MmalDecoderN;		///< number of decoder streams
-
-struct data_t {
-	MMAL_COMPONENT_T *vout;
-	MMAL_POOL_T *vout_input_pool;
-	MMAL_QUEUE_T *vout_queue;
-
-	MMAL_COMPONENT_T *deint;
-	MMAL_POOL_T *deint_input_pool;
-
-    DISPMANX_RESOURCE_HANDLE_T resource;
-    DISPMANX_DISPLAY_HANDLE_T display;
-    DISPMANX_ELEMENT_HANDLE_T element;
-    DISPMANX_UPDATE_HANDLE_T update;
-    DISPMANX_MODEINFO_T info;
-    uint32_t vc_image_ptr;
-    void *osd_buf;
-	int osd_width;
-	int osd_height;
-	int osd_x;
-	int osd_y;
-
-	uint32_t width;
-	int32_t par_num;
-	int32_t par_den;
-	int interlaced;
-	unsigned buffers_in_queue;
-//	unsigned buffers_deint_in;
-	unsigned buffers_deint_out;
-	unsigned buffers;
 };
 
-static struct data_t *data_list = NULL;
-static void MmalDisplayFrame(void);
+static DrmDecoder *DrmDecoders[1];	///< open decoder streams
+static int DrmDecoderN;		///< number of decoder streams
 
 //----------------------------------------------------------------------------
 //	Helper functions
 //----------------------------------------------------------------------------
 
-static void buffer_worker()
+struct drm_buf {
+	uint32_t x, y, width, height, size, pitch[3], handle[3], offset[3], fb_id;
+	uint8_t *plane[3];
+	uint32_t pix_fmt;
+	uint32_t fd_prime;
+	bool free_frame;
+	AVFrame *frame;
+};
+
+struct data_priv {
+	int fd_drm;
+	drmModeModeInfo mode_sd;
+	drmModeModeInfo mode_hdr;
+	drmModeModeInfo mode_hd;
+	drmModeCrtc *saved_crtc;
+	drmEventContext ev;   ///< event context page flip
+	struct drm_buf bufs[36];
+    struct drm_buf buf_osd;
+    struct drm_buf buf_black;
+	uint32_t connector_id, crtc_id, plane_id, osd_plane_id, front_buf;
+	uint32_t last_page_flip;
+	bool pflip_pending, cleanup;
+    int second_field;
+    int prime_buffers;
+};
+
+static struct data_priv *d_priv = NULL;
+static pthread_t presentation_thread_id;
+static void DrmDrawFrame(void);
+
+static uint64_t GetPropertyValue(int fd_drm, uint32_t objectID,
+						uint32_t objectType, const char *propName)
 {
-	MMAL_STATUS_T status;
-	MMAL_BUFFER_HEADER_T *buffer;
-    struct data_t *data = data_list;
+	uint32_t i;
+	int found = 0;
+	uint64_t value = 0;
+	drmModePropertyPtr Prop;
+	drmModeObjectPropertiesPtr objectProps =
+		drmModeObjectGetProperties(fd_drm, objectID, objectType);
 
-    if (data->buffers_deint_out < 3){
-		buffer = mmal_queue_get(data->vout_input_pool->queue);
-		mmal_buffer_header_reset(buffer);
-		data->buffers_deint_out++;
-		status = mmal_port_send_buffer(data->deint->output[0], buffer);
-		if(status != MMAL_SUCCESS)
-			fprintf(stderr, "Failed send buffer to deinterlacer output port (%d, %s)\n",
-				status, mmal_status_to_string(status));
-	}
-}
+	for (i = 0; i < objectProps->count_props; i++) {
+		if ((Prop = drmModeGetProperty(fd_drm, objectProps->props[i])) == NULL)
+			fprintf(stderr, "Unable to query property.\n");
 
-
-void vsync_callback(__attribute__ ((unused)) DISPMANX_UPDATE_HANDLE_T update,
-					__attribute__ ((unused)) void *arg)
-{
-    struct data_t *data = data_list;
-
-    MmalDisplayFrame();
-    if(data->interlaced == 1 && data->buffers > 0){
-		buffer_worker();
-	}
-}
-
-//Renderer
-static void vout_control_port_cb(__attribute__ ((unused)) MMAL_PORT_T *port,
-								MMAL_BUFFER_HEADER_T *buffer)
-{
-	MMAL_STATUS_T status;
-	AVFrame * frame = (AVFrame *)buffer->user_data;
-
-	if (buffer->cmd == MMAL_EVENT_ERROR) {
-		status = *(uint32_t *)buffer->data;
-		fprintf(stderr, "Vout MMAL error %"PRIx32" \"%s\"\n",
-			status, mmal_status_to_string(status));
-	}
-
-	mmal_buffer_header_release(buffer);
-	if(frame){
-		av_frame_free(&frame);
-	}
-}
-
-static void vout_input_port_cb(__attribute__ ((unused)) MMAL_PORT_T *port,
-							  MMAL_BUFFER_HEADER_T *buffer)
-{
-	AVFrame * frame = (AVFrame *)buffer->user_data;
-
-	mmal_buffer_header_release(buffer);
-	if(frame){
-		av_frame_free(&frame);
-	}
-}
-
-// Deinterlacer
-static void deint_control_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
-									MMAL_BUFFER_HEADER_T *buffer)
-{
-	mmal_buffer_header_release(buffer);
-}
-
-static void deint_input_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
-									MMAL_BUFFER_HEADER_T *buffer)
-{
-//    struct data_t *data = data_list;
-	AVFrame * frame = (AVFrame *)buffer->user_data;
-
-	mmal_buffer_header_release(buffer);
-	if(frame)
-		av_frame_free(&frame);
-//	data->buffers_deint_in--;
-}
-
-static void deint_output_port_cb(__attribute__ ((unused))MMAL_PORT_T *port,
-									MMAL_BUFFER_HEADER_T *buffer)
-{
-    struct data_t *data = data_list;
-
-	if (buffer->cmd == 0) {
-		if (buffer->length > 0) {
-			buffer->user_data = NULL;
-			// Correct PTS MMAL use microseconds
-			buffer->pts = (buffer->pts * 90 / 1000);
-			mmal_queue_put(data->vout_queue, buffer);
-            data->buffers_deint_out--;
-			data->buffers_in_queue++;
-		} else {
-			mmal_buffer_header_release(buffer);
+		if (strcmp(propName, Prop->name) == 0) {
+			value = objectProps->prop_values[i];
+			found = 1;
 		}
+
+		drmModeFreeProperty(Prop);
+
+		if (found)
+			break;
+	}
+
+	drmModeFreeObjectProperties(objectProps);
+
+	if (!found)
+		fprintf(stderr, "Unable to find value for property \'%s\'.\n", propName);
+
+	return value;
+}
+
+static int SetPropertyRequest(drmModeAtomicReqPtr ModeReq, int fd_drm,
+					uint32_t objectID, uint32_t objectType,
+					const char *propName, uint32_t value)
+{
+	uint32_t i;
+	int found = 0;
+	uint64_t id = 0;
+	drmModePropertyPtr Prop;
+	drmModeObjectPropertiesPtr objectProps =
+		drmModeObjectGetProperties(fd_drm, objectID, objectType);
+
+	for (i = 0; i < objectProps->count_props; i++) {
+		if ((Prop = drmModeGetProperty(fd_drm, objectProps->props[i])) == NULL)
+			fprintf(stderr, "Unable to query property.\n");
+
+		if (strcmp(propName, Prop->name) == 0) {
+			id = Prop->prop_id;
+			found = 1;
+		}
+
+		drmModeFreeProperty(Prop);
+
+		if (found)
+			break;
+	}
+
+	drmModeFreeObjectProperties(objectProps);
+
+	if (id == 0)
+		fprintf(stderr, "Unable to find value for property \'%s\'.\n", propName);
+
+	return drmModeAtomicAddProperty(ModeReq, objectID, id, value);
+}
+
+void DrmSetMode(drmModeModeInfo mode)
+{
+	struct data_priv *priv = d_priv;
+	drmModeAtomicReqPtr ModeReq;
+	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
+	uint32_t modeID = 0;
+
+	fprintf(stderr, "Setting mode  %ix%i@%i crtc_id %i plane_id %i connector_id %i\n",
+		mode.hdisplay, mode.vdisplay, mode.vrefresh, priv->crtc_id, priv->plane_id, priv->connector_id);
+
+	if (!(ModeReq = drmModeAtomicAlloc()))
+		fprintf(stderr, "cannot allocate atomic request (%d): %m\n", errno);
+
+	if (drmModeCreatePropertyBlob(priv->fd_drm, &mode, sizeof(mode), &modeID) != 0)
+		fprintf(stderr, "Failed to create mode property.\n");
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
+						DRM_MODE_OBJECT_CRTC, "MODE_ID", modeID);
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
+						DRM_MODE_OBJECT_CRTC, "ACTIVE", 1);
+
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->connector_id,
+						DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID", priv->crtc_id);
+
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "CRTC_X", 0);
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "CRTC_Y", 0);
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "CRTC_W", mode.hdisplay);
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "CRTC_H", mode.vdisplay);
+
+	if (drmModeAtomicCommit(priv->fd_drm, ModeReq, flags, NULL) != 0)
+		fprintf(stderr, "Cannot set atomic mode %i x %i (%d): %m\n",
+			mode.hdisplay, mode.vdisplay, errno);
+
+	drmModeAtomicFree(ModeReq);
+}
+
+void DrmSetBuf(struct drm_buf *buf)
+{
+	struct data_priv *priv = d_priv;
+	drmModeAtomicReqPtr ModeReq;
+//	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY;
+	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
+
+//	fprintf(stderr, "Set atomic buf %i width %i height %i fb_id %i\n",
+//		priv->prime_buffers, buf->width, buf->height, buf->fb_id);
+
+	fprintf(stderr, "Set atomic buf prime_buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
+		priv->prime_buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
+
+	if (!(ModeReq = drmModeAtomicAlloc()))
+		fprintf(stderr, "cannot allocate atomic request (%d): %m\n", errno);
+
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "SRC_X", 0);
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "SRC_Y", 0);
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "SRC_W", buf->width << 16);
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "SRC_H", buf->height << 16);
+
+	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "FB_ID", buf->fb_id);
+
+	if (drmModeAtomicCommit(priv->fd_drm, ModeReq, flags, NULL) != 0)
+		fprintf(stderr, "cannot set atomic buf %i width %i height %i fb_id %i (%d): %m\n",
+			priv->prime_buffers, buf->width, buf->height, buf->fb_id, errno);
+
+	drmModeAtomicFree(ModeReq);
+}
+
+static int Drm_find_dev()
+{
+	struct data_priv *priv;
+	drmModeRes *resources;
+	drmModeConnector *connector;
+	drmModeEncoder *encoder;
+	drmModeModeInfo *mode;
+	drmModePlane *plane;
+	drmModePlaneRes *plane_res;
+	int i, fd_drm;
+	uint32_t j, k;
+	uint64_t has_dumb;
+	uint64_t has_prime;
+
+//	fd_drm = drmOpen("imx-drm", NULL);
+	fd_drm = open("/dev/dri/card0", O_RDWR);
+	if (fd_drm < 0) {
+		fprintf(stderr, "cannot open /dev/dri/card0: %m\n");
+		return -errno;
+	}
+
+	// allocate mem for d_priv
+	priv = (struct data_priv *) malloc(sizeof(struct data_priv));
+	memset(priv, 0, sizeof(struct data_priv));
+	priv->fd_drm = fd_drm;
+
+	// check capability
+	if (drmGetCap(fd_drm, DRM_CAP_DUMB_BUFFER, &has_dumb) < 0 || has_dumb == 0)
+		fprintf(stderr, "drmGetCap DRM_CAP_DUMB_BUFFER failed or doesn't have dumb buffer\n");
+
+	if (drmSetClientCap(fd_drm, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0)
+		fprintf(stderr, "DRM_CLIENT_CAP_UNIVERSAL_PLANES not available.\n");
+
+	if (drmSetClientCap(fd_drm, DRM_CLIENT_CAP_ATOMIC, 1) != 0)
+		fprintf(stderr, "DRM_CLIENT_CAP_ATOMIC not available.\n");
+
+	if (drmGetCap(fd_drm, DRM_CAP_PRIME, &has_prime) < 0)
+		fprintf(stderr, "DRM_CAP_PRIME not available.\n");
+
+	if (drmGetCap(fd_drm, DRM_PRIME_CAP_EXPORT, &has_prime) < 0)
+		fprintf(stderr, "DRM_PRIME_CAP_EXPORT not available.\n");
+
+	if (drmGetCap(fd_drm, DRM_PRIME_CAP_IMPORT, &has_prime) < 0)
+		fprintf(stderr, "DRM_PRIME_CAP_IMPORT not available.\n");
+
+	if ((resources = drmModeGetResources(fd_drm)) == NULL){
+		fprintf(stderr, "cannot retrieve DRM resources (%d): %m\n",	errno);
+		return -errno;
+	}
+
+	// find all available connectors
+	for (i = 0; i < resources->count_connectors; i++) {
+		connector = drmModeGetConnector(fd_drm, resources->connectors[i]);
+		if (!connector) {
+			fprintf(stderr, "cannot retrieve DRM connector (%d): %m\n", errno);
+		return -errno;
+		}
+
+		if (connector != NULL && connector->connection == DRM_MODE_CONNECTED && connector->count_modes > 0) {
+			priv->connector_id = connector->connector_id;
+
+			// FIXME: use default encoder/crtc pair
+			if ((encoder = drmModeGetEncoder(priv->fd_drm, connector->encoder_id)) == NULL){
+				fprintf(stderr, "cannot retrieve encoder (%d): %m\n", errno);
+				return -errno;
+			}
+			priv->crtc_id = encoder->crtc_id;
+		}
+		    // search Modes for HD, HDready and SD
+		for (i = 0; i < connector->count_modes; i++) {
+			mode = &connector->modes[i];
+			// Mode HD
+			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 && mode->vrefresh == 50
+				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE)) {
+				memcpy(&priv->mode_hd, &connector->modes[i], sizeof(drmModeModeInfo));
+			}
+			// Mode HDready
+			if(mode->hdisplay == 1280 && mode->vdisplay == 720 && mode->vrefresh == 50
+				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE)) {
+				memcpy(&priv->mode_hdr, &connector->modes[i], sizeof(drmModeModeInfo));
+			}
+			// Mode SD
+			if(mode->hdisplay == 720 && mode->vdisplay == 576 && mode->vrefresh == 50
+				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE)) {
+				memcpy(&priv->mode_sd, &connector->modes[i], sizeof(drmModeModeInfo));
+			}
+		}
+		drmModeFreeConnector(connector);
+	}
+
+	// find first plane
+	if ((plane_res = drmModeGetPlaneResources(fd_drm)) == NULL)
+		fprintf(stderr, "cannot retrieve PlaneResources (%d): %m\n", errno);
+
+	fprintf(stderr, "PlaneResources count_planes: %i\n", plane_res->count_planes);
+	for (j = 0; j < plane_res->count_planes; j++) {
+		plane = drmModeGetPlane(fd_drm, plane_res->planes[j]);
+
+		if (plane == NULL)
+			fprintf(stderr, "cannot query DRM-KMS plane %d\n", j);
+
+		for (i = 0; i < resources->count_crtcs; i++) {
+			if (plane->possible_crtcs & (1 << i))
+				break;
+		}
+
+		uint64_t type = GetPropertyValue(fd_drm, plane_res->planes[j],
+							DRM_MODE_OBJECT_PLANE, "type");
+
+		fprintf(stderr, "Plane plane_id: %i crtc_id: %i possible_crtcs: %i möglicher CRTC %i type: %"PRIu64"\n",
+			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i], type);
+
+		if (type == DRM_PLANE_TYPE_PRIMARY && plane->crtc_id == priv->crtc_id) {
+			priv->plane_id = plane->plane_id;
+		}
+		if (type == DRM_PLANE_TYPE_OVERLAY && (encoder->possible_crtcs & plane->possible_crtcs)) {
+			priv->osd_plane_id = plane->plane_id;
+			break;
+		}
+
+		// test pixel format
+/*		for (k = 0; k < plane->count_formats; k++) {
+			switch (plane->formats[k]) {
+				case DRM_FORMAT_YUV420:
+					priv->pix_fmt = plane->formats[k];
+				case DRM_FORMAT_NV12:
+					priv->pix_fmt = plane->formats[k];
+				case DRM_FORMAT_ARGB8888:
+				break;
+			}
+		}*/
+
+		drmModeFreePlane(plane);
+	}
+
+	drmModeFreeResources(resources);
+	drmModeFreeEncoder(encoder);
+	drmModeFreePlaneResources(plane_res);
+
+	fprintf(stderr, "DRM setup CRTC: %i plane_id: %i osd_plane_id %i\n",
+		priv->crtc_id, priv->plane_id, priv->osd_plane_id);
+
+	d_priv = priv;
+
+	return 0;
+}
+
+static int Drm_setup_fb(struct drm_buf *buf, av_drmprime *primedata)
+{
+	struct data_priv *priv = d_priv;
+	struct drm_mode_create_dumb creq;
+	uint32_t pix_fmt;
+
+	if (primedata) {
+		uint32_t prime_handle;
+
+		switch(primedata->format) {
+			case DRM_FORMAT_NV12:
+//				fprintf(stderr, "Drm_setup_fb primedata vorhanden DRM_FORMAT_NV12 fd %i\n",
+//				primedata->fd);
+				pix_fmt = DRM_FORMAT_NV12;
+				break;
+			case DRM_FORMAT_NV12_10:
+				fprintf(stderr, "Drm_setup_fb primedata vorhanden DRM_FORMAT_NV12_10\n");
+				pix_fmt = DRM_FORMAT_NV12_10;
+				break;
+		}
+
+		if (drmPrimeFDToHandle(priv->fd_drm, primedata->fds[0], &prime_handle))
+			fprintf(stderr, "Failed to retrieve the Prime Handle.\n");
+
+		buf->pitch[0] = primedata->strides[0];
+		buf->offset[0] = primedata->offsets[0];
+		buf->handle[0] = buf->handle[1] = prime_handle;
+		buf->pitch[1] = primedata->strides[1];
+		buf->offset[1] = primedata->offsets[1];
+
 	} else {
-		mmal_buffer_header_release(buffer);
+		pix_fmt = buf->pix_fmt;
+
+		memset(&creq, 0, sizeof(struct drm_mode_create_dumb));
+		creq.width = buf->width;
+		creq.height = buf->height;
+		// 32 bpp for ARGB, 8 bpp for YUV420 and NV12
+		if (buf->pix_fmt == DRM_FORMAT_ARGB8888)
+			creq.bpp = 32;
+		else
+			creq.bpp = 12;
+
+		if (drmIoctl(priv->fd_drm, DRM_IOCTL_MODE_CREATE_DUMB, &creq) < 0){
+			fprintf(stderr, "cannot create dumb buffer (%d): %m\n", errno);
+			return -errno;
+		}
+
+		buf->size = creq.size;
+
+		buf->handle[2] = buf->handle[1] = buf->handle[0] = creq.handle;
+
+		if (buf->pix_fmt == DRM_FORMAT_YUV420) {
+			buf->pitch[0] = buf->width;
+			buf->pitch[2] = buf->pitch[1] = buf->pitch[0] / 2;
+
+			buf->offset[0] = 0;
+			buf->offset[1] = buf->pitch[0] * buf->height;
+			buf->offset[2] = buf->offset[1] + buf->pitch[1] * buf->height / 2;
+		}
+
+		if (buf->pix_fmt == DRM_FORMAT_NV12) {
+			buf->pitch[1] = buf->pitch[0] = buf->width;
+
+			buf->offset[0] = 0;
+			buf->offset[1] = buf->pitch[0] * buf->height;
+		}
+
+		if (buf->pix_fmt == DRM_FORMAT_ARGB8888) {
+			buf->pitch[0] = creq.pitch;
+
+			buf->offset[0] = 0;
+		}
+	}
+
+	if (drmModeAddFB2(priv->fd_drm, buf->width, buf->height,
+		pix_fmt, buf->handle, buf->pitch, buf->offset, &buf->fb_id, 0)) {
+		fprintf(stderr, "cannot create framebuffer (%d): %m\n", errno);
+		return -errno;
+	}
+
+//	fprintf(stderr, "Drm_setup_fb prime_buffers %i Handle %"PRIu32" fb_id %i %i x %i\n",
+//		priv->prime_buffers, buf->handle[0], buf->fb_id, buf->width, buf->height);
+
+	if (primedata)
+		return 0;
+
+	struct drm_mode_map_dumb mreq;
+	memset(&mreq, 0, sizeof(struct drm_mode_map_dumb));
+	mreq.handle = buf->handle[0];
+
+	if (drmIoctl(priv->fd_drm, DRM_IOCTL_MODE_MAP_DUMB, &mreq)){
+		fprintf(stderr, "cannot map dumb buffer (%d): %m\n", errno);
+		return -errno;
+	}
+
+	buf->plane[0] = mmap(0, creq.size, PROT_READ | PROT_WRITE, MAP_SHARED, priv->fd_drm, mreq.offset);
+	if (buf->plane[0] == MAP_FAILED) {
+		fprintf(stderr, "cannot mmap dumb buffer (%d): %m\n", errno);
+		return -errno;
+	}
+	buf->plane[1] = buf->plane[0] + buf->offset[1];
+	buf->plane[2] = buf->plane[0] + buf->offset[2];
+
+	return 0;
+}
+
+static void Drm_page_flip_event( __attribute__ ((unused)) int fd,
+                    __attribute__ ((unused)) unsigned int frame,
+				    __attribute__ ((unused)) unsigned int sec,
+				    __attribute__ ((unused)) unsigned int usec,
+				    void *data)
+{
+	struct data_priv *priv = d_priv;
+	struct drm_buf *buf = data;
+
+	priv->last_page_flip = GetMsTicks();
+	priv->pflip_pending = false;
+	if (!priv->cleanup)
+		DrmDrawFrame();
+
+	// FIXME: make this smarter
+	if (buf->free_frame == 1) {
+		usleep(10000);
+		av_frame_free(&buf->frame);
+		buf->free_frame = 0;
 	}
 }
 
-static void* pool_allocator_alloc(void *context, uint32_t size)
+static void Drm_destroy_fb(int fd_drm, struct drm_buf *buf)
 {
-	return mmal_port_payload_alloc((MMAL_PORT_T *)context, size);
+	struct drm_mode_destroy_dumb dreq;
+
+	struct data_priv *priv = d_priv;
+	fprintf(stderr, "Drm_destroy_fb prime_buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
+		priv->prime_buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
+
+	if (buf->plane[0] != 0)
+		munmap(buf->plane[0], buf->size);
+
+	drmModeRmFB(fd_drm, buf->fb_id);
+
+	if (buf->plane[0] != 0) {
+		memset(&dreq, 0, sizeof(dreq));
+		dreq.handle = buf->handle[0];
+		drmIoctl(fd_drm, DRM_IOCTL_MODE_DESTROY_DUMB, &dreq);
+	}
+	buf->width = 0;
+	buf->height = 0;
+	buf->fb_id = 0;
+	buf->plane[0] = 0;
+	buf->size = 0;
+	buf->fd_prime = 0;
+	buf->free_frame = 0;
 }
 
-static void pool_allocator_free(void *context, void *mem)
+static void DrmSetFb(struct drm_buf *buf, av_drmprime *primedata)
 {
-	mmal_port_payload_free((MMAL_PORT_T *)context, (uint8_t *)mem);
+	struct data_priv *priv = d_priv;
+
+	if (Drm_setup_fb(buf, primedata))
+		fprintf(stderr, "drm_setup_fb FB %i x %i failed\n", buf->width, buf->height);
+
+	DrmSetBuf(buf);
+
+	if (priv->prime_buffers == 1 && (priv->buf_black.width != 0)) {
+		fprintf(stderr, "DrmSetFb: destroy buf_black width %i fb_id %i\n",
+			priv->buf_black.width, priv->buf_black.fb_id);
+		Drm_destroy_fb(priv->fd_drm, &priv->buf_black);
+	}
 }
 
 ///
-///	Allocate new MMAL decoder.
+///	Allocate new DRM decoder.
 ///
 ///	@param stream	video stream
 ///
 ///	@returns always NULL.
 ///
-static MmalDecoder *MmalNewHwDecoder(VideoStream * stream)
+static DrmDecoder *DrmNewHwDecoder(VideoStream * stream)
 {
-    MmalDecoder *decoder;
+    DrmDecoder *decoder;
 
-    if (MmalDecoderN == 1) {
-	Fatal(_("video/MMAL: out of decoders\n"));
-    }
     if (!(decoder = calloc(1, sizeof(*decoder)))) {
-	Error(_("video/MMAL: out of memory\n"));
+	Error(_("video/DRM: out of memory\n"));
 	return NULL;
     }
 
-    decoder->Closing = -300 - 1;
+    // setup video surface ring buffer
+    atomic_set(&decoder->SurfacesFilled, 0);
+
     decoder->PixFmt = AV_PIX_FMT_NONE;
-    decoder->PTS = AV_NOPTS_VALUE;
+
     decoder->Stream = stream;
-    MmalDecoders[MmalDecoderN++] = decoder;
+
+    if (!DrmDecoderN) {		// FIXME: hack sync on audio
+	decoder->SyncOnAudio = 1;
+    }
+    decoder->Closing = 0;
+
+    decoder->PTS = AV_NOPTS_VALUE;
+
+    DrmDecoders[DrmDecoderN++] = decoder;
 
     return decoder;
 }
 
+
 ///
 ///	Get hwaccel context for ffmpeg.
 ///
-///	@param decoder	MMAL hw decoder
+///	@param decoder	DRM hw decoder
 ///
-static void *MmalGetHwAccelContext(unsigned int * codec_id)
+static void *DrmGetHwAccelContext(DrmDecoder * decoder)
 {
-    AVHWAccel *hwaccel = NULL;
+	fprintf(stderr, "DrmGetHwAccelContext not defined\n");
 
+/*    AVHWAccel *hwaccel=NULL;
     while((hwaccel= av_hwaccel_next(hwaccel))){
-        if (hwaccel->id == *codec_id)
-        fprintf(stderr, "MmalGetHwAccelContext: %s\n",hwaccel->name);
+        if (   hwaccel->id      == codec_id
+            && hwaccel->pix_fmt == pix_fmt)
             return hwaccel;
+          fprintf(stderr, "DrmNewHwDecoder: %s\n",hwaccel->name);
     }
+*/
+
 	return NULL;
 }
 
+
 ///
-///	Destroy a MMAL decoder.
+///	Destroy a DRM decoder.
 ///
-///	@param decoder	MMAL hw decoder
+///	@param decoder	DRM hw decoder
 ///
-static void MmalDelHwDecoder(MmalDecoder * decoder)
+static void DrmDelHwDecoder(DrmDecoder * decoder)
 {
-	decoder = MmalDecoders[0];
-    free(decoder);
-    return;
+    int i;
+	fprintf(stderr, "DrmDelHwDecoder\n");
+
+    for (i = 0; i < DrmDecoderN; ++i) {
+	if (DrmDecoders[i] == decoder) {
+	    DrmDecoders[i] = NULL;
+	    // copy last slot into empty slot
+	    if (i < --DrmDecoderN) {
+		DrmDecoders[i] = DrmDecoders[DrmDecoderN];
+	    }
+
+	    free(decoder);
+
+	    return;
+	}
+    }
+    Error(_("video/DRM: decoder not in decoder list.\n"));
 }
 
 ///
-///	Set MMAL decoder video clock.
+///	Set DRM decoder video clock.
 ///
-///	@param decoder	MMAL hardware decoder
+///	@param decoder	DRM hardware decoder
 ///	@param pts	audio presentation timestamp
 ///
-void MmalSetClock(MmalDecoder * decoder, int64_t pts)
+void DrmSetClock(DrmDecoder * decoder, int64_t pts)
 {
+	fprintf(stderr, "DrmSetClock\n");
     decoder->PTS = pts;
 }
 
 ///
-///	Get MMAL decoder video clock.
+///	Get DRM decoder video clock.
 ///
-///	@param decoder	MMAL hw decoder
+///	@param decoder	DRM hw decoder
 ///
-static int64_t MmalGetClock(const MmalDecoder * decoder)
+///	FIXME: 20 wrong for 60hz dvb streams
+///
+static int64_t DrmGetClock(const DrmDecoder * decoder)
 {
-   	struct data_t *data = data_list;
+	fprintf(stderr, "DrmGetClock\n");
 
-    if (decoder->PTS == (int64_t) AV_NOPTS_VALUE)
-		return AV_NOPTS_VALUE;
+    if (decoder->PTS == (int64_t) AV_NOPTS_VALUE) {
+//	fprintf(stderr, "DrmGetClock decoder->PTS == AV_NOPTS_VALUE\n");
+	return AV_NOPTS_VALUE;
+    }
+    // subtract buffered decoded frames
+//    if (decoder->Interlaced) {
+	/*
+	   Info("video: %s =pts field%d #%d\n",
+	   Timestamp2String(decoder->PTS),
+	   decoder->SurfaceField,
+	   atomic_read(&decoder->SurfacesFilled));
+	 */
+	// 1 field is future, 2 fields are past, + 2 in driver queue
+//	return decoder->PTS -
+//	    20 * 90 * (2 * atomic_read(&decoder->SurfacesFilled)
+//	    - decoder->SurfaceField - 2 + 2);
+//    }
 
-    return decoder->PTS - 20 * 90 * data->buffers;
+    return decoder->PTS - 20 * 90 * (atomic_read(&decoder->SurfacesFilled));
 }
 
+
 //----------------------------------------------------------------------------
-//	MMAL OSD
+//	DRM OSD
 //----------------------------------------------------------------------------
 
 ///
@@ -9866,33 +10282,32 @@ static int64_t MmalGetClock(const MmalDecoder * decoder)
 ///
 ///	@note looked by caller
 ///
-static void MmalOsdClear(void)
+static void DrmOsdClear(void)
 {
-   	struct data_t *data = data_list;
-   	int ret;
+	struct data_priv *priv = d_priv;
 
-	if(data->osd_buf != NULL){
-		data->update = vc_dispmanx_update_start( 10 );
-		assert( data->update );
-		ret = vc_dispmanx_element_remove( data->update, data->element );
-		assert( ret == 0 );
-		ret = vc_dispmanx_update_submit_sync( data->update );
-		assert( ret == 0 );
-		ret = vc_dispmanx_resource_delete( data->resource );
-		assert( ret == 0 );
-		free(data->osd_buf);
-		data->osd_buf = NULL;
-	}
+    if (drmModeSetPlane(priv->fd_drm, priv->osd_plane_id, priv->crtc_id,
+	    0, 0, 0, 0, 0, 0, 0, 0, 0 << 16, 0 << 16))
+            fprintf(stderr, "failed to clear plane: (%d): %m\n", (errno));
+    priv->buf_osd.x = 0;
 }
 
 ///
-///	MMAL initialize OSD.
+///	DRM initialize OSD.
 ///
 ///	@param width	osd width
 ///	@param height	osd height
 ///
-static void MmalOsdInit(__attribute__ ((unused))int width, __attribute__ ((unused))int height)
+static void DrmOsdInit(int width, int height)
 {
+	struct data_priv *priv = d_priv;
+
+    priv->buf_osd.x = 0;
+    priv->buf_osd.width = width;
+    priv->buf_osd.height = height;
+    if (Drm_setup_fb(&priv->buf_osd, NULL)){
+	    fprintf(stderr, "drm_setup_fb FB OSD failed\n");
+    }
 }
 
 ///
@@ -9909,564 +10324,400 @@ static void MmalOsdInit(__attribute__ ((unused))int width, __attribute__ ((unuse
 ///
 ///	@note looked by caller
 ///
-static void MmalOsdDrawARGB( __attribute__ ((unused)) int xi, __attribute__ ((unused)) int yi,
+static void DrmOsdDrawARGB( __attribute__ ((unused)) int xi, __attribute__ ((unused)) int yi,
     int width, int height, int pitch, const uint8_t * argb, int x, int y)
 {
-   	struct data_t *data = data_list;
-    VC_DISPMANX_ALPHA_T alpha = {DISPMANX_FLAGS_ALPHA_FROM_SOURCE, 0, 0};
-    VC_IMAGE_TYPE_T type = VC_IMAGE_ARGB8888;
-    VC_RECT_T src_rect, dst_rect, rect;
-    int ret, i;
+	struct data_priv *priv = d_priv;
+	int i;
 
-	if(data->osd_buf == NULL){
-		int h = FFALIGN(height, 16);
-		int w = FFALIGN(width, 32);
-		data->osd_buf = calloc(h, w * 4);
-		data->osd_width = w;
-		data->osd_height = h;
-		data->osd_x = x;
-		data->osd_y = y;
+	if (priv->buf_osd.x == 0){
+		if (drmModeSetPlane(priv->fd_drm, priv->osd_plane_id, priv->crtc_id, priv->buf_osd.fb_id,
+            0, x, y, width, height, 0, 0, width << 16, height << 16))
+                fprintf(stderr, "failed to enable plane: (%d): %m\n", (errno));
+        priv->buf_osd.x = x;
+        priv->buf_osd.y = y;
+    }
 
-		for (i = 0; i < height; ++i){
-			memcpy(data->osd_buf + i * data->osd_width * 4, argb + i * width * 4, width * 4);
-		}
-
-		data->resource = vc_dispmanx_resource_create( type, w, h,
-                                                  &data->vc_image_ptr );
-		assert(data->resource);
-
-		vc_dispmanx_rect_set(&dst_rect, 0, 0, w, h);
-
-		ret = vc_dispmanx_resource_write_data(data->resource, type,
-                          data->osd_width * 4, data->osd_buf, &dst_rect);
-		assert(ret == 0);
-
-		data->update = vc_dispmanx_update_start(10);
-		assert(data->update);
-
-		vc_dispmanx_rect_set(&src_rect, 0, 0, w << 16, h << 16);
-
-		vc_dispmanx_rect_set(&dst_rect, data->osd_x, data->osd_y, w, h);
-
-		data->element = vc_dispmanx_element_add(data->update, data->display,
-                                  2000, &dst_rect, data->resource, &src_rect,
-                                  DISPMANX_PROTECTION_NONE, &alpha,
-                                  NULL, VC_IMAGE_ROT0);
-
-		ret = vc_dispmanx_update_submit_sync(data->update);
-		assert(ret == 0);
-
-	} else {
-
-		for (i = 0; i < height; ++i){
-			memcpy(data->osd_buf + (y - data->osd_y) * data->osd_width * 4 + 
-						data->osd_width * 4 * i + (x - data->osd_x) * 4,
-						argb + i * pitch, (size_t)pitch);
-		}
-		vc_dispmanx_rect_set(&dst_rect, 0, 0, data->osd_width, data->osd_height);
-
-		ret = vc_dispmanx_resource_write_data(data->resource, type,
-                          data->osd_width * 4, data->osd_buf, &dst_rect);
-		assert(ret == 0);
-
-		data->update = vc_dispmanx_update_start(10);
-		assert(data->update);
-
-		vc_dispmanx_rect_set(&rect, x - data->osd_x, y - data->osd_y, data->osd_width, data->osd_height);
-
-		ret = vc_dispmanx_element_modified(data->update, data->element, &rect);
-		assert(ret == 0);
-	
-		ret = vc_dispmanx_update_submit_sync(data->update);
-		assert(ret == 0);
+	for (i = 0; i < height; ++i) {
+		memcpy(priv->buf_osd.plane[0] + (x - priv->buf_osd.x) * 4 + (i + y - priv->buf_osd.y)
+		   * priv->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
 	}
+//	fprintf(stderr, "DrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
+//	   width, height, pitch, x, y, xi, yi, y - priv->buf_osd.y, x - priv->buf_osd.x);
 }
-
 
 ///
 ///	Cleanup osd.
 ///
-static void MmalOsdExit(void)
+static void DrmOsdExit(void)
 {
+	struct data_priv *priv = d_priv;
+
+	Drm_destroy_fb(priv->fd_drm, &priv->buf_osd);
 }
 
-static void set_latency_target(bool enable)
-{
-   	struct data_t *data = data_list;
-    MMAL_STATUS_T status;
-
-    MMAL_PARAMETER_AUDIO_LATENCY_TARGET_T latency_target = {
-        .hdr = { MMAL_PARAMETER_AUDIO_LATENCY_TARGET, sizeof(latency_target) },
-        .enable = enable ? MMAL_TRUE : MMAL_FALSE,
-        .filter = 2,
-        .target = 4000,
-        .shift = 3,
-        .speed_factor = -135,
-        .inter_factor = 500,
-        .adj_cap = 20
-    };
-
-    status = mmal_port_parameter_set(data->vout->input[0], &latency_target.hdr);
-    if (status != MMAL_SUCCESS)
-		fprintf(stderr, "Failed to configure latency target on input port %s (status=%"PRIx32" %s)\n",
-              data->vout->input[0]->name, status, mmal_status_to_string(status));
-}
 
 ///
-///	MMAL setup.
+///	DRM setup.
 ///
 ///	@param unused
 ///
 ///	@returns always true.
 ///
-static int MmalInit(__attribute__ ((unused)) const char *display_name)
+static int DrmInit(__attribute__ ((unused)) const char *display_name)
 {
-	struct data_t *data;
+	struct data_priv *priv;
 
-	// allocate mem for dev_list
-	data = (struct data_t *) malloc(sizeof(struct data_t));
-	memset(data, 0, sizeof(struct data_t));
+	if (Drm_find_dev()){
+		fprintf(stderr, "drm_find_dev() failed\n");
+		return 0;
+	}
+	priv = d_priv;
+	priv->bufs[0].width = priv->bufs[1].width = 0;
+	priv->bufs[0].height = priv->bufs[1].height = 0;
+	priv->bufs[0].pix_fmt = priv->bufs[1].pix_fmt = DRM_FORMAT_NV12;
+	OsdConfigWidth = priv->mode_hd.hdisplay;
+	OsdConfigHeight = priv->mode_hd.vdisplay;
+	priv->buf_osd.pix_fmt = DRM_FORMAT_ARGB8888;
+	priv->buf_black.width = 0;
+	priv->buf_black.pix_fmt = DRM_FORMAT_ARGB8888;
 
-	data->width = 0;
-	data->par_num = 0;
-	data->par_den = 0;
-	OsdConfigWidth = 1920; // default
-	OsdConfigHeight = 1080;
+	// save actual modesetting for connector+CRTC
+	priv->saved_crtc = drmModeGetCrtc(priv->fd_drm, priv->crtc_id);
 
-    bcm_host_init();
-    data->display = vc_dispmanx_display_open(0);
-	if (data->display == DISPMANX_NO_HANDLE)
-		fprintf(stderr, "Error: cannot open dispmanx display\n");
-	// start vc_dispmanx_vsync_callback
-    if(vc_dispmanx_vsync_callback(data->display, vsync_callback, NULL))
-		fprintf(stderr, "Error: cannot open dispmanx vsync callback\n");
+	DrmSetMode(priv->mode_hd);
 
-	data_list = data;
-
+	// init variables page flip
+    if (priv->ev.page_flip_handler != Drm_page_flip_event) {
+		memset(&priv->ev, 0, sizeof(priv->ev));
+		priv->ev.version = DRM_EVENT_CONTEXT_VERSION;
+		priv->ev.page_flip_handler = Drm_page_flip_event;
+	}
     return 1;
 }
 
 ///
-///	MMAL Exit function.
+///	DRM Exit function.
 ///
-static void MmalExit(void)
+static void DrmExit(void)
 {
-   	struct data_t *data = data_list;
+	drmEventContext ev;
+	struct data_priv *priv = d_priv;
 
-    if(vc_dispmanx_vsync_callback(data->display, NULL, NULL))
-		fprintf(stderr, "Error: cannot close dispmanx vsync callback\n");
+	// init variables
+	memset(&ev, 0, sizeof(ev));
+	ev.version = DRM_EVENT_CONTEXT_VERSION;
+	ev.page_flip_handler = Drm_page_flip_event;
 
-/*	vc_dispmanx_display_close(data->display);
-	bcm_host_deinit();*/
+	if (d_priv) {
+		// if a pageflip is pending, wait for it to complete
+		priv->cleanup = true;
+		while (priv->pflip_pending) 
+			if (drmHandleEvent(priv->fd_drm, &ev))
+				break;
 
-    set_latency_target(MMAL_FALSE);
+		// restore saved CRTC configuration
+		if (priv->saved_crtc){
+			drmModeSetCrtc(priv->fd_drm, priv->saved_crtc->crtc_id, priv->saved_crtc->buffer_id,
+				priv->saved_crtc->x, priv->saved_crtc->y, &priv->connector_id, 1, &priv->saved_crtc->mode);
+			drmModeFreeCrtc(priv->saved_crtc);
+		}
 
-	if (data->deint)
-		mmal_component_release(data->deint);
+		// destroy framebuffers
+		Drm_destroy_fb(priv->fd_drm, &priv->bufs[1]);
+		Drm_destroy_fb(priv->fd_drm, &priv->bufs[0]);
 
-	if (data->vout)
-		mmal_component_release(data->vout);
-
-	data->interlaced = 0;
-	data->buffers_in_queue = 0;
-//	data->buffers_deint_in = 0;
-	data->buffers_deint_out = 0;
-	data->buffers = 0;
-}
-
-static void MmalChangeResolution(const AVCodecContext * video_ctx, int interlaced_frame)
-{
-	MMAL_STATUS_T status;
-   	struct data_t *data = data_list;
-
-	// Test if first time
-	if(data->width != 0){
-		MmalExit();
+		// free allocated memory
+		free(priv);
 	}
-
-	status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &data->vout);
-	if (status != MMAL_SUCCESS)
-		fprintf(stderr, "Failed to create MMAL render component %s (status=%"PRIx32" %s)\n",
-		    MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, status, mmal_status_to_string(status));
-
-	status = mmal_port_enable(data->vout->control, vout_control_port_cb);
-	if (status != MMAL_SUCCESS)
-		fprintf(stderr, "Failed to enable render control port %s (%x, %s)\n",
-		    data->vout->control->name, status, mmal_status_to_string(status));
-
-	data->vout->input[0]->format->type = MMAL_ES_TYPE_VIDEO;
-	data->vout->input[0]->format->encoding = MMAL_ENCODING_OPAQUE;
-	data->vout->input[0]->format->es->video.width = video_ctx->width;
-	data->vout->input[0]->format->es->video.height = video_ctx->height;
-	data->vout->input[0]->format->es->video.crop.x = 0;
-	data->vout->input[0]->format->es->video.crop.y = 0;
-	data->vout->input[0]->format->es->video.crop.width = video_ctx->width;
-	data->vout->input[0]->format->es->video.crop.height = video_ctx->height;
-	data->vout->input[0]->format->es->video.frame_rate.num = video_ctx->framerate.num;
-	data->vout->input[0]->format->es->video.frame_rate.den = video_ctx->framerate.den;
-	data->vout->input[0]->format->es->video.par.num = video_ctx->sample_aspect_ratio.num;
-	data->vout->input[0]->format->es->video.par.den = video_ctx->sample_aspect_ratio.den;
-	//data->vout->input[0]->format->es->video.color_space
-	//data->vout->input[0]->format->bitrate
-	data->vout->input[0]->format->flags = MMAL_ES_FORMAT_FLAG_FRAMED;
-	status = mmal_port_format_commit(data->vout->input[0]);
-	if (status != MMAL_SUCCESS)
-		fprintf(stderr, "Failed to commit format for render input port %s (status=%"PRIx32" %s)\n",
-		   data->vout->input[0]->name, status, mmal_status_to_string(status));
-
-    // Set PARAMETER_DISPLAYREGION
-/*    MMAL_DISPLAYREGION_T param;
-    param.hdr.id = MMAL_PARAMETER_DISPLAYREGION;
-    param.hdr.size = sizeof(MMAL_DISPLAYREGION_T);
-    param.layer = 2;
-//    param.fullscreen = 1;
-//    param.mode = MMAL_DISPLAY_MODE_FILL;
-    param.mode = MMAL_DISPLAY_MODE_LETTERBOX;
-//    param.display_num = 0;//0 typically being a directly connected LCD display
-//    param.set = MMAL_DISPLAY_SET_LAYER|MMAL_DISPLAY_SET_NUM|MMAL_DISPLAY_SET_FULLSCREEN|MMAL_DISPLAY_SET_MODE;
-    param.set = MMAL_DISPLAY_SET_LAYER|MMAL_DISPLAY_SET_MODE;
-    status = mmal_port_parameter_set(data->vout->input[0], &param.hdr);
-    if(status != MMAL_SUCCESS && status != MMAL_ENOSYS)
-        fprintf(stderr, "cannot set vout Component (%d): %m\n", status);
-*/
-	data->vout->input[0]->buffer_size = data->vout->input[0]->buffer_size_recommended;
-	data->vout->input[0]->buffer_num = 50;
-	status = mmal_port_enable(data->vout->input[0], vout_input_port_cb);
-	if (status != MMAL_SUCCESS)
-		fprintf(stderr, "Failed to enable renderer input port %s (status=%"PRIx32" %s)\n",
-		    data->vout->input[0]->name, status, mmal_status_to_string(status));
-
-	status = mmal_component_enable(data->vout);
-	if (status != MMAL_SUCCESS)
-		fprintf(stderr, "Failed to enable renderer component %s (status=%"PRIx32" %s)\n",
-		    data->vout->name, status, mmal_status_to_string(status));
-
-	data->vout_input_pool = mmal_pool_create_with_allocator(data->vout->input[0]->buffer_num,
-	   data->vout->input[0]->buffer_size, data->vout->input[0], pool_allocator_alloc, pool_allocator_free);
-	if(!data->vout_input_pool)
-		printf("Failed to create pool for vout input port (%d, %s)\n",
-			status, mmal_status_to_string(status));
-
-	data->vout_queue = mmal_queue_create();
-
-	if(interlaced_frame == 1){
-		data->interlaced = 1;
-		// Deinterlacer
-		status = mmal_component_create("vc.ril.image_fx", &data->deint);
-		if(status != MMAL_SUCCESS)
-			printf("Failed to create deinterlace component vc.ril.image_fx (%x, %s)\n",
-				status, mmal_status_to_string(status));
-
-        // Param 3 is set 0 (full frame rate) Param 4 is set 1 (QPU usage)
-		MMAL_PARAMETER_IMAGEFX_PARAMETERS_T imfx_param = {{MMAL_PARAMETER_IMAGE_EFFECT_PARAMETERS,
-			sizeof(imfx_param)}, MMAL_PARAM_IMAGEFX_DEINTERLACE_ADV, 4, {3, 0, 0, 1 }};
-		status = mmal_port_parameter_set(data->deint->output[0], &imfx_param.hdr);
-		if (status != MMAL_SUCCESS)
-			printf("Failed to configure MMAL component vc.ril.image_fx (status=%"PRIx32" %s)",
-					status, mmal_status_to_string(status));
-
-		status = mmal_port_enable(data->deint->control, deint_control_port_cb);
-		if(status != MMAL_SUCCESS)
-			printf("Failed to enable deinterlace control port %s (%x, %s)\n",
-				data->vout->control->name, status, mmal_status_to_string(status));
-
-		mmal_format_copy(data->deint->input[0]->format, data->vout->input[0]->format);
-		status = mmal_port_format_commit(data->deint->input[0]);
-		if (status != MMAL_SUCCESS)
-			printf("Failed to commit deinterlace intput format (status=%"PRIx32" %s)\n",
-				status, mmal_status_to_string(status));
-
-		status = mmal_port_parameter_set_uint32(data->deint->input[0],
-			MMAL_PARAMETER_EXTRA_BUFFERS, 5);
-		if (status != MMAL_SUCCESS)
-			printf("Failed to set MMAL_PARAMETER_EXTRA_BUFFERS on input deinterlacer port (status=%"PRIx32" %s)\n",
-					status, mmal_status_to_string(status));
-
-		data->deint->input[0]->buffer_num = data->deint->input[0]->buffer_num_recommended;
-		data->deint->input[0]->buffer_size = data->deint->input[0]->buffer_size_min;
-		status = mmal_port_enable(data->deint->input[0], deint_input_port_cb);
-		if(status != MMAL_SUCCESS)
-			printf("Failed to enable deinterlace input port %s (%d, %s)\n",
-				data->deint->input[0]->name, status, mmal_status_to_string(status));
-
-		mmal_format_copy(data->deint->output[0]->format, data->vout->input[0]->format);
-		status = mmal_port_format_commit(data->deint->output[0]);
-		if (status != MMAL_SUCCESS)
-			printf("Failed to commit deinterlace output format (status=%"PRIx32" %s)\n",
-				status, mmal_status_to_string(status));
-
-		status = mmal_component_enable(data->deint);
-		if(status != MMAL_SUCCESS)
-			printf("Failed to enable deinterlace component %s (%d, %s)\n",
-				data->deint->name, status, mmal_status_to_string(status));
-
-		data->deint->output[0]->buffer_num = data->deint->output[0]->buffer_num_recommended;
-		data->deint->output[0]->buffer_size = data->deint->output[0]->buffer_size_min;
-		status = mmal_port_enable(data->deint->output[0], deint_output_port_cb);
-		if(status != MMAL_SUCCESS)
-			printf("Failed to enable deinterlacer output port %s (%d, %s)\n",
-				data->deint->output[0]->name, status, mmal_status_to_string(status));
-
-		data->deint_input_pool = mmal_pool_create_with_allocator(data->deint->input[0]->buffer_num,
-			data->deint->input[0]->buffer_size, data->deint->input[0], pool_allocator_alloc, pool_allocator_free);
-		if(!data->deint_input_pool)
-			printf("Failed to create pool for deinterlacer input port (%d, %s)\n",
-			status, mmal_status_to_string(status));
-	}
-
-	// start vc_dispmanx_vsync_callback
-    if(vc_dispmanx_vsync_callback(data->display, vsync_callback, NULL))
-		fprintf(stderr, "Error: cannot open dispmanx vsync callback\n");
-
-	data->width = video_ctx->width;
-	data->par_num = video_ctx->sample_aspect_ratio.num;
-	data->par_den = video_ctx->sample_aspect_ratio.den;
-    set_latency_target(MMAL_TRUE);
 }
 
 ///
-///	Get MMAL decoder statistics.
+///	Get DRM decoder statistics.
 ///
-///	@param decoder		MMAL decoder
+///	@param decoder		DRM decoder
 ///	@param[out] missed	missed frames
 ///	@param[out] duped	duped frames
 ///	@param[out] dropped	dropped frames
 ///	@param[out] count	number of decoded frames
 ///
-void MmalGetStats(MmalDecoder * decoder, int *missed, int *duped,
+/*void DrmGetStats(DrmDecoder * decoder, int *missed, int *duped,
     int *dropped, int *counter)
 {
     *missed = decoder->FramesMissed;
     *duped = decoder->FramesDuped;
     *dropped = decoder->FramesDropped;
     *counter = decoder->FrameCounter;
-}
+}*/
 
 ///
 ///	Display a video frame.
 ///
-static void MmalDisplayFrame(void)
+static void *DrmDisplayFrame()
 {
-	MMAL_BUFFER_HEADER_T *buffer, *rbuffer;
-	MMAL_STATUS_T status;
-	MmalDecoder *decoder;
-	decoder = MmalDecoders[0];
-	AVFrame *frame;
-   	struct data_t *data = data_list;
+	struct data_priv *priv = d_priv;
+	DrmDecoder *decoder;
 
-	if(data->buffers_in_queue == 0 ){
-		if(decoder->StartCounter > 0)
-			decoder->FramesMissed++;
-		return;
+	// Thread setcancelstate
+	pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
+
+	decoder = DrmDecoders[0];
+
+    //	Render videos into output
+	while ((atomic_read(&decoder->SurfacesFilled)) < 2 ){
+		usleep(15000);
 	}
+	DrmDrawFrame();
+	while (1){
+		drmHandleEvent(priv->fd_drm, &priv->ev);
+	}
+	return 0;
+}
+
+
+///
+///	Draw a video frame.
+///
+static void DrmDrawFrame(void)
+{
+    int i, j;
+	struct data_priv *priv = d_priv;
+	struct drm_buf *buf = 0;
+	DrmDecoder *decoder;
+	AVFrame *surface;
+	av_drmprime *primedata = NULL;
+	decoder = DrmDecoders[0];
+
+	// Zeitname vor der Kopiererei
+	uint32_t newtime = GetMsTicks();
+
+		if (priv->prime_buffers && priv->buf_black.width && decoder->Closing) {
+			for (i = 0; i < priv->prime_buffers; ++i) {
+				Drm_destroy_fb(priv->fd_drm, &priv->bufs[i]);
+			}
+			priv->prime_buffers = 0;
+			priv->front_buf = 0;
+		}
 
 dequeue:
-	buffer = mmal_queue_get(data->vout_queue);
-	// Debug segfault
-	if (buffer == NULL){
-		syslog(LOG_INFO, "MmalDisplayFrame: buffer are NULL!!! buffers in queue: %i buffers: %i\n",
-			data->buffers_in_queue, data->buffers);
-		return;
+	while ((atomic_read(&decoder->SurfacesFilled)) == 0 ) {
+		usleep(20000);
 	}
 
-	frame = (AVFrame *)buffer->user_data;
-	data->buffers_in_queue--;
-	data->buffers--;
-	if(decoder->Closing > -5){
-		if(frame)
-			av_frame_free(&frame);
-		mmal_buffer_header_release(buffer);
-		if(data->buffers_in_queue > 0)
-			goto dequeue;
-		return;
-	}
+    pthread_mutex_lock(&VideoLockMutex);
+	surface = decoder->SurfacesRb[decoder->SurfaceRead];
+    pthread_mutex_unlock(&VideoLockMutex);
 
-	int64_t audio_clock = AudioGetClock();
-	int64_t video_clock = decoder->PTS = buffer->pts;
-	int diff = video_clock - audio_clock - VideoAudioDelay;
+	if (decoder->Closing && (surface->interlaced_frame == 0 || priv->second_field == 1)) {
+		// first step set a black FB
+		if (!(priv->buf_black.width)) {
+			priv->buf_black.width = 720;
+			priv->buf_black.height = 576;
+			DrmSetFb(&priv->buf_black, primedata);
+			buf = &priv->buf_black;
+			goto page_flip;
+		}
+		if(surface) {
+			fprintf(stderr, "DrmDrawFrame av_frame_free %p\n", surface);
+			av_frame_free(&surface);
+		}
 
-	if(diff > 55 * 90 && decoder->FrameCounter % 2 == 0 && !decoder->TrickSpeed){
-		decoder->FramesDuped++;
-		rbuffer = mmal_queue_get(data->vout_input_pool->queue);
-		memcpy(rbuffer->data, buffer->data, buffer->length);
-		rbuffer->length = buffer->length;
-		rbuffer->user_data = NULL;
-		mmal_queue_put_back(data->vout_queue, buffer);
-		data->buffers_in_queue++;
-		data->buffers++;
-		buffer = rbuffer;
-	}
-	if (diff < -25 * 90 && data->buffers_in_queue > 1 && !decoder->TrickSpeed) {
-		decoder->FramesDropped++;
-		if(frame)
-			av_frame_free(&frame);
-		mmal_buffer_header_release(buffer);
+		pthread_mutex_lock(&VideoLockMutex);
+		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
+		atomic_dec(&decoder->SurfacesFilled);
+		pthread_mutex_unlock(&VideoLockMutex);
 		goto dequeue;
 	}
 
-	//Debug
-//	uint32_t newtime = GetMsTicks();
-/*	fprintf(stderr, "vor Dec %3d buffers %2d queue %d deint_in %d deint_out %i Diff %5i Dup %i Drop %i Miss %i Closing %i TSpeed %i TCount %i\n",
-		VideoGetBuffers(decoder->Stream), data->buffers,
-		data->buffers_in_queue, data->buffers_deint_in, data->buffers_deint_out,
-		diff, decoder->FramesDuped, decoder->FramesDropped, decoder->FramesMissed,
-		decoder->Closing, decoder->TrickSpeed, decoder->TrickCounter);*/
-//	data->mytime = newtime;
+	//Untersuchen wir mal primedata
+	if (surface->data[3]) {
+		primedata = (av_drmprime *)surface->data[3];
+		// search or made fd / FB combination
+			for (i = 0; i < priv->prime_buffers; i++) {
+				if (priv->bufs[i].fd_prime == primedata->fds[0]) {
+					buf = &priv->bufs[i];
+					break;
+				}
+			}
+		if (buf == 0) {
+			buf = &priv->bufs[priv->prime_buffers];
+			buf->width = (uint32_t)surface->width;
+			buf->height = (uint32_t)surface->height;
+			buf->fd_prime = primedata->fds[0];
+
+			DrmSetFb(buf, primedata);
+			priv->prime_buffers++;
+		}
+	} else {
+
+		buf = &priv->bufs[priv->front_buf ^ 1];
+
+		if (surface->width != (int)buf->width) {
+
+			buf->width = (uint32_t)surface->width;
+			if (surface->interlaced_frame == 1)
+				buf->height = (uint32_t)surface->height / 2;
+			else buf->height = (uint32_t)surface->height;
+
+			DrmSetFb(buf, primedata);
+			priv->prime_buffers++;
+		}
+
+		// Copy YUV420 to NV12 and deinterlace at same time
+		if (surface->data[0]) {
+			for (i = 0; i < surface->height; ++i)
+				if (((i + surface->top_field_first) % 2 == 0 && priv->second_field == 1) ||
+					((i + surface->top_field_first + 1) % 2 == 0 && priv->second_field == 0) ||
+					surface->interlaced_frame == 0)
+						memcpy(buf->plane[0] + i / (surface->interlaced_frame + 1) * surface->width,
+							surface->data[0] + i * surface->linesize[0],
+							surface->width);
+
+			for (i = 0; i < surface->height / 2; ++i) {
+				if (((i + surface->top_field_first) % 2 == 0 && priv->second_field == 1) ||
+					((i + surface->top_field_first + 1) % 2 == 0 && priv->second_field == 0) ||
+					surface->interlaced_frame == 0)
+					for (j = 0; j < surface->width; ++j) {
+						if (j % 2 == 0)
+							memcpy(buf->plane[1] + i / (surface->interlaced_frame + 1) * surface->width + j,
+								surface->data[1] + i * surface->linesize[2] + j / 2, 1 );
+						else memcpy(buf->plane[1] + i / (surface->interlaced_frame + 1) * surface->width + j,
+								surface->data[2] + i * surface->linesize[1] + (j +1) / 2, 1 );
+					}
+			}
+
+			if (surface->interlaced_frame == 1 && priv->second_field == 0)
+				priv->second_field = 1;
+			else {
+				priv->second_field = 0;
+				if (surface->pts == (int64_t) AV_NOPTS_VALUE)
+				surface->pkt_pts += 1800;
+				else surface->pts += 1800;
+			}
+		}
+	}
+
+	int64_t audio_clock = AudioGetClock();
+	int64_t video_clock = surface->pts;
+
+	if (video_clock == (int64_t) AV_NOPTS_VALUE)
+		video_clock = surface->pkt_pts;
+
+	int diff = video_clock - audio_clock - VideoAudioDelay;
+	decoder->PTS = surface->pts;
+	decoder->PTS_A = audio_clock;
+	decoder->time = newtime;
+
+	if(diff > 55 * 90 && !decoder->TrickSpeed) {
+		decoder->FramesDuped++;
+		uint32_t nowtime = GetMsTicks();
+		uint32_t diff = nowtime - priv->last_page_flip;
+        if (diff < 21) {
+            usleep((21 - diff) * 1000);
+		}
+	}
+	if (diff < -25 * 90 && !decoder->TrickSpeed) {
+		decoder->FramesDropped++;
+		if(surface)
+			av_frame_free(&surface);
+		pthread_mutex_lock(&VideoLockMutex);
+		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
+		atomic_dec(&decoder->SurfacesFilled);
+		pthread_mutex_unlock(&VideoLockMutex);
+		goto dequeue;
+	}
+
+/*	fprintf(stderr, "Queue %i Diff %4i PTSV %4"PRId64" PTSA %4"PRId64" VADelay %i StartCounter %i FramesDuped %i FramesDropped %i\n",
+		atomic_read(&decoder->SurfacesFilled), diff, video_clock, audio_clock, VideoAudioDelay,
+		decoder->StartCounter, decoder->FramesDuped, decoder->FramesDropped);*/
+
+page_flip:
+	if (surface->interlaced_frame == 0 || priv->second_field == 0)
+		buf->free_frame = 1;
+
+	buf->frame = surface;
+	if (drmModePageFlip(priv->fd_drm, priv->crtc_id, buf->fb_id,
+			DRM_MODE_PAGE_FLIP_EVENT, buf)) {
+		fprintf(stderr, "cannot flip CRTC for connector %u fb_id %i width %i (%d): %m\n",
+			priv->connector_id, buf->fb_id, surface->width, errno);
+	} else {
+		priv->front_buf ^= 1;
+		priv->pflip_pending = true;
+	}
+
+	if (surface->interlaced_frame == 0 || priv->second_field == 0) {
+		pthread_mutex_lock(&VideoLockMutex);
+		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
+		atomic_dec(&decoder->SurfacesFilled);
+		pthread_mutex_unlock(&VideoLockMutex);
+	}
 
 	if(decoder->StartCounter == 0)
 		AudioVideoReady(video_clock);
 
-	// HDMI phase
-//	usleep(9000); 
-
-	buffer->pts = 1;
-	buffer->cmd = 0;
-	status = mmal_port_send_buffer(data->vout->input[0], buffer);
-	if(status != MMAL_SUCCESS)
-		fprintf(stderr, "Failed send buffer to renderer input port (%d, %s)\n",
-		    status, mmal_status_to_string(status));
-
 //	decoder->FramesDisplayed++;
 	decoder->StartCounter++;
-	decoder->FrameCounter++;
-
+//	decoder->FrameCounter++;
 }
 
 ///
-///	Debug MMAL decoder frames drop...
+///	Debug DRM decoder frames drop...
 ///
-///	@param decoder	MMAL hw decoder
+///	@param decoder	DRM hw decoder
 ///
-/*static void MmalPrintFrames(const MmalDecoder * decoder)
+static void DrmPrintFrames(const DrmDecoder * decoder)
 {
-    Debug(3, "video/mmal: %d missed, %d duped, %d dropped frames of %d,%d\n",
+    Debug(3, "video/drm: %d missed, %d duped, %d dropped frames of %d,%d\n",
 	decoder->FramesMissed, decoder->FramesDuped, decoder->FramesDropped,
 	decoder->FrameCounter, decoder->FramesDisplayed);
 #ifndef DEBUG
     (void)decoder;
 #endif
-}*/
+}
 
 
 #ifdef USE_VIDEO_THREAD
 ///
-///	Handle a MMAL display.
+///	Handle a DRM display.
 ///
-static void MmalDisplayHandlerThread(void)
+static void DrmDisplayHandlerThread(void)
 {
     int err;
-    MmalDecoder *decoder;
-    struct data_t *data = data_list;
+    int filled;
+    struct timespec nowtime;
+    DrmDecoder *decoder;
 
-    if (!(decoder = MmalDecoders[0])) {	// no stream available
-	fprintf(stderr, "MmalDisplayHandlerThread: no stream available\n");
+    if (!(decoder = DrmDecoders[0])) {	// no stream available
+	fprintf(stderr, "DrmDisplayHandlerThread: no stream available\n");
 	return;
     }
+    // manage fill frame output ring buffer
+    filled = atomic_read(&decoder->SurfacesFilled);
 
-    if (data->buffers < 7) {
+    if (filled < VIDEO_SURFACES_MAX - 1) {
+		// FIXME: hot polling
+		pthread_mutex_lock(&VideoLockMutex);
+		// fetch+decode or reopen
 		err = VideoDecodeInput(decoder->Stream);
+		pthread_mutex_unlock(&VideoLockMutex);
     } else {
 		err = VideoPollInput(decoder->Stream);
     }
     if (err) {
-		// FIXME
-		usleep(10 * 1000);		// nothing buffered
-		if (err == -1 && decoder->Closing) {
-			decoder->Closing--;
-			if (!decoder->Closing) {
-				Debug(3, "video/mmal: closing eof\n");
-				decoder->Closing = -1;
-			}
-		}
-    }
+		// FIXME: sleep on wakeup
+		usleep(10000);		// nothing buffered
+/*		if (err == -1 && decoder->Closing) {
+			fprintf(stderr, "DrmDisplayHandlerThread: nothing buffered\n");
+		}*/
+	}
 }
 
 #else
 
 
-#define MmalDisplayHandlerThread	NULL
+#define DRMDisplayHandlerThread	NULL
 
 #endif
-
-
-///
-///	Render a ffmpeg frame.
-///
-///	@param decoder		MMAL hw decoder
-///	@param video_ctx	ffmpeg video codec context
-///	@param frame		frame to display
-///
-static void MmalRenderFrame(MmalDecoder * decoder,
-    const AVCodecContext * video_ctx, AVFrame * frame)
-{
-	MMAL_BUFFER_HEADER_T *buffer, *qbuffer;
-//	MMAL_ES_FORMAT_T *format;
-	MMAL_STATUS_T status;
-    struct data_t *data = data_list;
-//	format = (MMAL_ES_FORMAT_T *)frame->data[2];
-
-    // fill no frame to output queue
-	if(decoder->Closing == 1){
-		av_frame_free(&frame);
-		return;
-	}
-
-	// if resolution changed
-	if(video_ctx->width != data->width)
-		MmalChangeResolution(video_ctx, frame->interlaced_frame);
-
-	if(data->par_num != video_ctx->sample_aspect_ratio.num ||
-		data->par_den != video_ctx->sample_aspect_ratio.den) {
-		data->vout->input[0]->format->es->video.par.num = video_ctx->sample_aspect_ratio.num;
-		data->vout->input[0]->format->es->video.par.den = video_ctx->sample_aspect_ratio.den;
-		status = mmal_port_format_commit(data->vout->input[0]);
-		if (status != MMAL_SUCCESS){
-			fprintf(stderr, "Failed to commit format for render input port %s (status=%"PRIx32" %s)\n",
-			data->vout->input[0]->name, status, mmal_status_to_string(status));
-		} else {
-			data->par_num = video_ctx->sample_aspect_ratio.num;
-			data->par_den = video_ctx->sample_aspect_ratio.den;
-		}
-	}
-
-	// can always use vout_input_pool?
-	buffer = (MMAL_BUFFER_HEADER_T *)frame->data[3];
-
-	if (buffer == NULL){
-		syslog(LOG_INFO, "MmalRenderFrame: buffer are NULL!!!\n");
-		return;
-	}
-
-    if(data->interlaced == 0){
-		qbuffer = mmal_queue_get(data->vout_input_pool->queue);
-	}else{
-		qbuffer = mmal_queue_get(data->deint_input_pool->queue);
-	}
-
-	memcpy(qbuffer->data, buffer->data, buffer->length);
-	qbuffer->length = buffer->length;
-	qbuffer->user_data = frame;
-
-	if (qbuffer == NULL){
-		syslog(LOG_INFO, "MmalRenderFrame: qbuffer are NULL!!!\n");
-		return;
-	}
-
-    // fill frame to output queue
-    if(data->interlaced == 0){
-		qbuffer->pts = buffer->pts;
-		mmal_queue_put(data->vout_queue, qbuffer);
-		data->buffers_in_queue++;
-		data->buffers++;
-	}else{
-		// MMAL use microseconds
-		qbuffer->pts = buffer->pts / 90 * 1000;
-		mmal_port_send_buffer(data->deint->input[0], qbuffer);
-//		data->buffers_deint_in++;
-		data->buffers++;
-		data->buffers++;
-	}
-}
 
 ///
 ///	Callback to negotiate the PixelFormat.
@@ -10475,80 +10726,114 @@ static void MmalRenderFrame(MmalDecoder * decoder,
 ///			it is terminated by -1 as 0 is a valid format, the
 ///			formats are ordered by quality.
 ///
-static enum AVPixelFormat Mmal_get_format(__attribute__ ((unused)) MmalDecoder * decoder,
-		__attribute__ ((unused)) AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
+static enum AVPixelFormat Drm_get_format(DrmDecoder * decoder,
+    AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
     while (*fmt != AV_PIX_FMT_NONE) {
-        if (*fmt == AV_PIX_FMT_MMAL)
-			return AV_PIX_FMT_MMAL;
+        if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == 0x0002)
+            return AV_PIX_FMT_YUV420P;
+        if (*fmt == AV_PIX_FMT_RKMPP && video_ctx->codec_id == 0x001c)
+            return AV_PIX_FMT_RKMPP;
+        if (*fmt == AV_PIX_FMT_RKMPP && video_ctx->codec_id == 0x00ae)
+            return AV_PIX_FMT_RKMPP;
         fmt++;
     }
-    fprintf(stderr, "The MMAL pixel format not offered\n");
-    return AV_PIX_FMT_NONE;
+    fprintf(stderr, "The RKMPP pixel format not offered in get_format()\n");
+
+    return avcodec_default_get_format(video_ctx, fmt);
+}
+
+
+///
+///	Render a ffmpeg frame.
+///
+///	@param decoder		DRM hw decoder
+///	@param video_ctx	ffmpeg video codec context
+///	@param frame		frame to display
+///
+static void DrmRenderFrame(DrmDecoder * decoder,
+    const AVCodecContext * video_ctx, const AVFrame * frame)
+{
+//	struct data_priv *priv = d_priv;
+
+	if(decoder->Closing) {
+//		fprintf(stderr, "DrmRenderFrame decoder->Closing %i frame %p\n", decoder->Closing, frame);
+		av_frame_free(&frame);
+		return;
+	}
+
+    decoder->SurfacesRb[decoder->SurfaceWrite] = frame;
+    decoder->SurfaceWrite = (decoder->SurfaceWrite + 1) % VIDEO_SURFACES_MAX;
+    atomic_inc(&decoder->SurfacesFilled);
 }
 
 ///
 ///	Reset start of frame counter.
 ///
-///	@param decoder	MMAL decoder
+///	@param decoder	DRM decoder
 ///
-static void MmalResetStart(MmalDecoder * decoder)
+static void DrmResetStart(DrmDecoder * decoder)
 {
+	fprintf(stderr, "DrmResetStart\n");
     decoder->StartCounter = 0;
 }
 
 
 ///
-///	Set MMAL decoder closing stream flag.
+///	Set DRM decoder closing stream flag.
 ///
-///	@param decoder	MMAL decoder
+///	@param decoder	DRM decoder
 ///
-static void MmalSetClosing(MmalDecoder * decoder)
+static void DrmSetClosing(DrmDecoder * decoder, int closing)
 {
-    decoder->Closing = 1;
+    decoder->Closing = closing;
+	fprintf(stderr, "DrmSetClosing %i\n", decoder->Closing);
 }
 
 
 ///
 ///	Set trick play speed.
 ///
-///	@param decoder	MMAL decoder
+///	@param decoder	DRM decoder
 ///	@param speed	trick speed (0 = normal)
 ///
-static void MmalSetTrickSpeed(MmalDecoder * decoder, int speed)
+static void DrmSetTrickSpeed(DrmDecoder * decoder, int speed)
 {
     decoder->TrickSpeed = speed;
     decoder->TrickCounter = speed;
+//	fprintf(stderr, "DrmSetTrickSpeed set to: %i\n", speed);
+    if (speed) {
+	decoder->Closing = 0;
+    }
 }
 
 ///
-///	MMAL video module.
+///	DRM video module.
 ///
-static const VideoModule MmalModule = {
-    .Name = "mmal",
+static const VideoModule DrmModule = {
+    .Name = "drm",
     .Enabled = 1,
-    .NewHwDecoder = (VideoHwDecoder * (*const)(VideoStream *)) MmalNewHwDecoder,
-    .DelHwDecoder = (void (*const) (VideoHwDecoder *))MmalDelHwDecoder,
+    .NewHwDecoder = (VideoHwDecoder * (*const)(VideoStream *)) DrmNewHwDecoder,
+    .DelHwDecoder = (void (*const) (VideoHwDecoder *))DrmDelHwDecoder,
     .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum AVPixelFormat *))Mmal_get_format,
+	    AVCodecContext *, const enum AVPixelFormat *))Drm_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
-	    const AVCodecContext *, const AVFrame *))MmalRenderFrame,
-    .GetHwAccelContext = (void *(*const)(int)) MmalGetHwAccelContext,
-    .SetClock = (void (*const) (VideoHwDecoder *, int64_t))MmalSetClock,
-    .GetClock = (int64_t(*const) (const VideoHwDecoder *))MmalGetClock,
-    .SetClosing = (void (*const) (const VideoHwDecoder *))MmalSetClosing,
-    .ResetStart = (void (*const) (const VideoHwDecoder *))MmalResetStart,
-    .SetTrickSpeed =(void (*const) (const VideoHwDecoder *, int))MmalSetTrickSpeed,
-//    .GrabOutput = MmalGrabOutputSurface,
-    .GetStats = (void (*const) (VideoHwDecoder *, int *, int *, int *,
-	    int *))MmalGetStats,
-    .DisplayHandlerThread = MmalDisplayHandlerThread,
-    .OsdClear = MmalOsdClear,
-    .OsdDrawARGB = MmalOsdDrawARGB,
-    .OsdInit = MmalOsdInit,
-    .OsdExit = MmalOsdExit,
-    .Init = MmalInit,
-    .Exit = MmalExit,
+	    const AVCodecContext *, const AVFrame *))DrmRenderFrame,
+    .GetHwAccelContext = (void *(*const)(VideoHwDecoder *)) DrmGetHwAccelContext,
+    .SetClock = (void (*const) (VideoHwDecoder *, int64_t))DrmSetClock,
+    .GetClock = (int64_t(*const) (const VideoHwDecoder *))DrmGetClock,
+    .SetClosing = (void (*const) (const VideoHwDecoder *, int))DrmSetClosing,
+    .ResetStart = (void (*const) (const VideoHwDecoder *))DrmResetStart,
+    .SetTrickSpeed =(void (*const) (const VideoHwDecoder *, int))DrmSetTrickSpeed,
+//    .GetStats = (void (*const) (VideoHwDecoder *, int *, int *, int *,
+//	    int *))DrmGetStats,
+    .DisplayHandlerThread = DrmDisplayHandlerThread,
+    .OsdClear = DrmOsdClear,
+    .OsdDrawARGB = DrmOsdDrawARGB,
+    .OsdInit = DrmOsdInit,
+    .OsdExit = DrmOsdExit,
+    .Init = DrmInit,
+    .Exit = DrmExit,
 };
 #endif
 
@@ -10690,8 +10975,8 @@ static const VideoModule NoopModule = {
 #endif
     .ReleaseSurface = NoopReleaseSurface,
 #if 0
-    .get_format = (enum AVPixelFormat(*const) (VideoHwDecoder *,
-	    AVCodecContext *, const enum AVPixelFormat *))Noop_get_format,
+    .get_format = (enum PixelFormat(*const) (VideoHwDecoder *,
+	    AVCodecContext *, const enum PixelFormat *))Noop_get_format,
     .RenderFrame = (void (*const) (VideoHwDecoder *,
 	    const AVCodecContext *, const AVFrame *))NoopSyncRenderFrame,
     .GetHwAccelContext = (void *(*const)(VideoHwDecoder *))
@@ -11106,6 +11391,8 @@ static void *VideoDisplayHandlerThread(void *dummy)
 ///
 static void VideoThreadInit(void)
 {
+//	fprintf(stderr, "VideoThreadInit\n");
+
 #ifdef USE_GLX
     glXMakeCurrent(XlibDisplay, None, NULL);
 #endif
@@ -11114,6 +11401,8 @@ static void VideoThreadInit(void)
     pthread_cond_init(&VideoWakeupCond, NULL);
     pthread_create(&VideoThread, NULL, VideoDisplayHandlerThread, NULL);
     pthread_setname_np(VideoThread, "softhddev video");
+
+	pthread_create(&presentation_thread_id, NULL, DrmDisplayFrame, NULL);
 }
 
 ///
@@ -11121,6 +11410,7 @@ static void VideoThreadInit(void)
 ///
 static void VideoThreadExit(void)
 {
+	fprintf(stderr, "VideoThreadExit\n");
     if (VideoThread) {
 	void *retval;
 
@@ -11130,6 +11420,12 @@ static void VideoThreadExit(void)
 	if (pthread_cancel(VideoThread)) {
 	    Error(_("video: can't queue cancel video display thread\n"));
 	}
+	// DrmDisplayFrame loop end
+	if (pthread_cancel(presentation_thread_id)) {
+	    Error(_("video: can't cancel DrmDisplayFrame thread\n"));
+		fprintf(stderr, "VideoThreadExit: can't cancel DrmDisplayFrame thread\n");
+	}
+//	int pthread_cancel (pthread_t presentation_thread_id);
 	//VideoThreadUnlock();
 	if (pthread_join(VideoThread, &retval) || retval != PTHREAD_CANCELED) {
 	    Error(_("video: can't cancel video display thread\n"));
@@ -11148,6 +11444,7 @@ static void VideoThreadExit(void)
 ///
 void VideoDisplayWakeup(void)
 {
+//	fprintf(stderr, "VideoDisplayWakeup\n");
 	#ifdef USE_XLIB_XCB
     if (!XlibDisplay) {			// not yet started
 	return;
@@ -11155,6 +11452,7 @@ void VideoDisplayWakeup(void)
     #endif
 
     if (!VideoThread) {			// start video thread, if needed
+//	fprintf(stderr, "VideoDisplayWakeup: (!VideoThread)\n");
 	VideoThreadInit();
     }
 }
@@ -11182,8 +11480,8 @@ static const VideoModule *VideoModules[] = {
     &VaapiGlxModule,			// FIXME: if working, prefer this
 #endif
 #endif
-#ifdef USE_MMAL
-    &MmalModule,
+#ifdef USE_DRM
+    &DrmModule,
 #endif
     &NoopModule
 };
@@ -11201,8 +11499,8 @@ struct _video_hw_decoder_
 #ifdef USE_VDPAU
 	VdpauDecoder Vdpau;		///< vdpau decoder structure
 #endif
-#ifdef USE_MMAL
-	MmalDecoder Mmal;		    ///< MMAL-API decoder structure
+#ifdef USE_DRM
+	DrmDecoder Drm;		    ///< DRM-API decoder structure
 #endif
     };
 };
@@ -11217,6 +11515,7 @@ struct _video_hw_decoder_
 VideoHwDecoder *VideoNewHwDecoder(VideoStream * stream)
 {
     VideoHwDecoder *hw;
+
     VideoThreadLock();
     hw = VideoUsedModule->NewHwDecoder(stream);
     VideoThreadUnlock();
@@ -11326,9 +11625,9 @@ void VideoRenderFrame(VideoHwDecoder * hw_decoder,
 ///
 ///	@param hw_decoder	video hardware decoder (must be VA-API)
 ///
-void *VideoGetHwAccelContext(int codec_id)
+void *VideoGetHwAccelContext(VideoHwDecoder * hw_decoder)
 {
-    return VideoUsedModule->GetHwAccelContext(codec_id);
+    return VideoUsedModule->GetHwAccelContext(hw_decoder);
 }
 
 #ifdef USE_VDPAU
@@ -11428,10 +11727,10 @@ int64_t VideoGetClock(const VideoHwDecoder * hw_decoder)
 ///
 ///	@param hw_decoder	video hardware decoder
 ///
-void VideoSetClosing(VideoHwDecoder * hw_decoder)
+void VideoSetClosing(VideoHwDecoder * hw_decoder, int closing)
 {
     Debug(3, "video: set closing\n");
-    VideoUsedModule->SetClosing(hw_decoder);
+    VideoUsedModule->SetClosing(hw_decoder, closing);
     // clear clock to avoid further sync
     VideoSetClock(hw_decoder, AV_NOPTS_VALUE);
 }
@@ -11630,8 +11929,8 @@ void VideoGetStats(VideoHwDecoder * hw_decoder, int *missed, int *duped,
 ///	@param[out] aspect_num	video stream aspect numerator
 ///	@param[out] aspect_den	video stream aspect denominator
 ///
-void VideoGetVideoSize(__attribute__ ((unused))VideoHwDecoder * hw_decoder,
-    int *width, int *height, int *aspect_num, int *aspect_den)
+void VideoGetVideoSize(VideoHwDecoder * hw_decoder, int *width, int *height,
+    int *aspect_num, int *aspect_den)
 {
     *width = 1920;
     *height = 1080;
@@ -11939,7 +12238,7 @@ const char *VideoGetDriverName(void)
 ///
 ///	@param geometry	 [=][<width>{xX}<height>][{+-}<xoffset>{+-}<yoffset>]
 ///
-/*int VideoSetGeometry(const char *geometry)
+int VideoSetGeometry(const char *geometry)
 {
 #ifdef USE_XLIB_XCB
     XParseGeometry(geometry, &VideoWindowX, &VideoWindowY, &VideoWindowWidth,
@@ -11947,7 +12246,7 @@ const char *VideoGetDriverName(void)
 #endif
     return 0;
 }
-*/
+
 ///
 ///	Set 60hz display mode.
 ///
@@ -12437,6 +12736,7 @@ int VideoRaiseWindow(void)
 void VideoInit(const char *display_name)
 {
     int i;
+
 #ifdef USE_XLIB_XCB
     int screen_nr;
     xcb_screen_iterator_t screen_iter;
@@ -12543,7 +12843,7 @@ void VideoInit(const char *display_name)
 #endif
 
     //
-    //	prepare hardware decoder VA-API/VDPAU/MMAL
+    //	prepare hardware decoder VA-API/VDPAU/DRM
     //
     for (i = 0; i < (int)(sizeof(VideoModules) / sizeof(*VideoModules)); ++i) {
 	// FIXME: support list of drivers and include display name
@@ -12551,12 +12851,13 @@ void VideoInit(const char *display_name)
 	if ((VideoDriverName
 		&& !strcasecmp(VideoDriverName, VideoModules[i]->Name))
 	    || (!VideoDriverName && VideoModules[i]->Enabled)) {
-	    if (VideoModules[i]->Init(display_name)) {
-		VideoUsedModule = VideoModules[i];
-		goto found;
-	    }
-	}
+			if (VideoModules[i]->Init(display_name)) {
+			VideoUsedModule = VideoModules[i];
+			goto found;
+			}
+		}
     }
+    
     Error(_("video: '%s' output module isn't supported\n"), VideoDriverName);
     VideoUsedModule = &NoopModule;
 
@@ -12792,6 +13093,9 @@ int main(int argc, char *const argv[])
 	if (VideoVdpauEnabled) {
 	    VdpauDisplayFrame();
 	}
+#endif
+#ifdef USE_DRM
+	    DrmDisplayFrame();
 #endif
 	tick = GetMsTicks();
 	n++;

@@ -1354,10 +1354,10 @@ static VideoStream MyVideoStream[1];	///< normal video stream
 static VideoStream PipVideoStream[1];	///< pip video stream
 #endif
 
-#ifdef DEBUG
+//#ifdef DEBUG
 uint32_t VideoSwitch;			///< debug video switch ticks
 static int VideoMaxPacketSize;		///< biggest used packet buffer
-#endif
+//#endif
 //#define STILL_DEBUG 2
 #ifdef STILL_DEBUG
 static char InStillPicture;		///< flag still picture
@@ -1760,6 +1760,9 @@ static void VideoStreamOpen(VideoStream * stream)
     stream->CodecID = AV_CODEC_ID_NONE;
     stream->LastCodecID = AV_CODEC_ID_NONE;
 
+	fprintf(stderr, "VideoStreamOpen Pkts %i\n",
+		atomic_read(&stream->PacketsFilled));
+
     if ((stream->HwDecoder = VideoNewHwDecoder(stream))) {
 	stream->Decoder = CodecVideoNewDecoder(stream->HwDecoder);
 	VideoPacketInit(stream);
@@ -1782,12 +1785,17 @@ static void VideoStreamClose(VideoStream * stream, int delhw)
     if (stream->Decoder) {
 	VideoDecoder *decoder;
 
+	fprintf(stderr, "VideoStreamClose Pkts %i\n",
+		atomic_read(&stream->PacketsFilled));
+
 	decoder = stream->Decoder;
 	// FIXME: remove this lock for main stream close
+
 	pthread_mutex_lock(&stream->DecoderLockMutex);
+	CodecVideoClose(decoder);
 	stream->Decoder = NULL;		// lock read thread
 	pthread_mutex_unlock(&stream->DecoderLockMutex);
-	CodecVideoClose(decoder);
+
 	CodecVideoDelDecoder(decoder);
     }
     if (stream->HwDecoder) {
@@ -1867,11 +1875,13 @@ int VideoDecodeInput(VideoStream * stream)
     }
 
     if (stream->Close) {		// close stream request
+	fprintf(stderr, "close stream request\n");
 	VideoStreamClose(stream, 1);
 	stream->Close = 0;
 	return 1;
     }
     if (stream->ClearBuffers) {		// clear buffer request
+	fprintf(stderr, "ClearBuffers stream request\n");
 	atomic_set(&stream->PacketsFilled, 0);
 	stream->PacketRead = stream->PacketWrite;
 	// FIXME: ->Decoder already checked
@@ -1935,12 +1945,21 @@ int VideoDecodeInput(VideoStream * stream)
 	    if (stream->LastCodecID != AV_CODEC_ID_MPEG2VIDEO) {
 		stream->LastCodecID = AV_CODEC_ID_MPEG2VIDEO;
 		CodecVideoOpen(stream->Decoder, AV_CODEC_ID_MPEG2VIDEO);
+		VideoSetClosing(stream->HwDecoder, 0);
 	    }
 	    break;
 	case AV_CODEC_ID_H264:
 	    if (stream->LastCodecID != AV_CODEC_ID_H264) {
 		stream->LastCodecID = AV_CODEC_ID_H264;
 		CodecVideoOpen(stream->Decoder, AV_CODEC_ID_H264);
+		VideoSetClosing(stream->HwDecoder, 0);
+	    }
+	    break;
+	case AV_CODEC_ID_HEVC:
+	    if (stream->LastCodecID != AV_CODEC_ID_HEVC) {
+		stream->LastCodecID = AV_CODEC_ID_HEVC;
+		CodecVideoOpen(stream->Decoder, AV_CODEC_ID_HEVC);
+		VideoSetClosing(stream->HwDecoder, 0);
 	    }
 	    break;
 	default:
@@ -2004,11 +2023,12 @@ int VideoGetBuffers(const VideoStream * stream)
 static void StartVideo(void)
 {
     VideoInit(X11DisplayName);
-
+#ifdef USE_XLIB_XCB
     if (ConfigFullscreen) {
 	// FIXME: not good looking, mapped and then resized.
 	VideoSetFullscreen(1);
     }
+#endif
     VideoOsdInit();
     if (!MyVideoStream->Decoder) {
 	VideoStreamOpen(MyVideoStream);
@@ -2165,6 +2185,10 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
 	return 0;
     }
     if (stream->NewStream) {		// channel switched
+
+	fprintf(stderr, "PlayVideo3: new stream %dms Pkts %i\n",
+		GetMsTicks() - VideoSwitch, atomic_read(&stream->PacketsFilled));
+
 	Debug(3, "video: new stream %dms\n", GetMsTicks() - VideoSwitch);
 	if (atomic_read(&stream->PacketsFilled) >= VIDEO_PACKET_MAX - 1) {
 	    Debug(3, "video: new video stream lost\n");
@@ -2207,6 +2231,7 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
     }
     // hard limit buffer full: needed for replay
     if (atomic_read(&stream->PacketsFilled) >= VIDEO_PACKET_MAX - 10) {
+//	fprintf(stderr, "PlayVideo3: hard limit buffer full\n");
 	return 0;
     }
 #ifdef USE_SOFTLIMIT
@@ -2281,13 +2306,30 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
 #endif
 	    VideoNextPacket(stream, AV_CODEC_ID_H264);
 	} else {
-	    Debug(3, "video: h264 detected\n");
-	    stream->CodecID = AV_CODEC_ID_H264;
+		Debug(3, "video: h264 detected\n");
+		stream->CodecID = AV_CODEC_ID_H264;
+	}
+
+	// SKIP PES header (ffmpeg supports short start code)
+	VideoEnqueue(stream, pts, check - 2, l + 2);
+	return size;
+    }
+
+    // HEVC Codec
+    if ((data[6] & 0xC0) == 0x80 && z >= 2 && check[0] == 0x01 && check[1] == 0x46) {
+	// old PES HDTV recording z == 2 -> stronger check!
+
+	if (stream->CodecID == AV_CODEC_ID_HEVC) {
+            VideoNextPacket(stream, AV_CODEC_ID_HEVC);
+	} else {
+            Debug(3, "video: hvec detected\n");
+            stream->CodecID = AV_CODEC_ID_HEVC;
 	}
 	// SKIP PES header (ffmpeg supports short start code)
 	VideoEnqueue(stream, pts, check - 2, l + 2);
 	return size;
     }
+
     // PES start code 0x00 0x00 0x01 0x00|0xb3
     if (z > 1 && check[0] == 0x01 && (!check[1] || check[1] == 0xb3)) {
 	if (stream->CodecID == AV_CODEC_ID_MPEG2VIDEO) {
@@ -2479,7 +2521,7 @@ int SetPlayMode(int play_mode)
 		    MyVideoStream->NewStream = 1;
 		    MyVideoStream->InvalidPesCounter = 0;
 		    // tell hw decoder we are closing stream
-		    VideoSetClosing(MyVideoStream->HwDecoder);
+		    VideoSetClosing(MyVideoStream->HwDecoder, 1);
 		    VideoResetStart(MyVideoStream->HwDecoder);
 #ifdef DEBUG
 		    VideoSwitch = GetMsTicks();
@@ -2644,11 +2686,15 @@ void Mute(void)
 */
 void StillPicture(const uint8_t * data, int size)
 {
+
     static uint8_t seq_end_mpeg[] = { 0x00, 0x00, 0x01, 0xB7 };
     // H264 NAL End of Sequence
     static uint8_t seq_end_h264[] = { 0x00, 0x00, 0x00, 0x01, 0x0A };
-    int i;
+    // H265 NAL End of Sequence
+    //0x48 = end of seq   0x4a = end of stream
+    static uint8_t seq_end_h265[] = { 0x00, 0x00, 0x00, 0x01, 0x48, 0x01 };
     int old_video_hardware_decoder;
+    int i;
 
     // might be called in Suspended Mode
     if (!MyVideoStream->Decoder || MyVideoStream->SkipStream) {
@@ -2680,7 +2726,8 @@ void StillPicture(const uint8_t * data, int size)
 #ifdef STILL_DEBUG
     fprintf(stderr, "still-picture\n");
 #endif
-    for (i = 0; i < (MyVideoStream->CodecID == AV_CODEC_ID_MPEG2VIDEO ? 25 : 25);
+//    for (i = 0; i < (MyVideoStream->CodecID == AV_CODEC_ID_MPEG2VIDEO ? 4 : 4);
+    for (i = 0; i < (MyVideoStream->CodecID == AV_CODEC_ID_HEVC ? 3 : 4);
 	++i) {
 	const uint8_t *split;
 	int n;
@@ -2729,6 +2776,9 @@ void StillPicture(const uint8_t * data, int size)
 	if (MyVideoStream->CodecID == AV_CODEC_ID_H264) {
 	    VideoEnqueue(MyVideoStream, AV_NOPTS_VALUE, seq_end_h264,
 		sizeof(seq_end_h264));
+	} else if (MyVideoStream->CodecID == AV_CODEC_ID_HEVC) {
+	    VideoEnqueue(MyVideoStream, AV_NOPTS_VALUE, seq_end_h265,
+		sizeof(seq_end_h265));
 	} else {
 	    VideoEnqueue(MyVideoStream, AV_NOPTS_VALUE, seq_end_mpeg,
 		sizeof(seq_end_mpeg));
@@ -2884,7 +2934,7 @@ const char *CommandLineHelp(void)
 	"  -d display\tdisplay of x11 server (fe. :0.0)\n"
 	"  -f\t\tstart with fullscreen window (only with window manager)\n"
 	"  -g geometry\tx11 window geometry wxh+x+y\n"
-	"  -v device\tvideo driver device (va-api, vdpau, mmal, noop)\n"
+	"  -v device\tvideo driver device (va-api, vdpau, drm, noop)\n"
 	"  -s\t\tstart in suspended mode\n"
 	"  -x\t\tstart x11 server, with -xx try to connect, if this fails\n"
 	"  -X args\tX11 server arguments (f.e. -nocursor)\n"
