@@ -9635,13 +9635,11 @@ struct _Drm_decoder_
     int Closing;			///< flag about closing current stream
     int SyncOnAudio;			///< flag sync to audio
     int64_t PTS;			///< video PTS clock
-    int64_t PTS_A;			///< audio PTS clock
-    uint32_t time;
 
     int LastAVDiff;			///< last audio - video difference
     int SyncCounter;			///< counter to sync frames
     int StartCounter;			///< counter for video start
-    int FramesMissed;			///< number of frames missed
+//    int FramesMissed;			///< number of frames missed
     int FramesDuped;			///< number of frames duplicated
     int FramesDropped;			///< number of frames dropped
 //    int FrameCounter;			///< number of frames decoded
@@ -9675,7 +9673,6 @@ struct data_priv {
     struct drm_buf buf_osd;
     struct drm_buf buf_black;
 	uint32_t connector_id, crtc_id, plane_id, osd_plane_id, front_buf;
-	uint32_t last_page_flip;
 	bool pflip_pending, cleanup;
     int second_field;
     int prime_buffers;
@@ -9795,11 +9792,7 @@ void DrmSetBuf(struct drm_buf *buf)
 {
 	struct data_priv *priv = d_priv;
 	drmModeAtomicReqPtr ModeReq;
-//	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_TEST_ONLY;
 	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
-
-//	fprintf(stderr, "Set atomic buf %i width %i height %i fb_id %i\n",
-//		priv->prime_buffers, buf->width, buf->height, buf->fb_id);
 
 	fprintf(stderr, "Set atomic buf prime_buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
 		priv->prime_buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
@@ -10088,7 +10081,6 @@ static void Drm_page_flip_event( __attribute__ ((unused)) int fd,
 	struct data_priv *priv = d_priv;
 	struct drm_buf *buf = data;
 
-	priv->last_page_flip = GetMsTicks();
 	priv->pflip_pending = false;
 	if (!priv->cleanup)
 		DrmDrawFrame();
@@ -10487,17 +10479,15 @@ static void DrmDrawFrame(void)
 	AVFrame *surface;
 	av_drmprime *primedata = NULL;
 	decoder = DrmDecoders[0];
+	int64_t audio_clock;
 
-	// Zeitname vor der Kopiererei
-	uint32_t newtime = GetMsTicks();
-
-		if (priv->prime_buffers && priv->buf_black.width && decoder->Closing) {
-			for (i = 0; i < priv->prime_buffers; ++i) {
-				Drm_destroy_fb(priv->fd_drm, &priv->bufs[i]);
+	if (priv->prime_buffers && priv->buf_black.width && decoder->Closing) {
+		for (i = 0; i < priv->prime_buffers; ++i) {
+			Drm_destroy_fb(priv->fd_drm, &priv->bufs[i]);
 			}
-			priv->prime_buffers = 0;
-			priv->front_buf = 0;
-		}
+		priv->prime_buffers = 0;
+		priv->front_buf = 0;
+	}
 
 dequeue:
 	while ((atomic_read(&decoder->SurfacesFilled)) == 0 ) {
@@ -10533,12 +10523,12 @@ dequeue:
 	if (surface->data[3]) {
 		primedata = (av_drmprime *)surface->data[3];
 		// search or made fd / FB combination
-			for (i = 0; i < priv->prime_buffers; i++) {
-				if (priv->bufs[i].fd_prime == primedata->fds[0]) {
-					buf = &priv->bufs[i];
-					break;
-				}
+		for (i = 0; i < priv->prime_buffers; i++) {
+			if (priv->bufs[i].fd_prime == primedata->fds[0]) {
+				buf = &priv->bufs[i];
+				break;
 			}
+		}
 		if (buf == 0) {
 			buf = &priv->bufs[priv->prime_buffers];
 			buf->width = (uint32_t)surface->width;
@@ -10597,27 +10587,43 @@ dequeue:
 		}
 	}
 
-	int64_t audio_clock = AudioGetClock();
 	int64_t video_clock = surface->pts;
-
 	if (video_clock == (int64_t) AV_NOPTS_VALUE)
 		video_clock = surface->pkt_pts;
+	if(decoder->StartCounter == 0 && decoder->Closing == 0) {
+		fprintf(stderr, "AudioVideoReady video_clock: %"PRId64" Closing: %i\n",
+			video_clock, decoder->Closing);
+		AudioVideoReady(video_clock);
+	}
+audioclock:
+	audio_clock = AudioGetClock();
+	if (audio_clock == (int64_t) AV_NOPTS_VALUE) {
+		fprintf(stderr, "DrmDrawFrame audio_clock: AV_NOPTS_VALUE sleep 20ms\n");
+		usleep(20000);
+		goto audioclock;
+	}
 
 	int diff = video_clock - audio_clock - VideoAudioDelay;
 	decoder->PTS = surface->pts;
-	decoder->PTS_A = audio_clock;
-	decoder->time = newtime;
+//	decoder->PTS_A = audio_clock;
 
 	if(diff > 55 * 90 && !decoder->TrickSpeed) {
 		decoder->FramesDuped++;
-		uint32_t nowtime = GetMsTicks();
-		uint32_t diff = nowtime - priv->last_page_flip;
-        if (diff < 21) {
-            usleep((21 - diff) * 1000);
-		}
+
+		fprintf(stderr, "Queue %i Diff %4i PTSV %4"PRId64" PTSA %4"PRId64" StartCounter %i Closing %i FramesDuped %i FramesDropped %i\n",
+			atomic_read(&decoder->SurfacesFilled), diff / 90, video_clock, audio_clock,
+			decoder->StartCounter, decoder->Closing, decoder->FramesDuped, decoder->FramesDropped);
+
+		usleep(20000);
+		goto audioclock;
 	}
 	if (diff < -25 * 90 && !decoder->TrickSpeed) {
 		decoder->FramesDropped++;
+
+		fprintf(stderr, "Queue %i Diff %4i PTSV %4"PRId64" PTSA %4"PRId64" StartCounter %i Closing %i FramesDuped %i FramesDropped %i\n",
+			atomic_read(&decoder->SurfacesFilled), diff / 90, video_clock, audio_clock,
+			decoder->StartCounter, decoder->Closing, decoder->FramesDuped, decoder->FramesDropped);
+
 		if(surface)
 			av_frame_free(&surface);
 		pthread_mutex_lock(&VideoLockMutex);
@@ -10627,13 +10633,19 @@ dequeue:
 		goto dequeue;
 	}
 
-/*	fprintf(stderr, "Queue %i Diff %4i PTSV %4"PRId64" PTSA %4"PRId64" VADelay %i StartCounter %i FramesDuped %i FramesDropped %i\n",
-		atomic_read(&decoder->SurfacesFilled), diff, video_clock, audio_clock, VideoAudioDelay,
-		decoder->StartCounter, decoder->FramesDuped, decoder->FramesDropped);*/
-
 page_flip:
 	if (surface->interlaced_frame == 0 || priv->second_field == 0)
 		buf->free_frame = 1;
+
+	if (decoder->Closing == 0)
+		decoder->StartCounter++;
+
+	if (surface->interlaced_frame == 0 || priv->second_field == 0) {
+		pthread_mutex_lock(&VideoLockMutex);
+		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
+		atomic_dec(&decoder->SurfacesFilled);
+		pthread_mutex_unlock(&VideoLockMutex);
+	}
 
 	buf->frame = surface;
 	if (drmModePageFlip(priv->fd_drm, priv->crtc_id, buf->fb_id,
@@ -10645,18 +10657,7 @@ page_flip:
 		priv->pflip_pending = true;
 	}
 
-	if (surface->interlaced_frame == 0 || priv->second_field == 0) {
-		pthread_mutex_lock(&VideoLockMutex);
-		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
-		atomic_dec(&decoder->SurfacesFilled);
-		pthread_mutex_unlock(&VideoLockMutex);
-	}
-
-	if(decoder->StartCounter == 0)
-		AudioVideoReady(video_clock);
-
 //	decoder->FramesDisplayed++;
-	decoder->StartCounter++;
 //	decoder->FrameCounter++;
 }
 

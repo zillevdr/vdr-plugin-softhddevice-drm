@@ -441,7 +441,8 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 
 	if (hwaccel) {
 		fprintf(stderr, "HW Accel used: %s\n",hwaccel->name);
-		av_log_set_level(AV_LOG_DEBUG);
+//		av_log_set_level(AV_LOG_DEBUG);
+		av_log_set_level(AV_LOG_ERROR );
 		if (!(video_codec = avcodec_find_decoder_by_name(hwaccel->name))) {
 			fprintf(stderr, "The HW video_codec is not present in libavcodec\n");
 		}
