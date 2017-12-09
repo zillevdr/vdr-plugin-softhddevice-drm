@@ -65,7 +65,7 @@ extern enum AVPixelFormat Video_get_format(VideoHwDecoder *, AVCodecContext *,
 
     /// Render a ffmpeg frame.
 extern void VideoRenderFrame(VideoHwDecoder *, const AVCodecContext *,
-    const AVFrame *);
+    AVFrame *);
 
     /// Get hwaccel context for ffmpeg.
 extern void *VideoGetHwAccelContext(VideoHwDecoder *);

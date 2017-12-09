@@ -17,9 +17,9 @@ SLOT="0"
 #DEPEND=""
 #RDEPEND=""
 
-EGIT_REPO_URI="https://github.com/rockchip-linux/mpp"
-#EGIT_REPO_URI="https://github.com/LongChair/mpp"
-EGIT_BRANCH="for_linux"
+#EGIT_REPO_URI="https://github.com/rockchip-linux/mpp"
+#EGIT_BRANCH="release"
+EGIT_REPO_URI="https://github.com/zillevdr/mpp"
 
 PATCHES=( "${FILESDIR}"/lfs.patch )
 

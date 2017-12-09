@@ -282,12 +282,10 @@ static enum AVPixelFormat Codec_get_format(AVCodecContext * video_ctx,
     return avcodec_default_get_buffer(video_ctx, frame);
 }*/
 
-static int Codec_get_buffer2(AVCodecContext * video_ctx, AVFrame * frame)
+/*static int Codec_get_buffer2(AVCodecContext * video_ctx, AVFrame * frame)
 {
-//	fprintf(stderr, "Codec_get_buffer2\n");
-
     return avcodec_default_get_buffer2(video_ctx, frame, 0);
-}
+}*/
 
 /**
 **	Video buffer management, release buffer for frame.
@@ -432,91 +430,40 @@ void CodecVideoDelDecoder(VideoDecoder * decoder)
 */
 void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 {
-    AVCodec *video_codec;
-    AVHWAccel *hwaccel = NULL, *hw = NULL;
 
-    while((hw = av_hwaccel_next(hw)))
-        if (hw->id == codec_id)
-			hwaccel = hw;
-
-	if (hwaccel) {
-		fprintf(stderr, "HW Accel used: %s\n",hwaccel->name);
-//		av_log_set_level(AV_LOG_DEBUG);
-		av_log_set_level(AV_LOG_ERROR );
-		if (!(video_codec = avcodec_find_decoder_by_name(hwaccel->name))) {
-			fprintf(stderr, "The HW video_codec is not present in libavcodec\n");
-		}
-	} else {
-		fprintf(stderr, "No HW Accel found for %s!\n",
-			avcodec_get_name(codec_id));
-		av_log_set_level(AV_LOG_ERROR );
-		if (!(video_codec = avcodec_find_decoder(codec_id))) {
+	if (codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+		if (!(decoder->VideoCodec = avcodec_find_decoder(codec_id))) {
 			Fatal(_("codec: codec ID %#06x not found\n"), codec_id);
 			fprintf(stderr, "codec: codec ID %#06x not found\n", codec_id);
 		}
+		fprintf(stderr, "codec_name: %s codec_id: %#06x\n", avcodec_get_name(codec_id), codec_id);
+	} else {
+		char *codec_name = (char *) malloc(1 + sizeof(avcodec_get_name(codec_id)) + 7);
+		strcpy(codec_name, avcodec_get_name(codec_id));
+		strcat(codec_name, "_rkmpp");
+		if (!(decoder->VideoCodec = avcodec_find_decoder_by_name(codec_name)))
+			fprintf(stderr, "The HW video_codec is not present in libavcodec\n");
+		fprintf(stderr, "codec_name: %s codec_id: %#06x\n", codec_name, codec_id);
+		free(codec_name);
+//		av_log_set_level(AV_LOG_DEBUG);
+//		av_log_set_level(AV_LOG_ERROR );
 	}
 
-	Debug(3, "codec: using video codec ID %#06x (%s)\n", codec_id, 
-		avcodec_get_name(codec_id));
-
-    if (decoder->VideoCtx) {
-	Error(_("codec: missing close\n"));
-	fprintf(stderr, "codec: missing close\n");
-    }
-
-    decoder->VideoCodec = video_codec;
-
-    if (!(decoder->VideoCtx = avcodec_alloc_context3(video_codec))) {
+    if (!(decoder->VideoCtx = avcodec_alloc_context3(decoder->VideoCodec))) {
 		Fatal(_("codec: can't allocate video codec context\n"));
 		fprintf(stderr, "codec: can't allocate video codec context\n");
     }
 
-	decoder->VideoCtx->hwaccel_context = hwaccel;
-	decoder->VideoCtx->refcounted_frames = 1;
-    if (video_codec->capabilities & CODEC_CAP_DR1) {
-		Debug(3, "codec: use callback buffer2 management\n");
-		decoder->VideoCtx->get_buffer2 = Codec_get_buffer2;
-    }
 	decoder->VideoCtx->get_format = Codec_get_format;
-
     decoder->VideoCtx->opaque = decoder;	// our structure
 
     pthread_mutex_lock(&CodecLockMutex);
     // open codec
-    if (avcodec_open2(decoder->VideoCtx, video_codec, NULL) < 0) {
+    if (avcodec_open2(decoder->VideoCtx, decoder->VideoCodec, NULL) < 0) {
 		Fatal(_("codec: can't open video codec!\n"));
 		fprintf(stderr, "codec: can't open video codec!\n");
     }
     pthread_mutex_unlock(&CodecLockMutex);
-
-    if (video_codec->capabilities & CODEC_CAP_TRUNCATED) {
-		Debug(3, "codec: video can use truncated packets\n");
-#ifndef USE_MPEG_COMPLETE
-		// we send incomplete frames, for old PES recordings
-		// this breaks the decoder for some stations
-		fprintf(stderr, "CodecVideoOpen CODEC_CAP_TRUNCATED 1\n");
-		decoder->VideoCtx->flags |= CODEC_FLAG_TRUNCATED;
-#endif
-    }
-#ifdef CODEC_CAP_FRAME_THREADS
-    if (video_codec->capabilities & CODEC_CAP_FRAME_THREADS) {
-		fprintf(stderr, "codec: codec supports frame threads\n");
-		Debug(3, "codec: codec supports frame threads\n");
-    }
-#endif
-
-    //decoder->VideoCtx->debug = FF_DEBUG_STARTCODE;
-    //decoder->VideoCtx->err_recognition |= AV_EF_EXPLODE;
-//	decoder->VideoCtx->slice_flags =
-//	    SLICE_FLAG_CODED_ORDER | SLICE_FLAG_ALLOW_FIELD;
-//	decoder->VideoCtx->thread_count = 1;
-//	decoder->VideoCtx->active_thread_type = 0;
-//	decoder->VideoCtx->hwaccel_context =
-//	    VideoGetHwAccelContext(decoder->HwDecoder);
-//	decoder->VideoCtx->draw_horiz_band = NULL;
-//	decoder->VideoCtx->slice_flags =
-//	    SLICE_FLAG_CODED_ORDER | SLICE_FLAG_ALLOW_FIELD;
-	//decoder->VideoCtx->flags |= CODEC_FLAG_EMU_EDGE;
 }
 
 /**
@@ -527,7 +474,6 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 void CodecVideoClose(VideoDecoder * video_decoder)
 {
 	if (video_decoder->VideoCodec->capabilities & AV_CODEC_CAP_DELAY) {
-		fprintf(stderr, "CodecVideoClose: AV_CODEC_CAP_DELAY > must send null avpkt\n");
 		AVPacket avpkt;
 
 		av_init_packet(&avpkt);
@@ -535,9 +481,7 @@ void CodecVideoClose(VideoDecoder * video_decoder)
 		avpkt.size = 0;
 
 		CodecVideoDecode(video_decoder, &avpkt);
-
-		av_packet_free(&avpkt);
-		fprintf(stderr, "codec: CodecVideoDecode av_packet_free(avpkt) done\n");
+		av_packet_unref(&avpkt);
 	}
 #ifndef USE_DRM
     // FIXME: play buffered data
@@ -547,12 +491,12 @@ void CodecVideoClose(VideoDecoder * video_decoder)
     av_freep(&video_decoder->Frame);
 #endif
 #endif
+
     if (video_decoder->VideoCtx) {
 	pthread_mutex_lock(&CodecLockMutex);
 	avcodec_close(video_decoder->VideoCtx);
-	fprintf(stderr, "CodecVideoClose avcodec_free_context(VideoCtx)\n");
 	avcodec_free_context(&video_decoder->VideoCtx);
-//	av_freep(&video_decoder->VideoCtx);
+	av_freep(&video_decoder->VideoCtx);
 	pthread_mutex_unlock(&CodecLockMutex);
     }
 }
@@ -604,37 +548,53 @@ void CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 {
     AVCodecContext *video_ctx;
     AVFrame *frame;
-    int used;
+    int ret;
+//    int used;
     int got_frame;
+    int cap_delay = 0;
 
 #ifdef USE_DRM
     if (!(decoder->Frame = av_frame_alloc())) {
 	Fatal(_("codec: can't allocate decoder frame\n"));
     }
+    decoder->Frame->format = AV_PIX_FMT_NONE;
 #endif
 
     video_ctx = decoder->VideoCtx;
     frame = decoder->Frame;
+    if (avpkt->data == NULL)
+		cap_delay = 1;
 
-    // FIXME: this function can crash with bad packets
-    used = avcodec_decode_video2(video_ctx, frame, &got_frame, avpkt);
-    Debug(4, "%s: %p %d -> %d %d\n", __FUNCTION__, avpkt->data, avpkt->size, used,
-	got_frame);
+	ret = avcodec_send_packet(video_ctx, avpkt);
+//	if (ret == AVERROR(EAGAIN))
+//		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(EAGAIN)\n");
+	if (ret == AVERROR(ENOMEM))
+		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(ENOMEM)\n");
+	if (ret == AVERROR(EINVAL))
+		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(EINVAL)\n");
 
-    if (used < 0) {
-	Debug(3, "codec: bad video frame\n");
-	av_frame_free(&frame);
-	return;
-    }
+	ret = avcodec_receive_frame(video_ctx, frame);
+	if (ret == 0) {
+		got_frame = 1;
+	}
+//	if (ret == AVERROR(EAGAIN))
+//		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR(EAGAIN)\n");
+	if (ret == AVERROR_EOF)
+		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR_EOF\n");
+	if (ret == AVERROR(EINVAL))
+		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR(EINVAL)\n");
 
-    if (got_frame && !frame->width == 0 && avpkt->data) {
+//		fprintf(stderr, "CodecVideoDecode cap_delay %i frame %i x %i ctx %i x %i frame %p\n",
+//			cap_delay, frame->width, frame->height,
+//			video_ctx->width, video_ctx->height, frame);
+
+    if (got_frame && !frame->width == 0 && !cap_delay && frame->width == video_ctx->width) {
 		VideoRenderFrame(decoder->HwDecoder, video_ctx, frame);
 	} else {
-		fprintf(stderr, "CodecVideoDecode used %i frame %i x %i ctx %i x %i frame %p\n",
-			used, frame->width, frame->height,
-			video_ctx->width, video_ctx->height, frame);
+//		fprintf(stderr, "CodecVideoDecode cap_delay %i frame %i x %i ctx %i x %i frame %p\n",
+//			cap_delay, frame->width, frame->height,
+//			video_ctx->width, video_ctx->height, frame);
 		av_frame_free(&frame);
-		return;
     }
 }
 
@@ -838,7 +798,7 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
     pthread_mutex_unlock(&CodecLockMutex);
     Debug(3, "codec: audio '%s'\n", audio_decoder->AudioCodec->long_name);
 
-    if (audio_codec->capabilities & CODEC_CAP_TRUNCATED) {
+    if (audio_codec->capabilities & AV_CODEC_CAP_TRUNCATED) {
 	Debug(3, "codec: audio can use truncated packets\n");
 	// we send only complete frames
 	// audio_decoder->AudioCtx->flags |= CODEC_FLAG_TRUNCATED;
@@ -1798,26 +1758,15 @@ static void CodecAudioUpdateFormat(AudioDecoder * audio_decoder)
 void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 {
     AVCodecContext *audio_ctx;
-
-#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,28,1)
-    AVFrame frame[1];
-#else
     AVFrame *frame;
-#endif
     int got_frame;
     int n;
 
     audio_ctx = audio_decoder->AudioCtx;
 
     // FIXME: don't need to decode pass-through codecs
-
-    // new AVFrame API
-#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,28,1)
-    avcodec_get_frame_defaults(frame);
-#else
     frame = audio_decoder->Frame;
     av_frame_unref(frame);
-#endif
 
     got_frame = 0;
     n = avcodec_decode_audio4(audio_ctx, frame, &got_frame,
@@ -1957,7 +1906,7 @@ void CodecInit(void)
     pthread_mutex_init(&CodecLockMutex, NULL);
 #ifndef DEBUG
     // disable display ffmpeg error messages
-//    av_log_set_callback(CodecNoopCallback);
+    av_log_set_callback(CodecNoopCallback);
 #else
     (void)CodecNoopCallback;
 #endif

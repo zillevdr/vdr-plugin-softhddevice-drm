@@ -20,9 +20,8 @@ SLOT="0"
 IUSE="alsa debug +drm oss"
 
 RDEPEND=">=media-video/vdr-2
-	alsa? ( media-libs/alsa-lib )"
-#	drmm? ( >=media-video/ffmpeg-3.2 )"
-#	mmal? ( sys-boot/raspberrypi-firmware )"
+	alsa? ( media-libs/alsa-lib )
+	drm? ( >=media-video/ffmpeg-3.4 )"
 
 #VDR_CONFD_FILE="${FILESDIR}/confd-0.6.0"
 #VDR_RCADDON_FILE="${FILESDIR}/rc-addon-0.6.0.sh"

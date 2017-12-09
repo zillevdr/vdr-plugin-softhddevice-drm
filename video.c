@@ -161,7 +161,7 @@ typedef enum
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
-#include <libavcodec/drmprime.h>
+#include <libavutil/hwcontext_drm.h>
 #endif
 
 #include <libavcodec/avcodec.h>
@@ -396,10 +396,10 @@ static VideoScalingModes VideoScaling[VideoResolutionMax];
 int VideoAudioDelay;
 
     /// Default zoom mode for 4:3
-static VideoZoomModes Video4to3ZoomMode;
+//static VideoZoomModes Video4to3ZoomMode;
 
     /// Default zoom mode for 16:9 and others
-static VideoZoomModes VideoOtherZoomMode;
+//static VideoZoomModes VideoOtherZoomMode;
 
 static char Video60HzMode;		///< handle 60hz displays
 static char VideoSoftStartSync;		///< soft start sync audio/video
@@ -446,7 +446,7 @@ static int OsdDirtyY;			///< osd dirty area y
 static int OsdDirtyWidth;		///< osd dirty area width
 static int OsdDirtyHeight;		///< osd dirty area height
 
-static int64_t VideoDeltaPTS;		///< FIXME: fix pts
+//static int64_t VideoDeltaPTS;		///< FIXME: fix pts
 
 #ifdef USE_SCREENSAVER
 static char DPMSDisabled;		///< flag we have disabled dpms
@@ -477,7 +477,7 @@ static void X11DPMSDisable(xcb_connection_t *);
 ///
 ///	@note frame->interlaced_frame can't be used for interlace detection
 ///
-static void VideoSetPts(int64_t * pts_p, int interlaced,
+/*static void VideoSetPts(int64_t * pts_p, int interlaced,
     const AVCodecContext * video_ctx, const AVFrame * frame)
 {
     int64_t pts;
@@ -553,14 +553,14 @@ static void VideoSetPts(int64_t * pts_p, int interlaced,
 	    *pts_p = pts;
 	}
     }
-}
+}*/
 
 ///
 ///	Update output for new size or aspect ratio.
 ///
 ///	@param input_aspect_ratio	video stream aspect
 ///
-static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
+/*static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
     int input_height, VideoResolutions resolution, int video_x, int video_y,
     int video_width, int video_height, int *output_x, int *output_y,
     int *output_width, int *output_height, int *crop_x, int *crop_y,
@@ -712,7 +712,7 @@ static void VideoUpdateOutput(AVRational input_aspect_ratio, int input_width,
     Debug(3, "video: aspect crop %dx%d%+d%+d\n", *crop_width, *crop_height,
 	*crop_x, *crop_y);
     return;
-}
+}*/
 
 #ifdef USE_XLIB_XCB
 //----------------------------------------------------------------------------
@@ -9616,7 +9616,7 @@ typedef struct _Drm_decoder_ DrmDecoder;
 struct _Drm_decoder_
 {
 
-    enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
+//    enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
 
     int SurfacesNeeded;			///< number of surface to request
     int SurfaceUsedN;			///< number of used video surfaces
@@ -9650,15 +9650,14 @@ static DrmDecoder *DrmDecoders[1];	///< open decoder streams
 static int DrmDecoderN;		///< number of decoder streams
 
 //----------------------------------------------------------------------------
-//	Helper functions
+//	Helper structures and functions
 //----------------------------------------------------------------------------
 
 struct drm_buf {
 	uint32_t x, y, width, height, size, pitch[3], handle[3], offset[3], fb_id;
 	uint8_t *plane[3];
 	uint32_t pix_fmt;
-	uint32_t fd_prime;
-	bool free_frame;
+	int fd_prime;
 	AVFrame *frame;
 };
 
@@ -9672,7 +9671,7 @@ struct data_priv {
 	struct drm_buf bufs[36];
     struct drm_buf buf_osd;
     struct drm_buf buf_black;
-	uint32_t connector_id, crtc_id, plane_id, osd_plane_id, front_buf;
+	uint32_t connector_id, crtc_id, plane_id, osd_plane_id, front_buf, act_fb_id;
 	bool pflip_pending, cleanup;
     int second_field;
     int prime_buffers;
@@ -9680,9 +9679,9 @@ struct data_priv {
 
 static struct data_priv *d_priv = NULL;
 static pthread_t presentation_thread_id;
-static void DrmDrawFrame(void);
+static void DrmFrame2Drm(void);
 
-static uint64_t GetPropertyValue(int fd_drm, uint32_t objectID,
+static uint64_t DrmGetPropertyValue(int fd_drm, uint32_t objectID,
 						uint32_t objectType, const char *propName)
 {
 	uint32_t i;
@@ -9715,7 +9714,7 @@ static uint64_t GetPropertyValue(int fd_drm, uint32_t objectID,
 	return value;
 }
 
-static int SetPropertyRequest(drmModeAtomicReqPtr ModeReq, int fd_drm,
+static int DrmSetPropertyRequest(drmModeAtomicReqPtr ModeReq, int fd_drm,
 					uint32_t objectID, uint32_t objectType,
 					const char *propName, uint32_t value)
 {
@@ -9764,21 +9763,21 @@ void DrmSetMode(drmModeModeInfo mode)
 
 	if (drmModeCreatePropertyBlob(priv->fd_drm, &mode, sizeof(mode), &modeID) != 0)
 		fprintf(stderr, "Failed to create mode property.\n");
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
 						DRM_MODE_OBJECT_CRTC, "MODE_ID", modeID);
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
 						DRM_MODE_OBJECT_CRTC, "ACTIVE", 1);
 
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->connector_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->connector_id,
 						DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID", priv->crtc_id);
 
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "CRTC_X", 0);
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "CRTC_Y", 0);
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "CRTC_W", mode.hdisplay);
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "CRTC_H", mode.vdisplay);
 
 	if (drmModeAtomicCommit(priv->fd_drm, ModeReq, flags, NULL) != 0)
@@ -9794,22 +9793,22 @@ void DrmSetBuf(struct drm_buf *buf)
 	drmModeAtomicReqPtr ModeReq;
 	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
 
-	fprintf(stderr, "Set atomic buf prime_buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
-		priv->prime_buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
+//	fprintf(stderr, "Set atomic buf prime_buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
+//		priv->prime_buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
 
 	if (!(ModeReq = drmModeAtomicAlloc()))
 		fprintf(stderr, "cannot allocate atomic request (%d): %m\n", errno);
 
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "SRC_X", 0);
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "SRC_Y", 0);
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "SRC_W", buf->width << 16);
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "SRC_H", buf->height << 16);
 
-	SetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "FB_ID", buf->fb_id);
 
 	if (drmModeAtomicCommit(priv->fd_drm, ModeReq, flags, NULL) != 0)
@@ -9824,12 +9823,12 @@ static int Drm_find_dev()
 	struct data_priv *priv;
 	drmModeRes *resources;
 	drmModeConnector *connector;
-	drmModeEncoder *encoder;
+	drmModeEncoder *encoder = 0;
 	drmModeModeInfo *mode;
 	drmModePlane *plane;
 	drmModePlaneRes *plane_res;
 	int i, fd_drm;
-	uint32_t j, k;
+	uint32_t j;
 	uint64_t has_dumb;
 	uint64_t has_prime;
 
@@ -9913,7 +9912,6 @@ static int Drm_find_dev()
 	if ((plane_res = drmModeGetPlaneResources(fd_drm)) == NULL)
 		fprintf(stderr, "cannot retrieve PlaneResources (%d): %m\n", errno);
 
-	fprintf(stderr, "PlaneResources count_planes: %i\n", plane_res->count_planes);
 	for (j = 0; j < plane_res->count_planes; j++) {
 		plane = drmModeGetPlane(fd_drm, plane_res->planes[j]);
 
@@ -9925,11 +9923,11 @@ static int Drm_find_dev()
 				break;
 		}
 
-		uint64_t type = GetPropertyValue(fd_drm, plane_res->planes[j],
+		uint64_t type = DrmGetPropertyValue(fd_drm, plane_res->planes[j],
 							DRM_MODE_OBJECT_PLANE, "type");
 
-		fprintf(stderr, "Plane plane_id: %i crtc_id: %i possible_crtcs: %i möglicher CRTC %i type: %"PRIu64"\n",
-			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i], type);
+//		fprintf(stderr, "Plane plane_id: %i crtc_id: %i possible_crtcs: %i possible CRTC %i type: %"PRIu64"\n",
+//			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i], type);
 
 		if (type == DRM_PLANE_TYPE_PRIMARY && plane->crtc_id == priv->crtc_id) {
 			priv->plane_id = plane->plane_id;
@@ -9966,38 +9964,27 @@ static int Drm_find_dev()
 	return 0;
 }
 
-static int Drm_setup_fb(struct drm_buf *buf, av_drmprime *primedata)
+static int DrmSetupFB(struct drm_buf *buf, AVDRMFrameDescriptor *primedata)
 {
 	struct data_priv *priv = d_priv;
 	struct drm_mode_create_dumb creq;
-	uint32_t pix_fmt;
 
 	if (primedata) {
 		uint32_t prime_handle;
 
-		switch(primedata->format) {
-			case DRM_FORMAT_NV12:
-//				fprintf(stderr, "Drm_setup_fb primedata vorhanden DRM_FORMAT_NV12 fd %i\n",
-//				primedata->fd);
-				pix_fmt = DRM_FORMAT_NV12;
-				break;
-			case DRM_FORMAT_NV12_10:
-				fprintf(stderr, "Drm_setup_fb primedata vorhanden DRM_FORMAT_NV12_10\n");
-				pix_fmt = DRM_FORMAT_NV12_10;
-				break;
-		}
+		buf->pix_fmt = primedata->layers[0].format;
 
-		if (drmPrimeFDToHandle(priv->fd_drm, primedata->fds[0], &prime_handle))
-			fprintf(stderr, "Failed to retrieve the Prime Handle.\n");
+		if (drmPrimeFDToHandle(priv->fd_drm, primedata->objects[0].fd, &prime_handle))
+			fprintf(stderr, "Failed to retrieve the Prime Handle %i size %i (%d): %m\n",
+				primedata->objects[0].fd, primedata->objects[0].size, errno);
 
-		buf->pitch[0] = primedata->strides[0];
-		buf->offset[0] = primedata->offsets[0];
 		buf->handle[0] = buf->handle[1] = prime_handle;
-		buf->pitch[1] = primedata->strides[1];
-		buf->offset[1] = primedata->offsets[1];
+		buf->pitch[0] = primedata->layers[0].planes[0].pitch;
+		buf->offset[0] = primedata->layers[0].planes[0].offset;
+		buf->pitch[1] = primedata->layers[0].planes[1].pitch;
+		buf->offset[1] = primedata->layers[0].planes[1].offset;
 
 	} else {
-		pix_fmt = buf->pix_fmt;
 
 		memset(&creq, 0, sizeof(struct drm_mode_create_dumb));
 		creq.width = buf->width;
@@ -10041,12 +10028,12 @@ static int Drm_setup_fb(struct drm_buf *buf, av_drmprime *primedata)
 	}
 
 	if (drmModeAddFB2(priv->fd_drm, buf->width, buf->height,
-		pix_fmt, buf->handle, buf->pitch, buf->offset, &buf->fb_id, 0)) {
+		buf->pix_fmt, buf->handle, buf->pitch, buf->offset, &buf->fb_id, 0)) {
 		fprintf(stderr, "cannot create framebuffer (%d): %m\n", errno);
 		return -errno;
 	}
 
-//	fprintf(stderr, "Drm_setup_fb prime_buffers %i Handle %"PRIu32" fb_id %i %i x %i\n",
+//	fprintf(stderr, "DrmSetupFB prime_buffers %i Handle %"PRIu32" fb_id %i %i x %i\n",
 //		priv->prime_buffers, buf->handle[0], buf->fb_id, buf->width, buf->height);
 
 	if (primedata)
@@ -10083,23 +10070,18 @@ static void Drm_page_flip_event( __attribute__ ((unused)) int fd,
 
 	priv->pflip_pending = false;
 	if (!priv->cleanup)
-		DrmDrawFrame();
+		DrmFrame2Drm();
 
 	// FIXME: make this smarter
-	if (buf->free_frame == 1) {
+	if (buf->frame) {
 		usleep(10000);
 		av_frame_free(&buf->frame);
-		buf->free_frame = 0;
 	}
 }
 
-static void Drm_destroy_fb(int fd_drm, struct drm_buf *buf)
+static void DrmDestroyFB(int fd_drm, struct drm_buf *buf)
 {
 	struct drm_mode_destroy_dumb dreq;
-
-	struct data_priv *priv = d_priv;
-	fprintf(stderr, "Drm_destroy_fb prime_buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
-		priv->prime_buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
 
 	if (buf->plane[0] != 0)
 		munmap(buf->plane[0], buf->size);
@@ -10117,24 +10099,8 @@ static void Drm_destroy_fb(int fd_drm, struct drm_buf *buf)
 	buf->plane[0] = 0;
 	buf->size = 0;
 	buf->fd_prime = 0;
-	buf->free_frame = 0;
 }
 
-static void DrmSetFb(struct drm_buf *buf, av_drmprime *primedata)
-{
-	struct data_priv *priv = d_priv;
-
-	if (Drm_setup_fb(buf, primedata))
-		fprintf(stderr, "drm_setup_fb FB %i x %i failed\n", buf->width, buf->height);
-
-	DrmSetBuf(buf);
-
-	if (priv->prime_buffers == 1 && (priv->buf_black.width != 0)) {
-		fprintf(stderr, "DrmSetFb: destroy buf_black width %i fb_id %i\n",
-			priv->buf_black.width, priv->buf_black.fb_id);
-		Drm_destroy_fb(priv->fd_drm, &priv->buf_black);
-	}
-}
 
 ///
 ///	Allocate new DRM decoder.
@@ -10146,6 +10112,7 @@ static void DrmSetFb(struct drm_buf *buf, av_drmprime *primedata)
 static DrmDecoder *DrmNewHwDecoder(VideoStream * stream)
 {
     DrmDecoder *decoder;
+	fprintf(stderr, "DrmNewHwDecoder\n");
 
     if (!(decoder = calloc(1, sizeof(*decoder)))) {
 	Error(_("video/DRM: out of memory\n"));
@@ -10155,7 +10122,7 @@ static DrmDecoder *DrmNewHwDecoder(VideoStream * stream)
     // setup video surface ring buffer
     atomic_set(&decoder->SurfacesFilled, 0);
 
-    decoder->PixFmt = AV_PIX_FMT_NONE;
+//    decoder->PixFmt = AV_PIX_FMT_NONE;
 
     decoder->Stream = stream;
 
@@ -10177,7 +10144,7 @@ static DrmDecoder *DrmNewHwDecoder(VideoStream * stream)
 ///
 ///	@param decoder	DRM hw decoder
 ///
-static void *DrmGetHwAccelContext(DrmDecoder * decoder)
+static void *DrmGetHwAccelContext(__attribute__ ((unused)) DrmDecoder * decoder)
 {
 	fprintf(stderr, "DrmGetHwAccelContext not defined\n");
 
@@ -10228,7 +10195,7 @@ static void DrmDelHwDecoder(DrmDecoder * decoder)
 ///
 void DrmSetClock(DrmDecoder * decoder, int64_t pts)
 {
-	fprintf(stderr, "DrmSetClock\n");
+//	fprintf(stderr, "DrmSetClock: pts %"PRId64"\n", pts);
     decoder->PTS = pts;
 }
 
@@ -10247,19 +10214,6 @@ static int64_t DrmGetClock(const DrmDecoder * decoder)
 //	fprintf(stderr, "DrmGetClock decoder->PTS == AV_NOPTS_VALUE\n");
 	return AV_NOPTS_VALUE;
     }
-    // subtract buffered decoded frames
-//    if (decoder->Interlaced) {
-	/*
-	   Info("video: %s =pts field%d #%d\n",
-	   Timestamp2String(decoder->PTS),
-	   decoder->SurfaceField,
-	   atomic_read(&decoder->SurfacesFilled));
-	 */
-	// 1 field is future, 2 fields are past, + 2 in driver queue
-//	return decoder->PTS -
-//	    20 * 90 * (2 * atomic_read(&decoder->SurfacesFilled)
-//	    - decoder->SurfaceField - 2 + 2);
-//    }
 
     return decoder->PTS - 20 * 90 * (atomic_read(&decoder->SurfacesFilled));
 }
@@ -10297,8 +10251,8 @@ static void DrmOsdInit(int width, int height)
     priv->buf_osd.x = 0;
     priv->buf_osd.width = width;
     priv->buf_osd.height = height;
-    if (Drm_setup_fb(&priv->buf_osd, NULL)){
-	    fprintf(stderr, "drm_setup_fb FB OSD failed\n");
+    if (DrmSetupFB(&priv->buf_osd, NULL)){
+	    fprintf(stderr, "DrmOsdInit: DrmSetupFB FB OSD failed\n");
     }
 }
 
@@ -10345,7 +10299,7 @@ static void DrmOsdExit(void)
 {
 	struct data_priv *priv = d_priv;
 
-	Drm_destroy_fb(priv->fd_drm, &priv->buf_osd);
+	DrmDestroyFB(priv->fd_drm, &priv->buf_osd);
 }
 
 
@@ -10374,7 +10328,7 @@ static int DrmInit(__attribute__ ((unused)) const char *display_name)
 	priv->buf_black.width = 0;
 	priv->buf_black.pix_fmt = DRM_FORMAT_ARGB8888;
 
-	// save actual modesetting for connector+CRTC
+	// save actual modesetting for connector + CRTC
 	priv->saved_crtc = drmModeGetCrtc(priv->fd_drm, priv->crtc_id);
 
 	DrmSetMode(priv->mode_hd);
@@ -10382,7 +10336,8 @@ static int DrmInit(__attribute__ ((unused)) const char *display_name)
 	// init variables page flip
     if (priv->ev.page_flip_handler != Drm_page_flip_event) {
 		memset(&priv->ev, 0, sizeof(priv->ev));
-		priv->ev.version = DRM_EVENT_CONTEXT_VERSION;
+//		priv->ev.version = DRM_EVENT_CONTEXT_VERSION;
+		priv->ev.version = 2;
 		priv->ev.page_flip_handler = Drm_page_flip_event;
 	}
     return 1;
@@ -10396,12 +10351,18 @@ static void DrmExit(void)
 	drmEventContext ev;
 	struct data_priv *priv = d_priv;
 
+	DrmDecoder *decoder;
+	decoder = DrmDecoders[0];
+
 	// init variables
 	memset(&ev, 0, sizeof(ev));
 	ev.version = DRM_EVENT_CONTEXT_VERSION;
 	ev.page_flip_handler = Drm_page_flip_event;
 
-	if (d_priv) {
+	fprintf(stderr, "DrmExit: frames in Queue: %i\n",
+		atomic_read(&decoder->SurfacesFilled));
+
+	if (priv) {
 		// if a pageflip is pending, wait for it to complete
 		priv->cleanup = true;
 		while (priv->pflip_pending) 
@@ -10414,10 +10375,6 @@ static void DrmExit(void)
 				priv->saved_crtc->x, priv->saved_crtc->y, &priv->connector_id, 1, &priv->saved_crtc->mode);
 			drmModeFreeCrtc(priv->saved_crtc);
 		}
-
-		// destroy framebuffers
-		Drm_destroy_fb(priv->fd_drm, &priv->bufs[1]);
-		Drm_destroy_fb(priv->fd_drm, &priv->bufs[0]);
 
 		// free allocated memory
 		free(priv);
@@ -10449,6 +10406,8 @@ static void *DrmDisplayFrame()
 {
 	struct data_priv *priv = d_priv;
 	DrmDecoder *decoder;
+    int i;
+	uint32_t fb_id;
 
 	// Thread setcancelstate
 	pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
@@ -10459,9 +10418,27 @@ static void *DrmDisplayFrame()
 	while ((atomic_read(&decoder->SurfacesFilled)) < 2 ){
 		usleep(15000);
 	}
-	DrmDrawFrame();
+	DrmFrame2Drm();
 	while (1){
-		drmHandleEvent(priv->fd_drm, &priv->ev);
+		if (drmHandleEvent(priv->fd_drm, &priv->ev) != 0)
+			fprintf(stderr, "DrmDisplayFrame: drmHandleEvent failed!\n");
+
+		fb_id = DrmGetPropertyValue(priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "FB_ID");
+
+		// Destroy FBs
+		if (priv->prime_buffers && priv->buf_black.fb_id == fb_id) {
+			for (i = 0; i < priv->prime_buffers; ++i) {
+				DrmDestroyFB(priv->fd_drm, &priv->bufs[i]);
+			}
+			priv->prime_buffers = 0;
+			priv->front_buf = 0;
+		}
+
+		// Destroy black FB
+		if (decoder->StartCounter == 2 && priv->buf_black.fb_id != 0) {
+			DrmDestroyFB(priv->fd_drm, &priv->buf_black);
+		}
 	}
 	return 0;
 }
@@ -10470,189 +10447,201 @@ static void *DrmDisplayFrame()
 ///
 ///	Draw a video frame.
 ///
-static void DrmDrawFrame(void)
+static void DrmFrame2Drm(void)
 {
     int i, j;
 	struct data_priv *priv = d_priv;
 	struct drm_buf *buf = 0;
 	DrmDecoder *decoder;
-	AVFrame *surface;
-	av_drmprime *primedata = NULL;
 	decoder = DrmDecoders[0];
+	AVFrame *frame;
+	AVDRMFrameDescriptor *primedata = NULL;
 	int64_t audio_clock;
-
-	if (priv->prime_buffers && priv->buf_black.width && decoder->Closing) {
-		for (i = 0; i < priv->prime_buffers; ++i) {
-			Drm_destroy_fb(priv->fd_drm, &priv->bufs[i]);
-			}
-		priv->prime_buffers = 0;
-		priv->front_buf = 0;
-	}
+	uint32_t fb_id;
 
 dequeue:
+	fb_id = DrmGetPropertyValue(priv->fd_drm, priv->plane_id,
+						DRM_MODE_OBJECT_PLANE, "FB_ID");
+
+	if (fb_id != priv->act_fb_id)
+		fprintf(stderr, "DrmFrame2Drm: FB page flip pending akt fb_id %i act_fb_id %i\n",
+			fb_id, priv->act_fb_id);
+
 	while ((atomic_read(&decoder->SurfacesFilled)) == 0 ) {
+		if (decoder->Closing && priv->prime_buffers)
+			break;
 		usleep(20000);
 	}
 
-    pthread_mutex_lock(&VideoLockMutex);
-	surface = decoder->SurfacesRb[decoder->SurfaceRead];
-    pthread_mutex_unlock(&VideoLockMutex);
+	if (atomic_read(&decoder->SurfacesFilled)) {
+		pthread_mutex_lock(&VideoLockMutex);
+		frame = decoder->SurfacesRb[decoder->SurfaceRead];
+		pthread_mutex_unlock(&VideoLockMutex);
+	} else
+		frame = NULL;
 
-	if (decoder->Closing && (surface->interlaced_frame == 0 || priv->second_field == 1)) {
-		// first step set a black FB
-		if (!(priv->buf_black.width)) {
+	if (decoder->Closing) {
+closing:
+		if (frame) {
+			av_frame_free(&frame);
+			pthread_mutex_lock(&VideoLockMutex);
+			decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
+			atomic_dec(&decoder->SurfacesFilled);
+			pthread_mutex_unlock(&VideoLockMutex);
+		}
+
+		// set a black FB
+		if (!(priv->buf_black.fb_id)) {
 			priv->buf_black.width = 720;
 			priv->buf_black.height = 576;
-			DrmSetFb(&priv->buf_black, primedata);
+			if (DrmSetupFB(&priv->buf_black, NULL))
+				fprintf(stderr, "DrmFrame2Drm: DrmSetupFB black FB %i x %i failed\n",
+					priv->buf_black.width, priv->buf_black.height);
+			DrmSetBuf(&priv->buf_black);
 			buf = &priv->buf_black;
 			goto page_flip;
 		}
-		if(surface) {
-			fprintf(stderr, "DrmDrawFrame av_frame_free %p\n", surface);
-			av_frame_free(&surface);
+		if (priv->buf_black.fb_id && priv->buf_black.fb_id != fb_id) {
+			DrmSetBuf(&priv->buf_black);
+//			fprintf(stderr, "DrmFrame2Drm DrmSetBuf OHNE DrmSetupFB\n");
+			buf = &priv->buf_black;
+			goto page_flip;
 		}
-
-		pthread_mutex_lock(&VideoLockMutex);
-		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
-		atomic_dec(&decoder->SurfacesFilled);
-		pthread_mutex_unlock(&VideoLockMutex);
 		goto dequeue;
 	}
 
-	//Untersuchen wir mal primedata
-	if (surface->data[3]) {
-		primedata = (av_drmprime *)surface->data[3];
+	if (frame->format & AV_PIX_FMT_DRM_PRIME) {
+		// frame in prime fd
+		primedata = (AVDRMFrameDescriptor *)frame->data[0];
 		// search or made fd / FB combination
 		for (i = 0; i < priv->prime_buffers; i++) {
-			if (priv->bufs[i].fd_prime == primedata->fds[0]) {
+			if (priv->bufs[i].fd_prime == primedata->objects[0].fd) {
 				buf = &priv->bufs[i];
 				break;
 			}
 		}
 		if (buf == 0) {
 			buf = &priv->bufs[priv->prime_buffers];
-			buf->width = (uint32_t)surface->width;
-			buf->height = (uint32_t)surface->height;
-			buf->fd_prime = primedata->fds[0];
+			buf->width = (uint32_t)frame->width;
+			buf->height = (uint32_t)frame->height;
+			buf->fd_prime = primedata->objects[0].fd;
 
-			DrmSetFb(buf, primedata);
+			if (DrmSetupFB(buf, primedata))
+				fprintf(stderr, "DrmFrame2Drm: DrmSetupFB FB %i x %i failed\n", buf->width, buf->height);
+
+			if (priv->prime_buffers == 0)
+				DrmSetBuf(buf);
 			priv->prime_buffers++;
 		}
 	} else {
+		// frame in frame data
+		buf = &priv->bufs[priv->front_buf];
+		if (buf->fb_id == 0) {
+			buf->width = (uint32_t)frame->width;
+			if (frame->interlaced_frame == 1)
+				buf->height = (uint32_t)frame->height / 2;
+			else buf->height = (uint32_t)frame->height;
 
-		buf = &priv->bufs[priv->front_buf ^ 1];
+			if (DrmSetupFB(buf, NULL))
+				fprintf(stderr, "DrmFrame2Drm: DrmSetupFB FB %i x %i failed\n", buf->width, buf->height);
 
-		if (surface->width != (int)buf->width) {
-
-			buf->width = (uint32_t)surface->width;
-			if (surface->interlaced_frame == 1)
-				buf->height = (uint32_t)surface->height / 2;
-			else buf->height = (uint32_t)surface->height;
-
-			DrmSetFb(buf, primedata);
+			if (priv->prime_buffers == 0)
+				DrmSetBuf(buf);
 			priv->prime_buffers++;
 		}
 
-		// Copy YUV420 to NV12 and deinterlace at same time
-		if (surface->data[0]) {
-			for (i = 0; i < surface->height; ++i)
-				if (((i + surface->top_field_first) % 2 == 0 && priv->second_field == 1) ||
-					((i + surface->top_field_first + 1) % 2 == 0 && priv->second_field == 0) ||
-					surface->interlaced_frame == 0)
-						memcpy(buf->plane[0] + i / (surface->interlaced_frame + 1) * surface->width,
-							surface->data[0] + i * surface->linesize[0],
-							surface->width);
+		// Copy YUV420 to NV12 and deinterlace at once
+		for (i = 0; i < frame->height; ++i)
+			if (((i + frame->top_field_first) % 2 == 0 && priv->second_field == 1) ||
+				((i + frame->top_field_first + 1) % 2 == 0 && priv->second_field == 0) ||
+				frame->interlaced_frame == 0)
+					memcpy(buf->plane[0] + i / (frame->interlaced_frame + 1) * frame->width,
+						frame->data[0] + i * frame->linesize[0], frame->width);
 
-			for (i = 0; i < surface->height / 2; ++i) {
-				if (((i + surface->top_field_first) % 2 == 0 && priv->second_field == 1) ||
-					((i + surface->top_field_first + 1) % 2 == 0 && priv->second_field == 0) ||
-					surface->interlaced_frame == 0)
-					for (j = 0; j < surface->width; ++j) {
-						if (j % 2 == 0)
-							memcpy(buf->plane[1] + i / (surface->interlaced_frame + 1) * surface->width + j,
-								surface->data[1] + i * surface->linesize[2] + j / 2, 1 );
-						else memcpy(buf->plane[1] + i / (surface->interlaced_frame + 1) * surface->width + j,
-								surface->data[2] + i * surface->linesize[1] + (j +1) / 2, 1 );
-					}
-			}
+		for (i = 0; i < frame->height / 2; ++i) {
+			if (((i + frame->top_field_first) % 2 == 0 && priv->second_field == 1) ||
+				((i + frame->top_field_first + 1) % 2 == 0 && priv->second_field == 0) ||
+				frame->interlaced_frame == 0)
+				for (j = 0; j < frame->width; ++j) {
+					if (j % 2 == 0)
+						memcpy(buf->plane[1] + i / (frame->interlaced_frame + 1) * frame->width + j,
+							frame->data[1] + i * frame->linesize[2] + j / 2, 1 );
+					else memcpy(buf->plane[1] + i / (frame->interlaced_frame + 1) * frame->width + j,
+							frame->data[2] + i * frame->linesize[1] + (j +1) / 2, 1 );
+				}
+		}
 
-			if (surface->interlaced_frame == 1 && priv->second_field == 0)
-				priv->second_field = 1;
-			else {
-				priv->second_field = 0;
-				if (surface->pts == (int64_t) AV_NOPTS_VALUE)
-				surface->pkt_pts += 1800;
-				else surface->pts += 1800;
-			}
+		if (frame->interlaced_frame == 1 && priv->second_field == 0)
+			priv->second_field = 1;
+		else {
+			priv->second_field = 0;
+			frame->pts += 1800;
 		}
 	}
 
-	int64_t video_clock = surface->pts;
-	if (video_clock == (int64_t) AV_NOPTS_VALUE)
-		video_clock = surface->pkt_pts;
-	if(decoder->StartCounter == 0 && decoder->Closing == 0) {
-		fprintf(stderr, "AudioVideoReady video_clock: %"PRId64" Closing: %i\n",
-			video_clock, decoder->Closing);
-		AudioVideoReady(video_clock);
-	}
+	if(decoder->StartCounter == 0 && decoder->Closing == 0)
+		AudioVideoReady(frame->pts);
+
 audioclock:
 	audio_clock = AudioGetClock();
-	if (audio_clock == (int64_t) AV_NOPTS_VALUE) {
-		fprintf(stderr, "DrmDrawFrame audio_clock: AV_NOPTS_VALUE sleep 20ms\n");
+	if (audio_clock == (int64_t) AV_NOPTS_VALUE && !decoder->TrickSpeed) {
+
+		if (decoder->Closing)
+			goto closing;
+
 		usleep(20000);
 		goto audioclock;
 	}
-
-	int diff = video_clock - audio_clock - VideoAudioDelay;
-	decoder->PTS = surface->pts;
-//	decoder->PTS_A = audio_clock;
+	int diff = frame->pts - audio_clock - VideoAudioDelay;
+	decoder->PTS = frame->pts;
 
 	if(diff > 55 * 90 && !decoder->TrickSpeed) {
 		decoder->FramesDuped++;
 
-		fprintf(stderr, "Queue %i Diff %4i PTSV %4"PRId64" PTSA %4"PRId64" StartCounter %i Closing %i FramesDuped %i FramesDropped %i\n",
-			atomic_read(&decoder->SurfacesFilled), diff / 90, video_clock, audio_clock,
-			decoder->StartCounter, decoder->Closing, decoder->FramesDuped, decoder->FramesDropped);
+		if (decoder->Closing)
+			goto closing;
 
 		usleep(20000);
 		goto audioclock;
 	}
+
 	if (diff < -25 * 90 && !decoder->TrickSpeed) {
 		decoder->FramesDropped++;
 
-		fprintf(stderr, "Queue %i Diff %4i PTSV %4"PRId64" PTSA %4"PRId64" StartCounter %i Closing %i FramesDuped %i FramesDropped %i\n",
-			atomic_read(&decoder->SurfacesFilled), diff / 90, video_clock, audio_clock,
-			decoder->StartCounter, decoder->Closing, decoder->FramesDuped, decoder->FramesDropped);
+		if (decoder->Closing)
+			goto closing;
 
-		if(surface)
-			av_frame_free(&surface);
+		av_frame_free(&frame);
 		pthread_mutex_lock(&VideoLockMutex);
 		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
 		atomic_dec(&decoder->SurfacesFilled);
 		pthread_mutex_unlock(&VideoLockMutex);
+		if (decoder->Closing == 0) {
+			decoder->StartCounter++;
+		}
 		goto dequeue;
 	}
 
-page_flip:
-	if (surface->interlaced_frame == 0 || priv->second_field == 0)
-		buf->free_frame = 1;
-
-	if (decoder->Closing == 0)
-		decoder->StartCounter++;
-
-	if (surface->interlaced_frame == 0 || priv->second_field == 0) {
+	buf->frame = NULL;
+	if (frame->interlaced_frame == 0 || priv->second_field == 0) {
+		buf->frame = frame;
 		pthread_mutex_lock(&VideoLockMutex);
 		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
 		atomic_dec(&decoder->SurfacesFilled);
 		pthread_mutex_unlock(&VideoLockMutex);
 	}
 
-	buf->frame = surface;
+	decoder->StartCounter++;
+
+page_flip:
+	priv->act_fb_id = buf->fb_id;
 	if (drmModePageFlip(priv->fd_drm, priv->crtc_id, buf->fb_id,
 			DRM_MODE_PAGE_FLIP_EVENT, buf)) {
 		fprintf(stderr, "cannot flip CRTC for connector %u fb_id %i width %i (%d): %m\n",
-			priv->connector_id, buf->fb_id, surface->width, errno);
+			priv->connector_id, buf->fb_id, frame->width, errno);
 	} else {
+//		fprintf(stderr, "flip CRTC for connector %u fb_id %i width %i\n",
+//			priv->connector_id, buf->fb_id, frame->width);
 		priv->front_buf ^= 1;
 		priv->pflip_pending = true;
 	}
@@ -10666,7 +10655,7 @@ page_flip:
 ///
 ///	@param decoder	DRM hw decoder
 ///
-static void DrmPrintFrames(const DrmDecoder * decoder)
+/*static void DrmPrintFrames(const DrmDecoder * decoder)
 {
     Debug(3, "video/drm: %d missed, %d duped, %d dropped frames of %d,%d\n",
 	decoder->FramesMissed, decoder->FramesDuped, decoder->FramesDropped,
@@ -10674,7 +10663,7 @@ static void DrmPrintFrames(const DrmDecoder * decoder)
 #ifndef DEBUG
     (void)decoder;
 #endif
-}
+}*/
 
 
 #ifdef USE_VIDEO_THREAD
@@ -10685,7 +10674,6 @@ static void DrmDisplayHandlerThread(void)
 {
     int err;
     int filled;
-    struct timespec nowtime;
     DrmDecoder *decoder;
 
     if (!(decoder = DrmDecoders[0])) {	// no stream available
@@ -10695,21 +10683,17 @@ static void DrmDisplayHandlerThread(void)
     // manage fill frame output ring buffer
     filled = atomic_read(&decoder->SurfacesFilled);
 
-    if (filled < VIDEO_SURFACES_MAX - 1) {
+//    if (filled < VIDEO_SURFACES_MAX - 1) {
+    if ((filled < VIDEO_SURFACES_MAX - 1) && VideoGetBuffers(decoder->Stream)) {
 		// FIXME: hot polling
-		pthread_mutex_lock(&VideoLockMutex);
 		// fetch+decode or reopen
 		err = VideoDecodeInput(decoder->Stream);
-		pthread_mutex_unlock(&VideoLockMutex);
     } else {
 		err = VideoPollInput(decoder->Stream);
     }
     if (err) {
 		// FIXME: sleep on wakeup
 		usleep(10000);		// nothing buffered
-/*		if (err == -1 && decoder->Closing) {
-			fprintf(stderr, "DrmDisplayHandlerThread: nothing buffered\n");
-		}*/
 	}
 }
 
@@ -10727,19 +10711,22 @@ static void DrmDisplayHandlerThread(void)
 ///			it is terminated by -1 as 0 is a valid format, the
 ///			formats are ordered by quality.
 ///
-static enum AVPixelFormat Drm_get_format(DrmDecoder * decoder,
+static enum AVPixelFormat Drm_get_format(__attribute__ ((unused)) DrmDecoder * decoder,
     AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
     while (*fmt != AV_PIX_FMT_NONE) {
-        if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == 0x0002)
+        if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO)
             return AV_PIX_FMT_YUV420P;
-        if (*fmt == AV_PIX_FMT_RKMPP && video_ctx->codec_id == 0x001c)
-            return AV_PIX_FMT_RKMPP;
-        if (*fmt == AV_PIX_FMT_RKMPP && video_ctx->codec_id == 0x00ae)
-            return AV_PIX_FMT_RKMPP;
+        if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_H264) {
+			fprintf(stderr, "AVPixelFormat: AV_PIX_FMT_NV12 Codecname: %s\n", video_ctx->codec->name);
+            return AV_PIX_FMT_NV12;
+		}
+        if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_HEVC) {
+            return AV_PIX_FMT_NV12;
         fmt++;
+		}
     }
-    fprintf(stderr, "The RKMPP pixel format not offered in get_format()\n");
+    fprintf(stderr, "AVPixelFormat: The RKMPP pixel format not offered in get_format()\n");
 
     return avcodec_default_get_format(video_ctx, fmt);
 }
@@ -10753,7 +10740,7 @@ static enum AVPixelFormat Drm_get_format(DrmDecoder * decoder,
 ///	@param frame		frame to display
 ///
 static void DrmRenderFrame(DrmDecoder * decoder,
-    const AVCodecContext * video_ctx, const AVFrame * frame)
+    __attribute__ ((unused)) const AVCodecContext * video_ctx, AVFrame * frame)
 {
 //	struct data_priv *priv = d_priv;
 
@@ -10763,9 +10750,11 @@ static void DrmRenderFrame(DrmDecoder * decoder,
 		return;
 	}
 
+	pthread_mutex_lock(&VideoLockMutex);
     decoder->SurfacesRb[decoder->SurfaceWrite] = frame;
     decoder->SurfaceWrite = (decoder->SurfaceWrite + 1) % VIDEO_SURFACES_MAX;
     atomic_inc(&decoder->SurfacesFilled);
+	pthread_mutex_unlock(&VideoLockMutex);
 }
 
 ///
@@ -10775,8 +10764,9 @@ static void DrmRenderFrame(DrmDecoder * decoder,
 ///
 static void DrmResetStart(DrmDecoder * decoder)
 {
-	fprintf(stderr, "DrmResetStart\n");
     decoder->StartCounter = 0;
+
+//	fprintf(stderr, "DrmResetStart: StartCounter %i\n", decoder->StartCounter);
 }
 
 
@@ -10788,7 +10778,7 @@ static void DrmResetStart(DrmDecoder * decoder)
 static void DrmSetClosing(DrmDecoder * decoder, int closing)
 {
     decoder->Closing = closing;
-	fprintf(stderr, "DrmSetClosing %i\n", decoder->Closing);
+//	fprintf(stderr, "DrmSetClosing %i\n", decoder->Closing);
 }
 
 
@@ -11392,8 +11382,6 @@ static void *VideoDisplayHandlerThread(void *dummy)
 ///
 static void VideoThreadInit(void)
 {
-//	fprintf(stderr, "VideoThreadInit\n");
-
 #ifdef USE_GLX
     glXMakeCurrent(XlibDisplay, None, NULL);
 #endif
@@ -11411,25 +11399,26 @@ static void VideoThreadInit(void)
 ///
 static void VideoThreadExit(void)
 {
-	fprintf(stderr, "VideoThreadExit\n");
     if (VideoThread) {
 	void *retval;
 
 	Debug(3, "video: video thread canceled\n");
+
 	//VideoThreadLock();
 	// FIXME: can't cancel locked
 	if (pthread_cancel(VideoThread)) {
 	    Error(_("video: can't queue cancel video display thread\n"));
+		fprintf(stderr, "VideoThreadExit: can't queue cancel video display thread\n");
 	}
 	// DrmDisplayFrame loop end
 	if (pthread_cancel(presentation_thread_id)) {
 	    Error(_("video: can't cancel DrmDisplayFrame thread\n"));
 		fprintf(stderr, "VideoThreadExit: can't cancel DrmDisplayFrame thread\n");
 	}
-//	int pthread_cancel (pthread_t presentation_thread_id);
 	//VideoThreadUnlock();
 	if (pthread_join(VideoThread, &retval) || retval != PTHREAD_CANCELED) {
 	    Error(_("video: can't cancel video display thread\n"));
+		fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 	}
 	VideoThread = 0;
 	pthread_cond_destroy(&VideoWakeupCond);
@@ -11606,7 +11595,7 @@ enum AVPixelFormat Video_get_format(VideoHwDecoder * hw_decoder,
 ///	@param frame		frame to display
 ///
 void VideoRenderFrame(VideoHwDecoder * hw_decoder,
-    const AVCodecContext * video_ctx, const AVFrame * frame)
+    const AVCodecContext * video_ctx, AVFrame * frame)
 {
 #if 0
     fprintf(stderr, "video: render frame pts %s closing %d\n",
@@ -11930,7 +11919,7 @@ void VideoGetStats(VideoHwDecoder * hw_decoder, int *missed, int *duped,
 ///	@param[out] aspect_num	video stream aspect numerator
 ///	@param[out] aspect_den	video stream aspect denominator
 ///
-void VideoGetVideoSize(VideoHwDecoder * hw_decoder, int *width, int *height,
+void VideoGetVideoSize(__attribute__ ((unused)) VideoHwDecoder * hw_decoder, int *width, int *height,
     int *aspect_num, int *aspect_den)
 {
     *width = 1920;
@@ -12239,7 +12228,7 @@ const char *VideoGetDriverName(void)
 ///
 ///	@param geometry	 [=][<width>{xX}<height>][{+-}<xoffset>{+-}<yoffset>]
 ///
-int VideoSetGeometry(const char *geometry)
+int VideoSetGeometry(__attribute__ ((unused)) const char *geometry)
 {
 #ifdef USE_XLIB_XCB
     XParseGeometry(geometry, &VideoWindowX, &VideoWindowY, &VideoWindowWidth,
