@@ -10390,14 +10390,14 @@ static void DrmExit(void)
 ///	@param[out] dropped	dropped frames
 ///	@param[out] count	number of decoded frames
 ///
-/*void DrmGetStats(DrmDecoder * decoder, int *missed, int *duped,
+void DrmGetStats(DrmDecoder * decoder, int *missed, int *duped,
     int *dropped, int *counter)
 {
-    *missed = decoder->FramesMissed;
+    *missed = decoder->FramesDuped;
     *duped = decoder->FramesDuped;
     *dropped = decoder->FramesDropped;
-    *counter = decoder->FrameCounter;
-}*/
+    *counter = decoder->StartCounter;
+}
 
 ///
 ///	Display a video frame.
@@ -10463,9 +10463,9 @@ dequeue:
 	fb_id = DrmGetPropertyValue(priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "FB_ID");
 
-	if (fb_id != priv->act_fb_id)
-		fprintf(stderr, "DrmFrame2Drm: FB page flip pending akt fb_id %i act_fb_id %i\n",
-			fb_id, priv->act_fb_id);
+//	if (fb_id != priv->act_fb_id)
+//		fprintf(stderr, "DrmFrame2Drm: FB page flip pending akt fb_id %i act_fb_id %i\n",
+//			fb_id, priv->act_fb_id);
 
 	while ((atomic_read(&decoder->SurfacesFilled)) == 0 ) {
 		if (decoder->Closing && priv->prime_buffers)
@@ -10816,8 +10816,7 @@ static const VideoModule DrmModule = {
     .SetClosing = (void (*const) (const VideoHwDecoder *, int))DrmSetClosing,
     .ResetStart = (void (*const) (const VideoHwDecoder *))DrmResetStart,
     .SetTrickSpeed =(void (*const) (const VideoHwDecoder *, int))DrmSetTrickSpeed,
-//    .GetStats = (void (*const) (VideoHwDecoder *, int *, int *, int *,
-//	    int *))DrmGetStats,
+    .GetStats = (void (*const) (VideoHwDecoder *, int *, int *, int *, int *))DrmGetStats,
     .DisplayHandlerThread = DrmDisplayHandlerThread,
     .OsdClear = DrmOsdClear,
     .OsdDrawARGB = DrmOsdDrawARGB,

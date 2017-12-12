@@ -1403,8 +1403,6 @@ static void VideoPacketExit(VideoStream * stream)
 
     atomic_set(&stream->PacketsFilled, 0);
 
-	fprintf(stderr, "softhddev.c: VideoPacketExit\n");
-
     for (i = 0; i < VIDEO_PACKET_MAX; ++i) {
 //	av_free_packet(&stream->PacketRb[i]);
 	av_packet_unref(&stream->PacketRb[i]);
@@ -1785,9 +1783,6 @@ static void VideoStreamClose(VideoStream * stream, int delhw)
     stream->SkipStream = 1;
     if (stream->Decoder) {
 	VideoDecoder *decoder;
-
-	fprintf(stderr, "VideoStreamClose Pkts %i\n",
-		atomic_read(&stream->PacketsFilled));
 
 	decoder = stream->Decoder;
 	// FIXME: remove this lock for main stream close
