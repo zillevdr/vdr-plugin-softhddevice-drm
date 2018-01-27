@@ -1862,6 +1862,7 @@ int VideoDecodeInput(VideoStream * stream)
     int filled;
     AVPacket *avpkt;
     int saved_size;
+    int ret = 0;
 
     if (!stream->Decoder) {		// closing
 #ifdef DEBUG
@@ -1965,9 +1966,11 @@ int VideoDecodeInput(VideoStream * stream)
     }
 
     // avcodec_decode_video2 needs size
-    saved_size = avpkt->size;
-    avpkt->size = avpkt->stream_index;
-    avpkt->stream_index = 0;
+    if (stream->LastCodecID == AV_CODEC_ID_MPEG2VIDEO) {
+        saved_size = avpkt->size;
+        avpkt->size = avpkt->stream_index;
+        avpkt->stream_index = 0;
+	}
 
 #ifdef USE_PIP
     //fprintf(stderr, "[");
@@ -1980,7 +1983,7 @@ int VideoDecodeInput(VideoStream * stream)
     // lock decoder against close
     pthread_mutex_lock(&stream->DecoderLockMutex);
     if (stream->Decoder) {
-	CodecVideoDecode(stream->Decoder, avpkt);
+	ret = CodecVideoDecode(stream->Decoder, avpkt);
     }
     pthread_mutex_unlock(&stream->DecoderLockMutex);
     //fprintf(stderr, "]\n");
@@ -1989,16 +1992,19 @@ int VideoDecodeInput(VideoStream * stream)
     if (stream->LastCodecID == AV_CODEC_ID_MPEG2VIDEO) {
 	FixPacketForFFMpeg(stream->Decoder, avpkt);
     } else {
-	CodecVideoDecode(stream->Decoder, avpkt);
+	ret = CodecVideoDecode(stream->Decoder, avpkt);
     }
 #endif
 
-    avpkt->size = saved_size;
+    if (stream->LastCodecID == AV_CODEC_ID_MPEG2VIDEO)
+        avpkt->size = saved_size;
 
   skip:
     // advance packet read
-    stream->PacketRead = (stream->PacketRead + 1) % VIDEO_PACKET_MAX;
-    atomic_dec(&stream->PacketsFilled);
+    if (ret) {
+        stream->PacketRead = (stream->PacketRead + 1) % VIDEO_PACKET_MAX;
+        atomic_dec(&stream->PacketsFilled);
+	}
 
     return 0;
 }

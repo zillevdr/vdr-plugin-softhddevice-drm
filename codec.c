@@ -544,11 +544,11 @@ void DisplayPts(AVCodecContext * video_ctx, AVFrame * frame)
 **	@param decoder	video decoder data
 **	@param avpkt	video packet
 */
-void CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
+int CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 {
     AVCodecContext *video_ctx;
     AVFrame *frame;
-    int ret;
+    int ret_in, ret_out;
 //    int used;
     int got_frame;
     int cap_delay = 0;
@@ -565,23 +565,23 @@ void CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
     if (avpkt->data == NULL)
 		cap_delay = 1;
 
-	ret = avcodec_send_packet(video_ctx, avpkt);
-//	if (ret == AVERROR(EAGAIN))
+	ret_in = avcodec_send_packet(video_ctx, avpkt);
+//	if (ret_in == AVERROR(EAGAIN))
 //		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(EAGAIN)\n");
-	if (ret == AVERROR(ENOMEM))
+	if (ret_in == AVERROR(ENOMEM))
 		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(ENOMEM)\n");
-	if (ret == AVERROR(EINVAL))
+	if (ret_in == AVERROR(EINVAL))
 		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(EINVAL)\n");
 
-	ret = avcodec_receive_frame(video_ctx, frame);
-	if (ret == 0) {
+	ret_out = avcodec_receive_frame(video_ctx, frame);
+	if (ret_out == 0) {
 		got_frame = 1;
 	}
-//	if (ret == AVERROR(EAGAIN))
+//	if (ret_out == AVERROR(EAGAIN))
 //		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR(EAGAIN)\n");
-	if (ret == AVERROR_EOF)
+	if (ret_out == AVERROR_EOF)
 		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR_EOF\n");
-	if (ret == AVERROR(EINVAL))
+	if (ret_out == AVERROR(EINVAL))
 		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR(EINVAL)\n");
 
 //		fprintf(stderr, "CodecVideoDecode cap_delay %i frame %i x %i ctx %i x %i frame %p\n",
@@ -596,6 +596,9 @@ void CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 //			video_ctx->width, video_ctx->height, frame);
 		av_frame_free(&frame);
     }
+	if (ret_in == AVERROR(EAGAIN))
+		return 0;
+	return 1;
 }
 
 /**
