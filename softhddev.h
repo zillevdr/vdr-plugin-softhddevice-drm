@@ -24,10 +24,6 @@
 extern "C"
 {
 #endif
-    /// C callback feed key press
-    extern void FeedKeyPress(const char *, const char *, int, int,
-	const char *);
-
     /// C plugin get osd size and ascpect
     extern void GetOsdSize(int *, int *, double *);
 
@@ -92,26 +88,9 @@ extern "C"
     /// C plugin main thread hook
     extern void MainThreadHook(void);
 
-    /// Suspend plugin
-    extern void Suspend(int, int, int);
-    /// Resume plugin
-    extern void Resume(void);
-
     /// Get decoder statistics
     extern void GetStats(int *, int *, int *, int *);
-    /// C plugin scale video
-    extern void ScaleVideo(int, int, int, int);
 
-    /// Set Pip position
-    extern void PipSetPosition(int, int, int, int, int, int, int, int);
-    /// Pip start
-    extern void PipStart(int, int, int, int, int, int, int, int);
-    /// Pip stop
-    extern void PipStop(void);
-    /// Pip play video packet
-    extern int PipPlayVideo(const uint8_t *, int);
-
-    extern const char *X11DisplayName;	///< x11 display name
 #ifdef __cplusplus
 }
 #endif

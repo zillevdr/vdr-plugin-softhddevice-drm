@@ -2,6 +2,7 @@
 ///	@file softhddev.c	@brief A software HD device plugin for VDR.
 ///
 ///	Copyright (c) 2011 - 2015 by Johns.  All Rights Reserved.
+///	Copyright (c) 2018 by zille.  All Rights Reserved.
 ///
 ///	Contributor(s):
 ///
@@ -20,43 +21,15 @@
 ///	$Id$
 //////////////////////////////////////////////////////////////////////////////
 
-#define noUSE_SOFTLIMIT			///< add soft buffer limits to Play..
-#define noUSE_PIP			///< include PIP support + new API
 #define noDUMP_TRICKSPEED		///< dump raw trickspeed packets
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#ifdef __FreeBSD__
-#include <signal.h>
-#endif
-#include <fcntl.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <inttypes.h>
 #include <unistd.h>
-#include <string.h>
 
 #include <libintl.h>
 #define _(str) gettext(str)		///< gettext shortcut
 #define _N(str) str			///< gettext_noop shortcut
 
 #include <libavcodec/avcodec.h>
-#include <libavutil/mem.h>
-// support old ffmpeg versions <1.0
-#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(55,18,102)
-#define AVCodecID CodecID
-#define AV_CODEC_ID_AAC CODEC_ID_AAC
-#define AV_CODEC_ID_AAC_LATM CODEC_ID_AAC_LATM
-#define AV_CODEC_ID_AC3 CODEC_ID_AC3
-#define AV_CODEC_ID_EAC3 CODEC_ID_EAC3
-#define AV_CODEC_ID_H264 CODEC_ID_H264
-#define AV_CODEC_ID_MP2 CODEC_ID_MP2
-#define AV_CODEC_ID_MPEG2VIDEO CODEC_ID_MPEG2VIDEO
-#define AV_CODEC_ID_NONE CODEC_ID_NONE
-#define AV_CODEC_ID_PCM_DVD CODEC_ID_PCM_DVD
-#endif
 
 #ifndef __USE_GNU
 #define __USE_GNU
@@ -82,10 +55,6 @@ static void DumpMpeg(const uint8_t * data, int size);
 
 extern int ConfigAudioBufferTime;	///< config size ms of audio buffer
 extern int ConfigVideoClearOnSwitch;	//<  clear decoder on channel switch
-char ConfigStartX11Server;		///< flag start the x11 server
-static signed char ConfigStartSuspended;	///< flag to start in suspend mode
-//static char ConfigFullscreen;		///< fullscreen modus
-static const char *X11ServerArguments;	///< default command arguments
 static char ConfigStillDecoder;		///< hw/sw decoder for still picture
 
 static pthread_mutex_t SuspendLockMutex;	///< suspend lock mutex
@@ -1045,16 +1014,8 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
     if (AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE) {
 	return 0;
     }
-#ifdef USE_SOFTLIMIT
-    // soft limit buffer full
-    if (AudioSyncStream && VideoGetBuffers(AudioSyncStream) > 3
-	&& AudioUsedBytes() > AUDIO_MIN_BUFFER_FREE * 2) {
-	return 0;
-    }
-#endif
     // PES header 0x00 0x00 0x01 ID
     // ID 0xBD 0xC0-0xCF
-
     // must be a PES start code
     if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01) {
 	Error(_("[softhddev] invalid PES audio packet\n"));
@@ -1277,13 +1238,6 @@ int PlayTsAudio(const uint8_t * data, int size)
     if (AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE) {
 	return 0;
     }
-#ifdef USE_SOFTLIMIT
-    // soft limit buffer full
-    if (AudioSyncStream && VideoGetBuffers(AudioSyncStream) > 3
-	&& AudioUsedBytes() > AUDIO_MIN_BUFFER_FREE * 2) {
-	return 0;
-    }
-#endif
 
     return TsDemuxer(tsdx, data, size);
 }
@@ -1351,10 +1305,6 @@ struct __video_stream__
 
 static VideoStream MyVideoStream[1];	///< normal video stream
 
-#ifdef USE_PIP
-static VideoStream PipVideoStream[1];	///< pip video stream
-#endif
-
 //#ifdef DEBUG
 uint32_t VideoSwitch;			///< debug video switch ticks
 //static int VideoMaxPacketSize;		///< biggest used packet buffer
@@ -1363,9 +1313,6 @@ uint32_t VideoSwitch;			///< debug video switch ticks
 #ifdef STILL_DEBUG
 static char InStillPicture;		///< flag still picture
 #endif
-
-const char *X11DisplayName;		///< x11 display name
-static volatile char Usr1Signal;	///< true got usr1 signal
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -1518,7 +1465,6 @@ static void VideoNextPacket(VideoStream * stream, int codec_id)
     VideoResetPacket(stream);
 }
 
-#ifdef USE_PIP
 
 /**
 **	Place mpeg video data in packet ringbuffer.
@@ -1672,84 +1618,6 @@ static void VideoMpegEnqueue(VideoStream * stream, int64_t pts,
     VideoEnqueue(stream, pts, data, size);
 }
 
-#else
-
-/**
-**	Fix packet for FFMpeg.
-**
-**	Some tv-stations sends mulitple pictures in a single PES packet.
-**	Current ffmpeg 0.10 and libav-0.8 has problems with this.
-**	Split the packet into single picture packets.
-**
-**	FIXME: there are stations which have multiple pictures and
-**	the last picture incomplete in the PES packet.
-**
-**	FIXME: move function call into PlayVideo, than the hardware
-**	decoder didn't need to support multiple frames decoding.
-**
-**	@param avpkt	ffmpeg a/v packet
-*/
-static void FixPacketForFFMpeg(VideoDecoder * vdecoder, AVPacket * avpkt)
-{
-    uint8_t *p;
-    int n;
-    AVPacket tmp[1];
-    int first;
-
-    p = avpkt->data;
-    n = avpkt->size;
-    *tmp = *avpkt;
-
-    first = 1;
-#if STILL_DEBUG>1
-    if (InStillPicture) {
-	fprintf(stderr, "fix(%d): ", n);
-    }
-#endif
-
-    while (n > 3) {
-#if STILL_DEBUG>1
-	if (InStillPicture && !p[0] && !p[1] && p[2] == 0x01) {
-	    fprintf(stderr, " %02x", p[3]);
-	}
-#endif
-	// scan for picture header 0x00000100
-	if (!p[0] && !p[1] && p[2] == 0x01 && !p[3]) {
-	    if (first) {
-		first = 0;
-		n -= 4;
-		p += 4;
-		continue;
-	    }
-	    // packet has already an picture header
-	    tmp->size = p - tmp->data;
-#if STILL_DEBUG>1
-	    if (InStillPicture) {
-		fprintf(stderr, "\nfix:%9d,%02x %02x %02x %02x\n", tmp->size,
-		    tmp->data[0], tmp->data[1], tmp->data[2], tmp->data[3]);
-	    }
-#endif
-	    CodecVideoDecode(vdecoder, tmp);
-	    // time-stamp only valid for first packet
-	    tmp->pts = AV_NOPTS_VALUE;
-	    tmp->dts = AV_NOPTS_VALUE;
-	    tmp->data = p;
-	    tmp->size = n;
-	}
-	--n;
-	++p;
-    }
-
-#if STILL_DEBUG>1
-    if (InStillPicture) {
-	fprintf(stderr, "\nfix:%9d.%02x %02x %02x %02x\n", tmp->size,
-	    tmp->data[0], tmp->data[1], tmp->data[2], tmp->data[3]);
-    }
-#endif
-    CodecVideoDecode(vdecoder, tmp);
-}
-
-#endif
 
 /**
 **	Open video stream.
@@ -1861,7 +1729,7 @@ int VideoDecodeInput(VideoStream * stream)
 {
     int filled;
     AVPacket *avpkt;
-    int saved_size;
+    int saved_size = 0;
     int ret = 0;
 
     if (!stream->Decoder) {		// closing
@@ -1872,13 +1740,13 @@ int VideoDecodeInput(VideoStream * stream)
     }
 
     if (stream->Close) {		// close stream request
-	fprintf(stderr, "VideoDecodeInput: close stream request\n");
+//	fprintf(stderr, "VideoDecodeInput: close stream request\n");
 	VideoStreamClose(stream, 1);
 	stream->Close = 0;
 	return 1;
     }
     if (stream->ClearBuffers) {		// clear buffer request
-	fprintf(stderr, "VideoDecodeInput: ClearBuffers stream request\n");
+//	fprintf(stderr, "VideoDecodeInput: ClearBuffers stream request\n");
 	atomic_set(&stream->PacketsFilled, 0);
 	stream->PacketRead = stream->PacketWrite;
 	// FIXME: ->Decoder already checked
@@ -1896,7 +1764,7 @@ int VideoDecodeInput(VideoStream * stream)
 
     filled = atomic_read(&stream->PacketsFilled);
     if (!filled) {
-	fprintf(stderr, "VideoDecodeInput: Nix im Speicher zum decodieren\n");
+//	fprintf(stderr, "VideoDecodeInput: Nix im Speicher zum decodieren\n");
 	return -1;
     }
 #if 0
@@ -1904,7 +1772,7 @@ int VideoDecodeInput(VideoStream * stream)
     if (stream->ClearClose /*|| stream->ClosingStream */ ) {
 	int f;
 
-	fprintf(stderr, "VideoDecodeInput: stream->ClearClose\n");
+//	fprintf(stderr, "VideoDecodeInput: stream->ClearClose\n");
 	// FIXME: during replay all packets are always checked
 
 	// flush buffers, if close is in the queue
@@ -1972,7 +1840,6 @@ int VideoDecodeInput(VideoStream * stream)
         avpkt->stream_index = 0;
 	}
 
-#ifdef USE_PIP
     //fprintf(stderr, "[");
     //DumpMpeg(avpkt->data, avpkt->size);
 #ifdef STILL_DEBUG
@@ -1987,14 +1854,6 @@ int VideoDecodeInput(VideoStream * stream)
     }
     pthread_mutex_unlock(&stream->DecoderLockMutex);
     //fprintf(stderr, "]\n");
-#else
-    // old version
-    if (stream->LastCodecID == AV_CODEC_ID_MPEG2VIDEO) {
-	FixPacketForFFMpeg(stream->Decoder, avpkt);
-    } else {
-	ret = CodecVideoDecode(stream->Decoder, avpkt);
-    }
-#endif
 
     if (stream->LastCodecID == AV_CODEC_ID_MPEG2VIDEO)
         avpkt->size = saved_size;
@@ -2026,13 +1885,7 @@ int VideoGetBuffers(const VideoStream * stream)
 */
 static void StartVideo(void)
 {
-    VideoInit(X11DisplayName);
-#ifdef USE_XLIB_XCB
-    if (ConfigFullscreen) {
-	// FIXME: not good looking, mapped and then resized.
-	VideoSetFullscreen(1);
-    }
-#endif
+    VideoInit();
     VideoOsdInit();
     if (!MyVideoStream->Decoder) {
 	VideoStreamOpen(MyVideoStream);
@@ -2181,7 +2034,7 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
     int z;
     int l;
 
-    if (!stream->Decoder) {		// no x11 video started
+    if (!stream->Decoder) {
 	return size;
     }
     if (stream->SkipStream) {		// skip video stream
@@ -2240,13 +2093,6 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
 //	fprintf(stderr, "PlayVideo3: hard limit buffer full\n");
 	return 0;
     }
-#ifdef USE_SOFTLIMIT
-    // soft limit buffer full
-    if (AudioSyncStream == stream && atomic_read(&stream->PacketsFilled) > 3
-	&& AudioUsedBytes() > AUDIO_MIN_BUFFER_FREE * 2) {
-	return 0;
-    }
-#endif
     // get pts/dts
     pts = AV_NOPTS_VALUE;
     if (data[7] & 0x80) {
@@ -2328,7 +2174,7 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
 	if (stream->CodecID == AV_CODEC_ID_HEVC) {
             VideoNextPacket(stream, AV_CODEC_ID_HEVC);
 	} else {
-            Debug(3, "video: hvec detected\n");
+            Debug(3, "video: hevc detected\n");
             stream->CodecID = AV_CODEC_ID_HEVC;
 	}
 	// SKIP PES header (ffmpeg supports short start code)
@@ -2350,11 +2196,7 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
 	}
 #endif
 	// SKIP PES header, begin of start code
-#ifdef USE_PIP
 	VideoMpegEnqueue(stream, pts, check - 2, l + 2);
-#else
-	VideoEnqueue(stream, pts, check - 2, l + 2);
-#endif
 	return size;
     }
     // this happens when vdr sends incomplete packets
@@ -2362,7 +2204,6 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
 	Debug(3, "video: not detected\n");
 	return size;
     }
-#ifdef USE_PIP
     if (stream->CodecID == AV_CODEC_ID_MPEG2VIDEO) {
 	// SKIP PES header
 	VideoMpegEnqueue(stream, pts, data + 9 + n, size - 9 - n);
@@ -2380,20 +2221,6 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
 	// SKIP PES header
 	VideoEnqueue(stream, pts, data + 9 + n, size - 9 - n);
     }
-#else
-    // SKIP PES header
-    VideoEnqueue(stream, pts, data + 9 + n, size - 9 - n);
-
-    // incomplete packets produce artefacts after channel switch
-    // packet < 65526 is the last split packet, detect it here for
-    // better latency
-    if (size < 65526 && stream->CodecID == AV_CODEC_ID_MPEG2VIDEO) {
-	// mpeg codec supports incomplete packets
-	// waiting for a full complete packages, increases needed delays
-	VideoNextPacket(stream, AV_CODEC_ID_MPEG2VIDEO);
-    }
-#endif
-
     return size;
 }
 
@@ -2520,6 +2347,8 @@ int SetPlayMode(int play_mode)
 	    if (MyVideoStream->Decoder && !MyVideoStream->SkipStream) {
 		// clear buffers on close configured always or replay only
 		if (ConfigVideoClearOnSwitch || MyVideoStream->ClearClose) {
+//			fprintf(stderr, "SetPlayMode ConfigVideoClearOnSwitch: %i play_mode %i\n",
+//				ConfigVideoClearOnSwitch, play_mode);
 		    Clear();		// flush all buffers
 		    MyVideoStream->ClearClose = 0;
 		}
@@ -2930,7 +2759,7 @@ void OsdDrawARGB(int xi, int yi, int height, int width, int pitch,
     const uint8_t * argb, int x, int y)
 {
     // wakeup display for showing remote learning dialog
-    VideoDisplayWakeup();
+//    VideoDisplayWakeup();
     VideoOsdDrawARGB(xi, yi, height, width, pitch, argb, x, y);
 }
 
@@ -2941,16 +2770,9 @@ void OsdDrawARGB(int xi, int yi, int height, int width, int pitch,
 */
 const char *CommandLineHelp(void)
 {
-    return "  -a device\taudio device (fe. alsa: hw:0,0 oss: /dev/dsp)\n"
-	"  -p device\taudio device for pass-through (hw:0,1 or /dev/dsp1)\n"
+    return "  -a device\taudio device (fe. alsa: hw:0,0)\n"
+	"  -p device\taudio device for pass-through (hw:0,1)\n"
 	"  -c channel\taudio mixer channel name (fe. PCM)\n"
-	"  -d display\tdisplay of x11 server (fe. :0.0)\n"
-	"  -f\t\tstart with fullscreen window (only with window manager)\n"
-	"  -g geometry\tx11 window geometry wxh+x+y\n"
-	"  -v device\tvideo driver device (va-api, vdpau, drm, noop)\n"
-	"  -s\t\tstart in suspended mode\n"
-	"  -x\t\tstart x11 server, with -xx try to connect, if this fails\n"
-	"  -X args\tX11 server arguments (f.e. -nocursor)\n"
 	"  -w workaround\tenable/disable workarounds\n"
 	"\tno-hw-decoder\t\tdisable hw decoder, use software decoder only\n"
 	"\tno-mpeg-hw-decoder\tdisable hw decoder for mpeg only\n"
@@ -2960,8 +2782,7 @@ const char *CommandLineHelp(void)
 	"\talsa-no-close-open\tdisable close open to fix alsa no sound bug\n"
 	"\talsa-close-open-delay\tenable close open delay to fix no sound bug\n"
 	"\tignore-repeat-pict\tdisable repeat pict message\n"
-	"\tuse-possible-defect-frames prefer faster channel switch\n"
-	"  -D\t\tstart in detached mode\n";
+	"\tuse-possible-defect-frames prefer faster channel switch\n";
 }
 
 /**
@@ -2975,15 +2796,9 @@ int ProcessArgs(int argc, char *const argv[])
     //
     //	Parse arguments.
     //
-#ifdef __FreeBSD__
-    if (!strcmp(*argv, "softhddevice")) {
-	++argv;
-	--argc;
-    }
-#endif
 
     for (;;) {
-	switch (getopt(argc, argv, "-a:c:d:fg:p:sv:w:xDX:")) {
+	switch (getopt(argc, argv, "-a:c:p:w:")) {
 	    case 'a':			// audio device for pcm
 		AudioSetDevice(optarg);
 		continue;
@@ -2992,39 +2807,6 @@ int ProcessArgs(int argc, char *const argv[])
 		continue;
 	    case 'p':			// pass-through audio device
 		AudioSetPassthroughDevice(optarg);
-		continue;
-#ifdef USE_XLIB_XCB
-	    case 'd':			// x11 display name
-		X11DisplayName = optarg;
-		continue;
-	    case 'f':			// fullscreen mode
-		ConfigFullscreen = 1;
-		continue;
-	    case 'g':			// geometry
-		if (VideoSetGeometry(optarg) < 0) {
-		    fprintf(stderr,
-			_
-			("Bad formated geometry please use: [=][<width>{xX}<height>][{+-}<xoffset>{+-}<yoffset>]\n"));
-		    return 0;
-		}
-		continue;
-#endif
-	    case 'v':			// video driver
-		VideoSetDevice(optarg);
-		continue;
-#ifdef USE_XLIB_XCB
-	    case 'x':			// x11 server
-		ConfigStartX11Server++;
-		continue;
-	    case 'X':			// x11 server arguments
-		X11ServerArguments = optarg;
-		continue;
-#endif
-	    case 's':			// start in suspend mode
-		ConfigStartSuspended = 1;
-		continue;
-	    case 'D':			// start in detached mode
-		ConfigStartSuspended = -1;
 		continue;
 	    case 'w':			// workarounds
 		if (!strcasecmp("no-hw-decoder", optarg)) {
@@ -3044,8 +2826,6 @@ int ProcessArgs(int argc, char *const argv[])
 		    AudioAlsaNoCloseOpen = 1;
 		} else if (!strcasecmp("alsa-close-open-delay", optarg)) {
 		    AudioAlsaCloseOpenDelay = 1;
-		} else if (!strcasecmp("ignore-repeat-pict", optarg)) {
-		    VideoIgnoreRepeatPict = 1;
 		} else if (!strcasecmp("use-possible-defect-frames", optarg)) {
 		    CodecUsePossibleDefectFrames = 1;
 		} else {
@@ -3083,112 +2863,6 @@ int ProcessArgs(int argc, char *const argv[])
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#define XSERVER_MAX_ARGS 512		///< how many arguments support
-
-#ifndef __FreeBSD__
-static const char *X11Server = "/usr/bin/X";	///< default x11 server
-#else
-static const char *X11Server = LOCALBASE "/bin/X";	///< default x11 server
-#endif
-static pid_t X11ServerPid;		///< x11 server pid
-
-/**
-**	USR1 signal handler.
-**
-**	@param sig	signal number
-*/
-static void Usr1Handler(int __attribute__ ((unused)) sig)
-{
-    ++Usr1Signal;
-
-    Debug(3, "x-setup: got signal usr1\n");
-}
-
-/**
-**	Start the X server
-*/
-static void StartXServer(void)
-{
-    struct sigaction usr1;
-    pid_t pid;
-    const char *sval;
-    const char *args[XSERVER_MAX_ARGS];
-    int argn;
-    char *buf;
-    int maxfd;
-    int fd;
-
-    //	X server
-    if (X11Server) {
-	args[0] = X11Server;
-    } else {
-	Error(_("x-setup: No X server configured!\n"));
-	return;
-    }
-
-    argn = 1;
-    if (X11DisplayName) {		// append display name
-	args[argn++] = X11DisplayName;
-	// export display for childs
-	setenv("DISPLAY", X11DisplayName, 1);
-    }
-    //	split X server arguments string into words
-    if ((sval = X11ServerArguments)) {
-	char *s;
-
-#ifndef __FreeBSD__
-	s = buf = strdupa(sval);
-#else
-	s = buf = alloca(strlen(sval) + 1);
-	strcpy(buf, sval);
-#endif
-	while ((sval = strsep(&s, " \t"))) {
-	    args[argn++] = sval;
-
-	    if (argn == XSERVER_MAX_ARGS - 1) {	// argument overflow
-		Error(_("x-setup: too many arguments for xserver\n"));
-		// argn = 1;
-		break;
-	    }
-	}
-    }
-    // FIXME: auth
-    // FIXME: append VTxx
-    args[argn] = NULL;
-
-    //	arm the signal
-    memset(&usr1, 0, sizeof(struct sigaction));
-    usr1.sa_handler = Usr1Handler;
-    sigaction(SIGUSR1, &usr1, NULL);
-
-    Debug(3, "x-setup: Starting X server '%s' '%s'\n", args[0],
-	X11ServerArguments);
-    //	fork
-    if ((pid = fork())) {		// parent
-
-	X11ServerPid = pid;
-	Debug(3, "x-setup: Started x-server pid=%d\n", X11ServerPid);
-
-	return;
-    }
-    // child
-    signal(SIGUSR1, SIG_IGN);		// ignore to force answer
-    //setpgid(0,getpid());
-    setpgid(pid, 0);
-
-    // close all open file-handles
-    maxfd = sysconf(_SC_OPEN_MAX);
-    for (fd = 3; fd < maxfd; fd++) {	// keep stdin, stdout, stderr
-	close(fd);			// vdr should open with O_CLOEXEC
-    }
-
-    //	start the X server
-    execvp(args[0], (char *const *)args);
-
-    Error(_("x-setup: Failed to start X server '%s'\n"), args[0]);
-    exit(-1);
-}
-
 /**
 **	Exit + cleanup.
 */
@@ -3203,52 +2877,13 @@ void SoftHdDeviceExit(void)
 	MyAudioDecoder = NULL;
     }
     NewAudioStream = 0;
-//    av_free_packet(AudioAvPkt);
     av_packet_unref(AudioAvPkt);
 
     StopVideo();
 
     CodecExit();
 
-    if (ConfigStartX11Server) {
-	Debug(3, "x-setup: Stop x11 server\n");
-
-	if (X11ServerPid) {
-	    int waittime;
-	    int timeout;
-	    pid_t wpid;
-	    int status;
-
-	    kill(X11ServerPid, SIGTERM);
-	    waittime = 0;
-	    timeout = 500;		// 0.5s
-	    // wait for x11 finishing, with timeout
-	    do {
-		wpid = waitpid(X11ServerPid, &status, WNOHANG);
-		if (wpid) {
-		    break;
-		}
-		if (waittime++ < timeout) {
-		    usleep(1 * 1000);
-		    continue;
-		}
-		kill(X11ServerPid, SIGKILL);
-	    } while (waittime < timeout);
-	    if (wpid && WIFEXITED(status)) {
-		Debug(3, "x-setup: x11 server exited (%d)\n",
-		    WEXITSTATUS(status));
-	    }
-	    if (wpid && WIFSIGNALED(status)) {
-		Debug(3, "x-setup: x11 server killed (%d)\n",
-		    WTERMSIG(status));
-	    }
-	}
-    }
-
     pthread_mutex_destroy(&SuspendLockMutex);
-#ifdef USE_PIP
-    pthread_mutex_destroy(&PipVideoStream->DecoderLockMutex);
-#endif
     pthread_mutex_destroy(&MyVideoStream->DecoderLockMutex);
 }
 
@@ -3261,42 +2896,24 @@ void SoftHdDeviceExit(void)
 */
 int Start(void)
 {
-    if (ConfigStartX11Server) {
-	StartXServer();
-    }
     CodecInit();
 
     pthread_mutex_init(&MyVideoStream->DecoderLockMutex, NULL);
-#ifdef USE_PIP
-    pthread_mutex_init(&PipVideoStream->DecoderLockMutex, NULL);
-#endif
     pthread_mutex_init(&SuspendLockMutex, NULL);
 
-    if (!ConfigStartSuspended) {
-	// FIXME: AudioInit for HDMI after X11 startup
-	// StartAudio();
 	AudioInit();
 	av_new_packet(AudioAvPkt, AUDIO_BUFFER_SIZE);
 	MyAudioDecoder = CodecAudioNewDecoder();
 	AudioCodecID = AV_CODEC_ID_NONE;
 	AudioChannelID = -1;
 
-	if (!ConfigStartX11Server) {
-	    StartVideo();
-	}
-    } else {
-	MyVideoStream->SkipStream = 1;
-	SkipAudio = 1;
-    }
+    StartVideo();
 
 #ifndef NO_TS_AUDIO
     PesInit(PesDemuxAudio);
 #endif
-    Info(_("[softhddev] ready%s\n"),
-	ConfigStartSuspended ? ConfigStartSuspended ==
-	-1 ? " detached" : " suspended" : "");
 
-    return ConfigStartSuspended;
+    return 0;
 }
 
 /**
@@ -3316,31 +2933,6 @@ void Stop(void)
 */
 void Housekeeping(void)
 {
-    //
-    //	when starting an own X11 server fails, try to connect to a already
-    //	running X11 server.  This can take some time.
-    //
-    if (X11ServerPid) {			// check if X11 server still running
-	pid_t wpid;
-	int status;
-
-	wpid = waitpid(X11ServerPid, &status, WNOHANG);
-	if (wpid) {
-	    if (WIFEXITED(status)) {
-		Debug(3, "x-setup: x11 server exited (%d)\n",
-		    WEXITSTATUS(status));
-	    }
-	    if (WIFSIGNALED(status)) {
-		Debug(3, "x-setup: x11 server killed (%d)\n",
-		    WTERMSIG(status));
-	    }
-	    X11ServerPid = 0;
-	    // video not running
-	    if (ConfigStartX11Server > 1 && !MyVideoStream->HwDecoder) {
-		StartVideo();
-	    }
-	}
-    }
 }
 
 /**
@@ -3348,105 +2940,9 @@ void Housekeeping(void)
 */
 void MainThreadHook(void)
 {
-    if (Usr1Signal) {			// x11 server ready
-	// FIYME: x11 server keeps sending sigusr1 signals
-	signal(SIGUSR1, SIG_IGN);	// ignore further signals
-	Usr1Signal = 0;
-	StartVideo();
-	VideoDisplayWakeup();
-    }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//	Suspend/Resume
-//////////////////////////////////////////////////////////////////////////////
-
-    /// call VDR support function
-extern void DelPip(void);
-
-/**
-**	Suspend plugin.
-**
-**	@param video	suspend closes video
-**	@param audio	suspend closes audio
-**	@param dox11	suspend closes x11 server
-*/
-void Suspend(int video, int audio, int dox11)
-{
-    pthread_mutex_lock(&SuspendLockMutex);
-    if (MyVideoStream->SkipStream && SkipAudio) {	// already suspended
-	pthread_mutex_unlock(&SuspendLockMutex);
-	return;
-    }
-
-    Debug(3, "[softhddev]%s:\n", __FUNCTION__);
-
-#ifdef USE_PIP
-    DelPip();				// must stop PIP
-#endif
-
-    // FIXME: should not be correct, if not both are suspended!
-    // Move down into if (video) ...
-    MyVideoStream->SkipStream = 1;
-    SkipAudio = 1;
-
-    if (audio) {
-	AudioExit();
-	if (MyAudioDecoder) {
-	    CodecAudioClose(MyAudioDecoder);
-	    CodecAudioDelDecoder(MyAudioDecoder);
-	    MyAudioDecoder = NULL;
-	}
-	NewAudioStream = 0;
-//	av_free_packet(AudioAvPkt);
-	av_packet_unref(AudioAvPkt);
-    }
-    if (video) {
-	StopVideo();
-    }
-
-    if (dox11) {
-	// FIXME: stop x11, if started
-    }
-
-    pthread_mutex_unlock(&SuspendLockMutex);
 }
 
 /**
-**	Resume plugin.
-*/
-void Resume(void)
-{
-    if (!MyVideoStream->SkipStream && !SkipAudio) {	// we are not suspended
-	return;
-    }
-
-    Debug(3, "[softhddev]%s:\n", __FUNCTION__);
-
-    pthread_mutex_lock(&SuspendLockMutex);
-    // FIXME: start x11
-
-    if (!MyVideoStream->HwDecoder) {	// video not running
-	StartVideo();
-    }
-    if (!MyAudioDecoder) {		// audio not running
-	// StartAudio();
-	AudioInit();
-	av_new_packet(AudioAvPkt, AUDIO_BUFFER_SIZE);
-	MyAudioDecoder = CodecAudioNewDecoder();
-	AudioCodecID = AV_CODEC_ID_NONE;
-	AudioChannelID = -1;
-    }
-
-    if (MyVideoStream->Decoder) {
-	MyVideoStream->SkipStream = 0;
-    }
-    SkipAudio = 0;
-
-    pthread_mutex_unlock(&SuspendLockMutex);
-}
-
-/*
 **	Get decoder statistics.
 **
 **	@param[out] missed	missed frames
@@ -3465,111 +2961,3 @@ void GetStats(int *missed, int *duped, int *dropped, int *counter)
 	    counter);
     }
 }
-
-/**
-**	Scale the currently shown video.
-**
-**	@param x	video window x coordinate OSD relative
-**	@param y	video window y coordinate OSD relative
-**	@param width	video window width OSD relative
-**	@param height	video window height OSD relative
-*/
-void ScaleVideo(int x, int y, int width, int height)
-{
-    if (MyVideoStream->HwDecoder) {
-	VideoSetOutputPosition(MyVideoStream->HwDecoder, x, y, width, height);
-    }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-//	PIP
-//////////////////////////////////////////////////////////////////////////////
-
-#ifdef USE_PIP
-
-/**
-**	Set PIP position.
-**
-**	@param x		video window x coordinate OSD relative
-**	@param y		video window y coordinate OSD relative
-**	@param width		video window width OSD relative
-**	@param height		video window height OSD relative
-**	@param pip_x		pip window x coordinate OSD relative
-**	@param pip_y		pip window y coordinate OSD relative
-**	@param pip_width	pip window width OSD relative
-**	@param pip_height	pip window height OSD relative
-*/
-void PipSetPosition(int x, int y, int width, int height, int pip_x, int pip_y,
-    int pip_width, int pip_height)
-{
-    if (!MyVideoStream->HwDecoder) {	// video not running
-	return;
-    }
-    ScaleVideo(x, y, width, height);
-
-    if (!PipVideoStream->HwDecoder) {	// pip not running
-	return;
-    }
-    VideoSetOutputPosition(PipVideoStream->HwDecoder, pip_x, pip_y, pip_width,
-	pip_height);
-}
-
-/**
-**	Start PIP stream.
-**
-**	@param x		video window x coordinate OSD relative
-**	@param y		video window y coordinate OSD relative
-**	@param width		video window width OSD relative
-**	@param height		video window height OSD relative
-**	@param pip_x		pip window x coordinate OSD relative
-**	@param pip_y		pip window y coordinate OSD relative
-**	@param pip_width	pip window width OSD relative
-**	@param pip_height	pip window height OSD relative
-*/
-void PipStart(int x, int y, int width, int height, int pip_x, int pip_y,
-    int pip_width, int pip_height)
-{
-    if (!MyVideoStream->HwDecoder) {	// video not running
-	return;
-    }
-
-    if (!PipVideoStream->Decoder) {
-	VideoStreamOpen(PipVideoStream);
-    }
-    PipSetPosition(x, y, width, height, pip_x, pip_y, pip_width, pip_height);
-}
-
-/**
-**	Stop PIP.
-*/
-void PipStop(void)
-{
-    int i;
-
-    if (!MyVideoStream->HwDecoder) {	// video not running
-	return;
-    }
-
-    ScaleVideo(0, 0, 0, 0);
-
-    PipVideoStream->Close = 1;
-    for (i = 0; PipVideoStream->Close && i < 50; ++i) {
-	usleep(1 * 1000);
-    }
-    Info("[softhddev]%s: pip close %dms\n", __FUNCTION__, i);
-}
-
-/**
-**	PIP play video packet.
-**
-**	@param data	data of exactly one complete PES packet
-**	@param size	size of PES packet
-**
-**	@return number of bytes used, 0 if internal buffer are full.
-*/
-int PipPlayVideo(const uint8_t * data, int size)
-{
-    return PlayVideo3(PipVideoStream, data, size);
-}
-
-#endif

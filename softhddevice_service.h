@@ -24,7 +24,6 @@
 
 #define ATMO_GRAB_SERVICE	"SoftHDDevice-AtmoGrabService-v1.0"
 #define ATMO1_GRAB_SERVICE	"SoftHDDevice-AtmoGrabService-v1.1"
-#define OSD_3DMODE_SERVICE	"SoftHDDevice-Osd3DModeService-v1.0"
 
 enum
 { GRAB_IMG_RGBA_FORMAT_B8G8R8A8 };
