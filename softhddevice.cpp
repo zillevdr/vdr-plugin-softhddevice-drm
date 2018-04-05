@@ -119,7 +119,7 @@ volatile char cSoftOsd::Dirty;		///< flag force redraw everything
 void cSoftOsd::SetActive(bool on)
 {
 #ifdef OSD_DEBUG
-    dsyslog("[softhddev]%s: %d level %d\n", __FUNCTION__, on, OsdLevel);
+    dsyslog("[softhddev] OSD %s: %d level %d\n", __FUNCTION__, on, OsdLevel);
 #endif
 
     if (Active() == on) {
@@ -153,7 +153,7 @@ cSoftOsd::cSoftOsd(int left, int top, uint level)
 #ifdef OSD_DEBUG
     /* FIXME: OsdWidth/OsdHeight not correct!
      */
-    dsyslog("[softhddev]%s: %dx%d%+d%+d, %d\n", __FUNCTION__, OsdWidth(),
+    dsyslog("[softhddev] OSD %s: %dx%d%+d%+d, %d\n", __FUNCTION__, OsdWidth(),
 	OsdHeight(), left, top, level);
 #endif
 
@@ -168,7 +168,7 @@ cSoftOsd::cSoftOsd(int left, int top, uint level)
 cSoftOsd::~cSoftOsd(void)
 {
 #ifdef OSD_DEBUG
-    dsyslog("[softhddev]%s: level %d\n", __FUNCTION__, OsdLevel);
+    dsyslog("[softhddev] OSD %s: level %d\n", __FUNCTION__, OsdLevel);
 #endif
 
     SetActive(false);
@@ -181,7 +181,7 @@ cSoftOsd::~cSoftOsd(void)
 eOsdError cSoftOsd::SetAreas(const tArea * areas, int n)
 {
 #ifdef OSD_DEBUG
-    dsyslog("[softhddev]%s: %d areas \n", __FUNCTION__, n);
+    dsyslog("[softhddev] OSD %s: %d areas \n", __FUNCTION__, n);
 #endif
 
     // clear old OSD, when new areas are set
@@ -208,7 +208,7 @@ void cSoftOsd::Flush(void)
     cPixmapMemory *pm;
 
 #ifdef OSD_DEBUG
-    dsyslog("[softhddev]%s: level %d active %d\n", __FUNCTION__, OsdLevel,
+    dsyslog("[softhddev] OSD %s: level %d active %d\n", __FUNCTION__, OsdLevel,
 	Active());
 #endif
 
@@ -224,7 +224,7 @@ void cSoftOsd::Flush(void)
 	static char warned;
 
 	if (!warned) {
-	    dsyslog("[softhddev]%s: FIXME: should be truecolor\n",
+	    dsyslog("[softhddev] OSD %s: FIXME: should be truecolor\n",
 		__FUNCTION__);
 	    warned = 1;
 	}
@@ -314,7 +314,7 @@ void cSoftOsd::Flush(void)
 		}
 	    }
 #ifdef OSD_DEBUG
-	    dsyslog("[softhddev]%s: draw %dx%d%+d%+d bm\n", __FUNCTION__, w, h,
+	    dsyslog("[softhddev] OSD %s: draw %dx%d%+d%+d bm\n", __FUNCTION__, w, h,
 		xs + x1, ys + y1);
 #endif
 	    OsdDrawARGB(0, 0, w, h, w * sizeof(uint32_t), argb, xs + x1,
@@ -396,7 +396,7 @@ void cSoftOsd::Flush(void)
 	    }
 	}
 #ifdef OSD_DEBUG
-	dsyslog("[softhddev]%s: draw %dx%d%+d%+d*%d -> %+d%+d %p\n",
+	dsyslog("[softhddev] OSD %s: draw %dx%d%+d%+d*%d -> %+d%+d %p\n",
 	    __FUNCTION__, w, h, xp, yp, stride, x, y, pm->Data());
 #endif
 	OsdDrawARGB(xp, yp, w, h, stride, pm->Data(), x, y);
@@ -436,7 +436,7 @@ cOsd *cSoftOsdProvider::Osd;		///< single osd
 cOsd *cSoftOsdProvider::CreateOsd(int left, int top, uint level)
 {
 #ifdef OSD_DEBUG
-    dsyslog("[softhddev]%s: %d, %d, %d\n", __FUNCTION__, left, top, level);
+    dsyslog("[softhddev] OSD %s: %d, %d, %d\n", __FUNCTION__, left, top, level);
 #endif
 
     return Osd = new cSoftOsd(left, top, level);
@@ -459,7 +459,7 @@ cSoftOsdProvider::cSoftOsdProvider(void)
 :  cOsdProvider()
 {
 #ifdef OSD_DEBUG
-    dsyslog("[softhddev]%s:\n", __FUNCTION__);
+    dsyslog("[softhddev] OSD %s:\n", __FUNCTION__);
 #endif
 }
 

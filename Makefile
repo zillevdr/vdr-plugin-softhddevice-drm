@@ -11,7 +11,8 @@ PLUGIN = softhddevice
 
 ### Configuration (edit this for your needs)
 
-CONFIG := # -DDEBUG #-DOSD_DEBUG	# enable debug output+functions
+CONFIG := # -DDEBUG 			# enable debug output+functions
+#CONFIG += -DOSD_DEBUG			# enable debug messages OSD
 #CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
 #CONFIG += -DSTILL_DEBUG=2		# still picture debug verbose level
 
