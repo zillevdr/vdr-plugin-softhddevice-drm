@@ -2774,15 +2774,10 @@ const char *CommandLineHelp(void)
 	"  -p device\taudio device for pass-through (hw:0,1)\n"
 	"  -c channel\taudio mixer channel name (fe. PCM)\n"
 	"  -w workaround\tenable/disable workarounds\n"
-	"\tno-hw-decoder\t\tdisable hw decoder, use software decoder only\n"
-	"\tno-mpeg-hw-decoder\tdisable hw decoder for mpeg only\n"
-	"\tstill-hw-decoder\tenable hardware decoder for still-pictures\n"
-	"\tstill-h264-hw-decoder\tenable h264 hw decoder for still-pictures\n"
 	"\talsa-driver-broken\tdisable broken alsa driver message\n"
 	"\talsa-no-close-open\tdisable close open to fix alsa no sound bug\n"
 	"\talsa-close-open-delay\tenable close open delay to fix no sound bug\n"
-	"\tignore-repeat-pict\tdisable repeat pict message\n"
-	"\tuse-possible-defect-frames prefer faster channel switch\n";
+	"\tignore-repeat-pict\tdisable repeat pict message\n";
 }
 
 /**

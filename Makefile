@@ -12,6 +12,7 @@ PLUGIN = softhddevice
 ### Configuration (edit this for your needs)
 
 CONFIG := # -DDEBUG #-DOSD_DEBUG	# enable debug output+functions
+#CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
 #CONFIG += -DSTILL_DEBUG=2		# still picture debug verbose level
 
 CONFIG += -DHAVE_PTHREAD_NAME		# supports new pthread_setname_np

@@ -242,8 +242,10 @@ void DrmSetMode(drmModeModeInfo mode)
 	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
 	uint32_t modeID = 0;
 
-	fprintf(stderr, "Setting mode  %ix%i@%i crtc_id %i plane_id %i connector_id %i\n",
+#ifdef DRM_DEBUG
+	Info(_("[softhddev]: Setting mode  %ix%i@%i crtc_id %i plane_id %i connector_id %i\n"),
 		mode.hdisplay, mode.vdisplay, mode.vrefresh, priv->crtc_id, priv->plane_id, priv->connector_id);
+#endif
 
 	if (!(ModeReq = drmModeAtomicAlloc()))
 		fprintf(stderr, "cannot allocate atomic request (%d): %m\n", errno);
@@ -355,6 +357,12 @@ static int Drm_find_dev()
 		return -errno;
 	}
 
+#ifdef DRM_DEBUG
+	Info(_("[softhddev] DRM have %i connectors, %i crtcs, %i encoders\n"),
+		resources->count_connectors, resources->count_crtcs,
+		resources->count_encoders);
+#endif
+
 	// find all available connectors
 	for (i = 0; i < resources->count_connectors; i++) {
 		connector = drmModeGetConnector(fd_drm, resources->connectors[i]);
@@ -413,8 +421,13 @@ static int Drm_find_dev()
 		uint64_t type = DrmGetPropertyValue(fd_drm, plane_res->planes[j],
 							DRM_MODE_OBJECT_PLANE, "type");
 
-//		fprintf(stderr, "Plane plane_id: %i crtc_id: %i possible_crtcs: %i possible CRTC %i type: %"PRIu64"\n",
-//			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i], type);
+#ifdef DRM_DEBUG // If more then 2 crtcs this must rewriten!!!
+		Info(_("[softhddev] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"),
+			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i],
+			(type == DRM_PLANE_TYPE_PRIMARY) ? "primary plane" :
+			(type == DRM_PLANE_TYPE_OVERLAY) ? "overlay plane" :
+			(type == DRM_PLANE_TYPE_CURSOR) ? "cursor plane" : "No plane type");
+#endif
 
 		if (type == DRM_PLANE_TYPE_PRIMARY && plane->crtc_id == priv->crtc_id) {
 			priv->plane_id = plane->plane_id;
@@ -443,8 +456,10 @@ static int Drm_find_dev()
 	drmModeFreeEncoder(encoder);
 	drmModeFreePlaneResources(plane_res);
 
-	fprintf(stderr, "DRM setup CRTC: %i plane_id: %i osd_plane_id %i\n",
+#ifdef DRM_DEBUG
+	Info(_("[softhddev] DRM setup CRTC: %i plane_id: %i osd_plane_id %i\n"),
 		priv->crtc_id, priv->plane_id, priv->osd_plane_id);
+#endif
 
 	d_priv = priv;
 
@@ -1543,17 +1558,11 @@ void VideoExit(void)
 	drmEventContext ev;
 	struct data_priv *priv = d_priv;
 
-	DrmDecoder *decoder;
-	decoder = DrmDecoders[0];
-
 	if (priv) {
 		// init variables
 		memset(&ev, 0, sizeof(ev));
 		ev.version = DRM_EVENT_CONTEXT_VERSION;
 		ev.page_flip_handler = Drm_page_flip_event;
-
-		fprintf(stderr, "DrmExit: frames in Queue: %i\n",
-			atomic_read(&decoder->SurfacesFilled));
 
 		// if a pageflip is pending, wait for it to complete
 		priv->cleanup = true;

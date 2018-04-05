@@ -16,15 +16,31 @@ GNU Affero General Public License for more details.
 
 Install:
 --------
-
 	git clone https://github.com/zillevdr/vdr-plugin-softhddevice-drm.git
 	cd vdr-plugin-softhddevice-drm
 	make
 	make install
 
+Requirement:
+---------
+        No running X!
+
+	media-video/vdr (version >=2.2.x)
+		Video Disk Recorder - turns a pc into a powerful set top box
+		for DVB.
+		http://www.tvdr.de/
+
+	media-video/ffmpeg (version >=3.0)
+		Complete solution to record, convert and stream audio and
+		video. Includes libavcodec and libswresample.
+		http://ffmpeg.org
+
+	media-libs/alsa-lib
+		Advanced Linux Sound Architecture Library
+		http://www.alsa-project.org
+
 TODO:
 -----
-
 	cleaning
 	Testing
 	other devices
@@ -32,7 +48,6 @@ TODO:
 
 Setup:	environment
 ------
-
 	ALSA_DEVICE=default
 		alsa PCM device name
 	ALSA_PASSTHROUGH_DEVICE=
@@ -44,7 +59,6 @@ Setup:	environment
 
 Setup: /etc/vdr/setup.conf
 ------
-
 	softhddevice.MakePrimary = 0
 	0 = no change, 1 make softhddevice primary at start
 
@@ -93,39 +107,21 @@ Setup: /etc/vdr/setup.conf
 
 Commandline:
 ------------
-
 	Use vdr -h to see the command line arguments supported by the plugin.
 
     -a audio_device
+    -p device for pass-through
+    -c audio mixer channel name
 
 SVDRP:
 ------
-
 	Use 'svdrpsend.pl plug softhddevice HELP'
 	or 'svdrpsend plug softhddevice HELP' to see the SVDRP commands help
 	and which are supported by the plugin.
 
 Known Bugs:
 -----------
-
 	no known bugs
-
-Requires:
----------
-
-	media-video/vdr (version >=2.2.x)
-		Video Disk Recorder - turns a pc into a powerful set top box
-		for DVB.
-		http://www.tvdr.de/
-
-	media-video/ffmpeg (version >=3.0)
-		Complete solution to record, convert and stream audio and
-		video. Includes libavcodec and libswresample.
-		http://ffmpeg.org
-
-	media-libs/alsa-lib
-		Advanced Linux Sound Architecture Library
-		http://www.alsa-project.org
 
 Optional:
 ---------
