@@ -571,12 +571,11 @@ static void Drm_page_flip_event( __attribute__ ((unused)) int fd,
 	struct drm_buf *buf = data;
 
 	priv->pflip_pending = false;
-	if (!priv->cleanup)
-		DrmFrame2Drm();
+	DrmFrame2Drm();
 
-	// FIXME: make this smarter
+	// 20ms is the frame on screen, then it can free for next use
 	if (buf->frame) {
-		usleep(15000);
+		usleep(20000);
 		av_frame_free(&buf->frame);
 	}
 }
@@ -611,8 +610,6 @@ static void *DrmDisplayFrame()
 {
 	struct data_priv *priv = d_priv;
 	DrmDecoder *decoder;
-    int i;
-	uint32_t fb_id;
 
 	// Thread setcancelstate
 	pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
@@ -627,18 +624,6 @@ static void *DrmDisplayFrame()
 	while (1){
 		if (drmHandleEvent(priv->fd_drm, &priv->ev) != 0)
 			fprintf(stderr, "DrmDisplayFrame: drmHandleEvent failed!\n");
-
-		fb_id = DrmGetPropertyValue(priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "FB_ID");
-
-		// Destroy FBs
-		if (priv->prime_buffers && priv->buf_black.fb_id == fb_id) {
-			for (i = 0; i < priv->prime_buffers; ++i) {
-				DrmDestroyFB(priv->fd_drm, &priv->bufs[i]);
-			}
-			priv->prime_buffers = 0;
-			priv->front_buf = 0;
-		}
 
 		// Destroy black FB
 		if (decoder->StartCounter == 2 && priv->buf_black.fb_id != 0) {
@@ -667,6 +652,15 @@ static void DrmFrame2Drm(void)
 dequeue:
 	fb_id = DrmGetPropertyValue(priv->fd_drm, priv->plane_id,
 						DRM_MODE_OBJECT_PLANE, "FB_ID");
+
+	// Destroy FBs
+	if (priv->prime_buffers && priv->buf_black.fb_id == fb_id) {
+		for (i = 0; i < priv->prime_buffers; ++i) {
+			DrmDestroyFB(priv->fd_drm, &priv->bufs[i]);
+		}
+		priv->prime_buffers = 0;
+		priv->front_buf = 0;
+	}
 
 //	if (fb_id != priv->act_fb_id)
 //		fprintf(stderr, "DrmFrame2Drm: FB page flip pending akt fb_id %i act_fb_id %i\n",

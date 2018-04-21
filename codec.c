@@ -1111,6 +1111,8 @@ void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 	    audio_ctx->channels, frame->nb_samples, plane_sz, data_sz);
     }
 
+//	fprintf(stderr, "CodecAudioDecode: avpkt->pts %"PRIu64"\n", avpkt->pts);
+
     if (audio_decoder->Resample) {
 	uint8_t outbuf[8192 * 2 * 8];
 	uint8_t *out[1];
