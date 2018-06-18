@@ -84,9 +84,6 @@ extern void CodecAudioOpen(AudioDecoder *, int);
     /// Close audio codec.
 extern void CodecAudioClose(AudioDecoder *);
 
-    /// Set audio drift correction.
-extern void CodecSetAudioDrift(int);
-
     /// Set audio pass-through.
 extern void CodecSetAudioPassthrough(int);
 

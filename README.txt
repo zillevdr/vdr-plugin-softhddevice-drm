@@ -30,9 +30,9 @@ Requirement:
 		for DVB.
 		http://www.tvdr.de/
 
-	media-video/ffmpeg (version >=3.0)
+	media-video/ffmpeg (version >=4.0)
 		Complete solution to record, convert and stream audio and
-		video. Includes libavcodec and libswresample.
+		video. Includes libavcodec and libavfilter.
 		http://ffmpeg.org
 
 	media-libs/alsa-lib

@@ -27,13 +27,12 @@
 //	Prototypes
 //----------------------------------------------------------------------------
 
-extern void AudioEnqueue(const void *, int);	///< buffer audio samples
+extern void AudioEnqueue(const void *, int, AVFrame *);	///< buffer audio samples
 extern void AudioFlushBuffers(void);	///< flush audio buffers
 extern void AudioPoller(void);		///< poll audio events/handling
 extern int AudioFreeBytes(void);	///< free bytes in audio output
 extern int AudioUsedBytes(void);	///< used bytes in audio output
 extern int64_t AudioGetDelay(void);	///< get current audio delay
-extern void AudioSetClock(int64_t);	///< set audio clock base
 extern int64_t AudioGetClock();		///< get current audio clock
 extern void AudioSetVolume(int);	///< set volume
 extern int AudioSetup(int *, int *, int);	///< setup audio output
@@ -46,6 +45,7 @@ extern void AudioSetSoftvol(int);	///< enable/disable softvol
 extern void AudioSetNormalize(int, int);	///< set normalize parameters
 extern void AudioSetCompression(int, int);	///< set compression parameters
 extern void AudioSetStereoDescent(int);	///< set stereo loudness descent
+extern void AudioSetEq(int[17], int);  /// Set audio equalizer.
 
 extern void AudioSetDevice(const char *);	///< set PCM audio device
 

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2018-04-05 11:17+0200\n"
+"POT-Creation-Date: 2018-04-22 18:23+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -122,25 +122,6 @@ msgid "audio/alsa: start delay %ums\n"
 msgstr ""
 
 #, c-format
-msgid "audio/alsa: snd_pcm_pause(): %s\n"
-msgstr ""
-
-#, c-format
-msgid "audio/alsa: snd_pcm_prepare(): %s\n"
-msgstr ""
-
-msgid "audio/alsa: still paused\n"
-msgstr ""
-
-#, c-format
-msgid "snd_pcm_pause(): %s\n"
-msgstr ""
-
-#, c-format
-msgid "snd_pcm_drop(): %s\n"
-msgstr ""
-
-#, c-format
 msgid "audio: can't set channels %d sample-rate %dHz\n"
 msgstr ""
 
@@ -184,12 +165,6 @@ msgid "codec: can't allocate audio codec context\n"
 msgstr ""
 
 msgid "codec: can't open audio codec\n"
-msgstr ""
-
-msgid "codec/audio: decoded data smaller than encoded\n"
-msgstr ""
-
-msgid "codec/audio: can't setup resample\n"
 msgstr ""
 
 msgid "codec/audio: latm\n"
@@ -351,9 +326,6 @@ msgstr "Audio"
 msgid "Audio/Video delay (ms)"
 msgstr "Audio/Video Verzögerung (ms)"
 
-msgid "Audio drift correction"
-msgstr "Audio Driftkorrektur"
-
 msgid "Pass-through default"
 msgstr "Pass-Through-Standard"
 
@@ -398,6 +370,66 @@ msgstr "Audio Puffergröße (ms)"
 
 msgid "Enable automatic AES"
 msgstr "Aktiviere automatiche AES"
+
+msgid "Audio Filter"
+msgstr ""
+
+msgid " Enable Audio Equalizer"
+msgstr ""
+
+msgid "  65 Hz band gain"
+msgstr ""
+
+msgid "  92 Hz band gain"
+msgstr ""
+
+msgid "  131 Hz band gain"
+msgstr ""
+
+msgid "  185 Hz band gain"
+msgstr ""
+
+msgid "  262 Hz band gain"
+msgstr ""
+
+msgid "  370 Hz band gain"
+msgstr ""
+
+msgid "  523 Hz band gain"
+msgstr ""
+
+msgid "  740 Hz band gain"
+msgstr ""
+
+msgid "  1047 Hz band gain"
+msgstr ""
+
+msgid "  1480 Hz band gain"
+msgstr ""
+
+msgid "  2093 Hz band gain"
+msgstr ""
+
+msgid "  2960 Hz band gain"
+msgstr ""
+
+msgid "  4186 Hz band gain"
+msgstr ""
+
+msgid "  5920 Hz band gain"
+msgstr ""
+
+msgid "  8372 Hz band gain"
+msgstr ""
+
+msgid "  11840 Hz band gain"
+msgstr ""
+
+msgid "  16744 Hz band gain"
+msgstr ""
+
+msgid "  20000 Hz band gain"
+msgstr ""
 
 #, c-format
 msgid " Frames missed(%d) duped(%d) dropped(%d) total(%d)"
@@ -469,6 +501,9 @@ msgstr ""
 
 msgid "softhddev: grab unsupported\n"
 msgstr ""
+
+#~ msgid "Audio drift correction"
+#~ msgstr "Audio Driftkorrektur"
 
 #~ msgid "SoftHdDevice"
 #~ msgstr "SoftHdDevice"

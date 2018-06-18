@@ -310,6 +310,7 @@ void DrmSetBuf(struct drm_buf *buf)
 static int Drm_find_dev()
 {
 	struct data_priv *priv;
+	drmVersion *version;
 	drmModeRes *resources;
 	drmModeConnector *connector;
 	drmModeEncoder *encoder = 0;
@@ -327,6 +328,9 @@ static int Drm_find_dev()
 		fprintf(stderr, "cannot open /dev/dri/card0: %m\n");
 		return -errno;
 	}
+
+	version = drmGetVersion(fd_drm);
+//	fprintf(stderr, "open /dev/dri/card0: %i %s\n", version->name_len, version->name);
 
 	// allocate mem for d_priv
 	priv = (struct data_priv *) malloc(sizeof(struct data_priv));
@@ -860,8 +864,8 @@ static void DrmDisplayHandlerThread(void)
     // manage fill frame output ring buffer
     filled = atomic_read(&decoder->SurfacesFilled);
 
-//    if (filled < VIDEO_SURFACES_MAX - 1) {
-    if ((filled < VIDEO_SURFACES_MAX - 1) && VideoGetBuffers(decoder->Stream)) {
+    if (filled < VIDEO_SURFACES_MAX - 1) {
+//    if ((filled < VIDEO_SURFACES_MAX - 1) && VideoGetBuffers(decoder->Stream)) {
 		// FIXME: hot polling
 		// fetch+decode or reopen
 		err = VideoDecodeInput(decoder->Stream);
@@ -882,8 +886,6 @@ static void DrmDisplayHandlerThread(void)
 ///
 ///	Clear the OSD.
 ///
-///	@todo I use glTexImage2D to clear the texture, are there faster and
-///	better ways to clear a texture?
 ///
 void VideoOsdClear(void)
 {
@@ -1046,6 +1048,7 @@ static void *VideoDisplayHandlerThread(void *dummy)
 ///
 static void VideoThreadInit(void)
 {
+//	fprintf(stderr, "[video.c]: VideoThreadInit\n");
     pthread_mutex_init(&VideoMutex, NULL);
     pthread_mutex_init(&VideoLockMutex, NULL);
     pthread_cond_init(&VideoWakeupCond, NULL);
@@ -1305,9 +1308,9 @@ void VideoResetStart(VideoHwDecoder * decoder)
 void VideoSetTrickSpeed(VideoHwDecoder * decoder, int speed)
 {
     Debug(3, "video: set trick-speed %d\n", speed);
+//	fprintf(stderr, "video: set trick-speed %d\n", speed);
     decoder->TrickSpeed = speed;
     decoder->TrickCounter = speed;
-//	fprintf(stderr, "DrmSetTrickSpeed set to: %i\n", speed);
     if (speed) {
 		decoder->Closing = 0;
     }

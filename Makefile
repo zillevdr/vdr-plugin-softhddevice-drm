@@ -7,7 +7,7 @@
 # This name will be used in the '-P...' option of VDR to load the plugin.
 # By default the main source file also carries this name.
 
-PLUGIN = softhddevice
+PLUGIN = softhddevice-drm
 
 ### Configuration (edit this for your needs)
 
@@ -20,8 +20,6 @@ CONFIG += -DHAVE_PTHREAD_NAME		# supports new pthread_setname_np
 #CONFIG += -DNO_TS_AUDIO		# disable ts audio parser
 #CONFIG += -DUSE_TS_VIDEO		# build new ts video parser
 CONFIG += -DUSE_MPEG_COMPLETE		# support only complete mpeg packets
-CONFIG += -DH264_EOS_TRICKSPEED		# insert seq end packets for trickspeed
-#CONDIF += -DDUMP_TRICKSPEED		# dump trickspeed packets
 CONFIG += -DUSE_VDR_SPU			# use VDR SPU decoder.
 
 ### The version number of this plugin (taken from the main source file):
@@ -70,8 +68,8 @@ SOFILE = libvdr-$(PLUGIN).so
 
 ### softhddevice config
 
-_CFLAGS += $(shell pkg-config --cflags alsa libavcodec libswresample libdrm)
-LIBS += $(shell pkg-config --libs alsa libavcodec libswresample libdrm)
+_CFLAGS += $(shell pkg-config --cflags alsa libavcodec libavfilter libdrm)
+LIBS += $(shell pkg-config --libs alsa libavcodec libavfilter libdrm)
 
 ### Includes and Defines (add further entries here):
 

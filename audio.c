@@ -57,6 +57,12 @@
 #endif
 #endif
 
+#include <libavutil/channel_layout.h>
+#include <libavutil/opt.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
+
 #include "iatomic.h"			// portable atomic_t
 
 #include "ringbuffer.h"
@@ -138,6 +144,14 @@ static int AudioChannelMatrix[AudioRatesMax][9];
 static const unsigned AudioRatesTable[AudioRatesMax] = {
     44100, 48000, 192000
 };
+
+//int AudioFilter;
+AVFilterGraph *filter_graph;
+AVFilterContext *abuffersrc_ctx, *abuffersink_ctx;
+int FilterInit;
+float AudioEqBand[18];
+int AudioEq;
+int Filterchanged;
 
 //----------------------------------------------------------------------------
 //	filter
@@ -264,28 +278,28 @@ static void AudioCompressor(int16_t * samples, int count)
     // find loudest sample
     max_sample = 0;
     for (i = 0; i < count / AudioBytesProSample; ++i) {
-	int t;
+		int t;
 
-	t = abs(samples[i]);
-	if (t > max_sample) {
-	    max_sample = t;
-	}
+		t = abs(samples[i]);
+		if (t > max_sample) {
+			max_sample = t;
+		}
     }
 
     // calculate compression factor
     if (max_sample > 0) {
-	factor = (INT16_MAX * 1000) / max_sample;
-	// smooth compression (FIXME: make configurable?)
-	AudioCompressionFactor =
-	    (AudioCompressionFactor * 950 + factor * 50) / 1000;
-	if (AudioCompressionFactor > factor) {
-	    AudioCompressionFactor = factor;	// no clipping
-	}
-	if (AudioCompressionFactor > AudioMaxCompression) {
-	    AudioCompressionFactor = AudioMaxCompression;
-	}
+		factor = (INT16_MAX * 1000) / max_sample;
+		// smooth compression (FIXME: make configurable?)
+		AudioCompressionFactor =
+			(AudioCompressionFactor * 950 + factor * 50) / 1000;
+		if (AudioCompressionFactor > factor) {
+			AudioCompressionFactor = factor;	// no clipping
+		}
+		if (AudioCompressionFactor > AudioMaxCompression) {
+			AudioCompressionFactor = AudioMaxCompression;
+		}
     } else {
-	return;				// silent nothing todo
+		return;				// silent nothing todo
     }
 
     Debug(4, "audio/compress: max %5d, fac=%6.3f, com=%6.3f\n", max_sample,
@@ -293,15 +307,15 @@ static void AudioCompressor(int16_t * samples, int count)
 
     // apply compression factor
     for (i = 0; i < count / AudioBytesProSample; ++i) {
-	int t;
+		int t;
 
-	t = (samples[i] * AudioCompressionFactor) / 1000;
-	if (t < INT16_MIN) {
-	    t = INT16_MIN;
-	} else if (t > INT16_MAX) {
-	    t = INT16_MAX;
-	}
-	samples[i] = t;
+		t = (samples[i] * AudioCompressionFactor) / 1000;
+		if (t < INT16_MIN) {
+			t = INT16_MIN;
+		} else if (t > INT16_MAX) {
+			t = INT16_MAX;
+		}
+		samples[i] = t;
     }
 }
 
@@ -312,7 +326,7 @@ static void AudioResetCompressor(void)
 {
     AudioCompressionFactor = 2000;
     if (AudioCompressionFactor > AudioMaxCompression) {
-	AudioCompressionFactor = AudioMaxCompression;
+		AudioCompressionFactor = AudioMaxCompression;
     }
 }
 
@@ -553,6 +567,200 @@ static void AudioResample(const int16_t * in, int in_chan, int frames,
 }
 
 #endif
+
+/**
+**	Set filter bands.
+**
+**	@param band		setting frequenz bands
+*/
+void AudioSetEq(int band[17], int onoff)
+{
+	int i;
+
+/*	fprintf(stderr, "AudioSetEq %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i onoff %d\n",
+		band[0], band[1], band[2], band[3], band[4], band[5], band[6], band[7],
+		band[8], band[9], band[10], band[11], band[12], band[13], band[14],
+		band[15], band[16], band[17], onoff);
+*/
+    for (i = 0; i < 18; i++) {
+		switch (band[i]) {
+			case 10:
+				AudioEqBand[i] = 6;
+				break;
+			case 9:
+				AudioEqBand[i] = 5.5;
+				break;
+			case 8:
+				AudioEqBand[i] = 5;
+				break;
+			case 7:
+				AudioEqBand[i] = 4.5;
+				break;
+			case 6:
+				AudioEqBand[i] = 4;
+				break;
+			case 5:
+				AudioEqBand[i] = 3.5;
+				break;
+			case 4:
+				AudioEqBand[i] = 3;
+				break;
+			case 3:
+				AudioEqBand[i] = 2.5;
+				break;
+			case 2:
+				AudioEqBand[i] = 2;
+				break;
+			case 1:
+				AudioEqBand[i] = 1.5;
+				break;
+			case 0:
+				AudioEqBand[i] = 1;
+				break;
+			case -1:
+				AudioEqBand[i] = 0.95;
+				break;
+			case -2:
+				AudioEqBand[i] = 0.9;
+				break;
+			case -3:
+				AudioEqBand[i] = 0.85;
+				break;
+			case -4:
+				AudioEqBand[i] = 0.8;
+				break;
+			case -5:
+				AudioEqBand[i] = 0.75;
+				break;
+			case -6:
+				AudioEqBand[i] = 0.7;
+				break;
+			case -7:
+				AudioEqBand[i] = 0.65;
+				break;
+			case -8:
+				AudioEqBand[i] = 0.6;
+				break;
+			case -9:
+				AudioEqBand[i] = 0.55;
+				break;
+			case -10:
+				AudioEqBand[i] = 0.5;
+				break;
+		}
+	}
+
+/*		fprintf(stderr, "1b=%.2f 2b=%.2f 3b=%.2f 4b=%.2f 5b=%.2f 6b=%.2f"
+			" 7b=%.2f 8b=%.2f 9b=%.2f 10b=%.2f 11b=%.2f 12b=%.2f 13b=%.2f"
+			" 14b=%.2f 15b=%.2f 16b=%.2f 17b=%.2f 18b=%.2f\n",
+			AudioEqBand[0], AudioEqBand[1], AudioEqBand[2], AudioEqBand[3],
+			AudioEqBand[4], AudioEqBand[5], AudioEqBand[6], AudioEqBand[7],
+			AudioEqBand[8], AudioEqBand[9], AudioEqBand[10], AudioEqBand[11],
+			AudioEqBand[12], AudioEqBand[13], AudioEqBand[14], AudioEqBand[15],
+			AudioEqBand[16], AudioEqBand[17]);
+*/
+	if (AudioEq && onoff)
+		Filterchanged = 1;
+	AudioEq = onoff;
+}
+
+/**
+**	Filter init.
+*/
+static int AudioFilterInit(AVFrame *frame)
+{
+	const AVFilter  *abuffer;
+	AVFilterContext *filter_ctx[3];
+	const AVFilter *eq;
+	const AVFilter *aformat;
+	const AVFilter *abuffersink;
+	char ch_layout[64];
+	char options_str[1024];
+	int err, i, n_filter = 0;
+
+#if LIBAVFILTER_VERSION_INT < AV_VERSION_INT(7,16,100)
+	avfilter_register_all();
+#endif
+
+	if (!(filter_graph = avfilter_graph_alloc()))
+		fprintf(stderr, "Unable to create filter graph.\n");
+
+	// input buffer
+	if (!(abuffer = avfilter_get_by_name("abuffer")))
+		fprintf(stderr, "Could not find the abuffer filter.\n");
+	if (!(abuffersrc_ctx = avfilter_graph_alloc_filter(filter_graph, abuffer, "src")))
+		fprintf(stderr, "Could not allocate the abuffersrc_ctx instance.\n");
+	av_get_channel_layout_string(ch_layout, sizeof(ch_layout), frame->channels, frame->channel_layout);
+//	fprintf(stderr, "CodecAudioFilterInit: ch_layout %s sample_fmt %s sample_rate %d\n",
+//		ch_layout, av_get_sample_fmt_name(frame->format), frame->sample_rate);
+	av_opt_set    (abuffersrc_ctx, "channel_layout", ch_layout,                             AV_OPT_SEARCH_CHILDREN);
+	av_opt_set    (abuffersrc_ctx, "sample_fmt",     av_get_sample_fmt_name(frame->format), AV_OPT_SEARCH_CHILDREN);
+	av_opt_set_q  (abuffersrc_ctx, "time_base",      (AVRational){ 1, frame->sample_rate }, AV_OPT_SEARCH_CHILDREN);
+	av_opt_set_int(abuffersrc_ctx, "sample_rate",    frame->sample_rate,                    AV_OPT_SEARCH_CHILDREN);
+	// initialize the filter with NULL options, set all options above.
+	if (avfilter_init_str(abuffersrc_ctx, NULL) < 0)
+		fprintf(stderr, "Could not initialize the abuffer filter.\n");
+
+	if (AudioEq) {
+		// superequalizer
+		if (!(eq = avfilter_get_by_name("superequalizer")))
+			fprintf(stderr, "Could not find the superequalizer filter.\n");
+		if (!(filter_ctx[n_filter] = avfilter_graph_alloc_filter(filter_graph, eq, "superequalizer")))
+			fprintf(stderr, "Could not allocate the superequalizer instance.\n");
+		snprintf(options_str, sizeof(options_str),"1b=%.2f:2b=%.2f:3b=%.2f:4b=%.2f:5b=%.2f"
+			":6b=%.2f:7b=%.2f:8b=%.2f:9b=%.2f:10b=%.2f:11b=%.2f:12b=%.2f:13b=%.2f:14b=%.2f:"
+			"15b=%.2f:16b=%.2f:17b=%.2f:18b=%.2f", AudioEqBand[0], AudioEqBand[1],
+			AudioEqBand[2], AudioEqBand[3], AudioEqBand[4], AudioEqBand[5],
+			AudioEqBand[6], AudioEqBand[7], AudioEqBand[8], AudioEqBand[9],
+			AudioEqBand[10], AudioEqBand[11], AudioEqBand[12], AudioEqBand[13],
+			AudioEqBand[14], AudioEqBand[15], AudioEqBand[16], AudioEqBand[17]);
+		if (avfilter_init_str(filter_ctx[n_filter], options_str) < 0)
+			fprintf(stderr, "Could not initialize the superequalizer filter.\n");
+		n_filter++;
+	}
+	// aformat
+	if (!(aformat = avfilter_get_by_name("aformat")))
+		fprintf(stderr, "Could not find the aformat filter.\n");
+	if (!(filter_ctx[n_filter] = avfilter_graph_alloc_filter(filter_graph, aformat, "aformat")))
+		fprintf(stderr, "Could not allocate the aformat instance.\n");
+	snprintf(options_str, sizeof(options_str),
+		"sample_fmts=%s:sample_rates=%d:channel_layouts=%s",
+		av_get_sample_fmt_name(AV_SAMPLE_FMT_S16),
+		frame->sample_rate, ch_layout);
+	if (avfilter_init_str(filter_ctx[n_filter], options_str) < 0)
+		fprintf(stderr, "Could not initialize the aformat filter.\n");
+	n_filter++;
+
+	// abuffersink
+	if (!(abuffersink = avfilter_get_by_name("abuffersink")))
+		fprintf(stderr, "Could not find the abuffersink filter.\n");
+	if (!(filter_ctx[n_filter] = avfilter_graph_alloc_filter(filter_graph, abuffersink, "sink")))
+		fprintf(stderr, "Could not allocate the abuffersink instance.\n");
+	if (avfilter_init_str(filter_ctx[n_filter], NULL) < 0)
+		fprintf(stderr, "Could not initialize the abuffersink instance.\n");
+	n_filter++;
+
+	// Connect the filters
+	for (i = 0; i < n_filter; i++) {
+		if (i == 0) {
+			err = avfilter_link(abuffersrc_ctx, 0, filter_ctx[i], 0);
+		} else {
+			err = avfilter_link(filter_ctx[i - 1], 0, filter_ctx[i], 0);
+		}
+	}
+	if (err < 0)
+		fprintf(stderr, "Error connecting audio filters\n");
+
+	// Configure the graph.
+	if (avfilter_graph_config(filter_graph, NULL) < 0)
+		fprintf(stderr, "Error configuring the audio filter graph\n");
+
+	abuffersink_ctx = filter_ctx[n_filter - 1];
+	Filterchanged = 0;
+	FilterInit = 1;
+
+	return 0;
+}
 
 //----------------------------------------------------------------------------
 //	ring buffer
@@ -1279,7 +1487,7 @@ static int AlsaSetup(int *freq, int *channels, int passthrough)
 /**
 **	Play audio.
 */
-static void AlsaPlay(void)
+/*static void AlsaPlay(void)
 {
     int err;
 
@@ -1297,12 +1505,12 @@ static void AlsaPlay(void)
 	Error(_("audio/alsa: still paused\n"));
     }
 #endif
-}
+}*/
 
 /**
 **	Pause audio.
 */
-static void AlsaPause(void)
+/*static void AlsaPause(void)
 {
     int err;
 
@@ -1315,7 +1523,7 @@ static void AlsaPause(void)
 	    Error(_("snd_pcm_drop(): %s\n"), snd_strerror(err));
 	}
     }
-}
+}*/
 
 /**
 **	Empty log callback
@@ -1578,120 +1786,180 @@ static void AudioExitThread(void)
 **	@param samples	sample buffer
 **	@param count	number of bytes in sample buffer
 */
-void AudioEnqueue(const void *samples, int count)
+void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFrame *inframe)
 {
     size_t n;
     int16_t *buffer;
+	AVFrame *outframe = NULL;
+	int err;
+
+	outframe  = av_frame_alloc();
+
+	if (inframe) {
+	if (inframe->sample_rate != (int)AudioRing[AudioRingWrite].HwSampleRate) {
+//		fprintf(stderr, "audio: AudioEnqueue sample_rate changed!!!\n");
+		AudioSetup(&inframe->sample_rate, &inframe->channels, 0);
+	}
+
+	if (FilterInit && (inframe->sample_rate != filter_graph->sink_links[0]->sample_rate
+		|| Filterchanged)) {
+		avfilter_graph_free(&filter_graph);
+		FilterInit = 0;
+//		fprintf(stderr, "audio: AudioEnqueue Free the filter graph.\n");
+	}
+
+	if (!FilterInit) {
+		AudioFilterInit(inframe);
+//		fprintf(stderr, "audio: AudioFilterInit\n");
+	}
+	if (av_buffersrc_add_frame(abuffersrc_ctx, inframe) < 0)
+		fprintf(stderr, "audio: Error submitting the frame to the filtergraph\n");
+	while ((err = av_buffersink_get_frame(abuffersink_ctx, outframe)) >= 0) {
+		if (err < 0)
+			fprintf(stderr, "audio: Error processing the filtered frame\n");
+	}
+/*	if (err == AVERROR(EAGAIN)) {
+		fprintf(stderr, "audio: Error filtering AVERROR(EAGAIN)\n");
+	} else if (err == AVERROR_EOF) {
+		fprintf(stderr, "audio: Error filtering AVERROR_EOF\n");
+	} else if (err < 0) {
+		fprintf(stderr, "audio: Error filtering the data\n");
+	}*/
+	} // Hack if (inframe)
+
+	if (outframe->channels) {
+/*		fprintf(stderr, "codec/audio in %s %dHz *%d NS %i linesize %d out %s %dHz *%d NS %i linesize %d count %d\n",
+			av_get_sample_fmt_name(inframe->format), inframe->sample_rate,
+			inframe->channels, inframe->nb_samples, inframe->linesize[0],
+			av_get_sample_fmt_name(outframe->format), outframe->sample_rate,
+			outframe->channels, outframe->nb_samples, outframe->linesize[0],
+			count);*/
 
 #ifdef noDEBUG
-    static uint32_t last_tick;
-    uint32_t tick;
+		static uint32_t last_tick;
+		uint32_t tick;
 
-    tick = GetMsTicks();
-    if (tick - last_tick > 101) {
-	Debug(3, "audio: enqueue %4d %dms\n", count, tick - last_tick);
-    }
-    last_tick = tick;
+		tick = GetMsTicks();
+		if (tick - last_tick > 101) {
+			Debug(3, "audio: enqueue %4d %dms\n", count, tick - last_tick);
+		}
+		last_tick = tick;
 #endif
 
-    if (!AudioRing[AudioRingWrite].HwSampleRate) {
-	Debug(3, "audio: enqueue not ready\n");
-	return;				// no setup yet
-    }
-    // save packet size
-    if (!AudioRing[AudioRingWrite].PacketSize) {
-	AudioRing[AudioRingWrite].PacketSize = count;
-	Debug(3, "audio: a/v packet size %d bytes\n", count);
-    }
-    // audio sample modification allowed and needed?
-    buffer = (void *)samples;
-    if (!AudioRing[AudioRingWrite].Passthrough && (AudioCompression
-	    || AudioNormalize
-	    || AudioRing[AudioRingWrite].InChannels !=
-	    AudioRing[AudioRingWrite].HwChannels)) {
-	int frames;
+		void * data = (void *)outframe->data[0];
+		count = outframe->nb_samples * outframe->channels * 2;
 
-	// resample into ring-buffer is too complex in the case of a roundabout
-	// just use a temporary buffer
-	frames =
-	    count / (AudioRing[AudioRingWrite].InChannels *
-	    AudioBytesProSample);
-	buffer =
-	    alloca(frames * AudioRing[AudioRingWrite].HwChannels *
-	    AudioBytesProSample);
+		if (!AudioRing[AudioRingWrite].HwSampleRate) {
+			Debug(3, "audio: enqueue not ready\n");
+			return;				// no setup yet
+		}
+		// save packet size
+		if (!AudioRing[AudioRingWrite].PacketSize) {
+			AudioRing[AudioRingWrite].PacketSize = count;
+			Debug(3, "audio: a/v packet size %d bytes\n", count);
+//			fprintf(stderr, "audio: AudioEnqueue a/v packet size %d bytes\n", count);
+		}
+		buffer = (void *)data;
+		// audio sample modification allowed and needed?
+		if (!AudioRing[AudioRingWrite].Passthrough && (AudioCompression
+			|| AudioNormalize
+			|| AudioRing[AudioRingWrite].InChannels !=
+			AudioRing[AudioRingWrite].HwChannels)) {
+			int frames;
+			fprintf(stderr, "audio: AudioEnqueue audio sample modification allowed and needed\n");
+
+			// resample into ring-buffer is too complex in the case of a roundabout
+			// just use a temporary buffer
+			frames =
+				count / (AudioRing[AudioRingWrite].InChannels *
+				AudioBytesProSample);
+			buffer =
+				alloca(frames * AudioRing[AudioRingWrite].HwChannels *
+				AudioBytesProSample);
 #ifdef USE_AUDIO_MIXER
-	// Convert / resample input to hardware format
-	AudioResample(samples, AudioRing[AudioRingWrite].InChannels, frames,
-	    buffer, AudioRing[AudioRingWrite].HwChannels);
+			// Convert / resample input to hardware format
+			AudioResample(samples, AudioRing[AudioRingWrite].InChannels, frames,
+				buffer, AudioRing[AudioRingWrite].HwChannels);
 #else
 #ifdef DEBUG
-	if (AudioRing[AudioRingWrite].InChannels !=
-	    AudioRing[AudioRingWrite].HwChannels) {
-	    Debug(3, "audio: internal failure channels mismatch\n");
-	    return;
-	}
+			if (AudioRing[AudioRingWrite].InChannels !=
+				AudioRing[AudioRingWrite].HwChannels) {
+				Debug(3, "audio: internal failure channels mismatch\n");
+				fprintf(stderr, "audio: AudioEnqueue internal failure channels mismatch\n");
+				return;
+			}
 #endif
-	memcpy(buffer, samples, count);
+			memcpy(buffer, samples, count);
 #endif
-	count =
-	    frames * AudioRing[AudioRingWrite].HwChannels *
-	    AudioBytesProSample;
+			count =
+				frames * AudioRing[AudioRingWrite].HwChannels *
+				AudioBytesProSample;
 
-	if (AudioCompression) {		// in place operation
-	    AudioCompressor(buffer, count);
+			if (AudioCompression) {		// in place operation
+				AudioCompressor(buffer, count);
+			}
+			if (AudioNormalize) {		// in place operation
+				AudioNormalizer(buffer, count);
+			}
+		}
+
+/*		fprintf(stderr, "audio: RingBufferWrite count %d PacketSize %d "
+			"RingBufferUsedBytes %6zu RingBufferFreeBytes %zu\n",
+			count, AudioRing[AudioRingWrite].PacketSize,
+			RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer),
+			RingBufferFreeBytes(AudioRing[AudioRingWrite].RingBuffer));*/
+
+		n = RingBufferWrite(AudioRing[AudioRingWrite].RingBuffer, buffer, count);
+		if (n != (size_t) count) {
+			Error(_("audio: can't place %d samples in ring buffer\n"), count);
+			fprintf(stderr, "audio: AudioEnqueue can't place %d samples in ring buffer\n", count);
+			// too many bytes are lost
+			// FIXME: caller checks buffer full.
+			// FIXME: should skip more, longer skip, but less often?
+			// FIXME: round to channel + sample border
+		}
+
+		if (!AudioRunning) {		// check, if we can start the thread
+			int skip;
+
+			n = RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer);
+			skip = AudioSkip;
+			// FIXME: round to packet size
+
+			Debug(3, "audio: start? %4zdms skip %dms\n", (n * 1000)
+				/ (AudioRing[AudioRingWrite].HwSampleRate *
+				AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample),
+				(skip * 1000)
+				/ (AudioRing[AudioRingWrite].HwSampleRate *
+				AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample));
+/*			fprintf(stderr, "audio: AudioEnqueue start? %4zdms skip %dms\n", (n * 1000)
+				/ (AudioRing[AudioRingWrite].HwSampleRate *
+				AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample),
+				(skip * 1000)
+				/ (AudioRing[AudioRingWrite].HwSampleRate *
+				AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample));
+*/
+			if (skip) {
+				if (n < (unsigned)skip) {
+					skip = n;
+				}
+				AudioSkip -= skip;
+				RingBufferReadAdvance(AudioRing[AudioRingWrite].RingBuffer, skip);
+				n = RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer);
+			}
+			// forced start or enough video + audio buffered
+			// for some exotic channels * 4 too small
+			if (AudioStartThreshold * 4 < n || (AudioVideoIsReady
+				&& AudioStartThreshold < n)) {
+				// restart play-back
+				// no lock needed, can wakeup next time
+				AudioRunning = 1;
+				pthread_cond_signal(&AudioStartCond);
+			}
+		}
+		AudioRing[AudioRingWrite].PTS = outframe->pts;
 	}
-	if (AudioNormalize) {		// in place operation
-	    AudioNormalizer(buffer, count);
-	}
-    }
-
-    n = RingBufferWrite(AudioRing[AudioRingWrite].RingBuffer, buffer, count);
-    if (n != (size_t) count) {
-	Error(_("audio: can't place %d samples in ring buffer\n"), count);
-	// too many bytes are lost
-	// FIXME: caller checks buffer full.
-	// FIXME: should skip more, longer skip, but less often?
-	// FIXME: round to channel + sample border
-    }
-
-    if (!AudioRunning) {		// check, if we can start the thread
-	int skip;
-
-	n = RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer);
-	skip = AudioSkip;
-	// FIXME: round to packet size
-
-	Debug(3, "audio: start? %4zdms skip %dms\n", (n * 1000)
-	    / (AudioRing[AudioRingWrite].HwSampleRate *
-		AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample),
-	    (skip * 1000)
-	    / (AudioRing[AudioRingWrite].HwSampleRate *
-		AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample));
-
-	if (skip) {
-	    if (n < (unsigned)skip) {
-		skip = n;
-	    }
-	    AudioSkip -= skip;
-	    RingBufferReadAdvance(AudioRing[AudioRingWrite].RingBuffer, skip);
-	    n = RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer);
-	}
-	// forced start or enough video + audio buffered
-	// for some exotic channels * 4 too small
-	if (AudioStartThreshold * 4 < n || (AudioVideoIsReady
-		&& AudioStartThreshold < n)) {
-	    // restart play-back
-	    // no lock needed, can wakeup next time
-	    AudioRunning = 1;
-	    pthread_cond_signal(&AudioStartCond);
-	}
-    }
-    // Update audio clock (stupid gcc developers thinks INT64_C is unsigned)
-    if (AudioRing[AudioRingWrite].PTS != (int64_t) INT64_C(0x8000000000000000)) {
-	AudioRing[AudioRingWrite].PTS += ((int64_t) count * 90 * 1000)
-	    / (AudioRing[AudioRingWrite].HwSampleRate *
-	    AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample);
-    }
+	av_frame_unref(outframe);
 }
 
 /**
@@ -1822,6 +2090,10 @@ void AudioFlushBuffers(void)
     int old;
     int i;
 
+//	fprintf(stderr, "AudioFlushBuffers: AudioFlushBuffers\n");
+	if (FilterInit)
+		Filterchanged = 1;
+
     if (atomic_read(&AudioRingFilled) >= AUDIO_RING_MAX) {
 	// wait for space in ring buffer, should never happen
 	for (i = 0; i < 24 * 2; ++i) {
@@ -1876,6 +2148,7 @@ void AudioFlushBuffers(void)
 void AudioPoller(void)
 {
     // FIXME: write poller
+	fprintf(stderr, "FIXME: write audio poller!\n");
 }
 
 /**
@@ -1924,21 +2197,6 @@ int64_t AudioGetDelay(void)
 	RingBufferUsedBytes(AudioRing[AudioRingRead].RingBuffer), pts / 90);
 
     return pts;
-}
-
-/**
-**	Set audio clock base.
-**
-**	@param pts	audio presentation timestamp
-*/
-void AudioSetClock(int64_t pts)
-{
-    if (AudioRing[AudioRingWrite].PTS != pts) {
-	Debug(4, "audio: set clock %s -> %s pts\n",
-	    Timestamp2String(AudioRing[AudioRingWrite].PTS),
-	    Timestamp2String(pts));
-    }
-    AudioRing[AudioRingWrite].PTS = pts;
 }
 
 /**
@@ -2026,7 +2284,7 @@ void AudioPlay(void)
     }
     Debug(3, "audio: resumed\n");
     AudioPaused = 0;
-    AudioEnqueue(NULL, 0);		// wakeup thread
+    AudioEnqueue(NULL, 0, NULL);		// wakeup thread
 }
 
 /**
@@ -2097,16 +2355,16 @@ void AudioSetNormalize(int onoff, int maxfac)
 void AudioSetCompression(int onoff, int maxfac)
 {
     if (onoff < 0) {
-	AudioCompression ^= 1;
+		AudioCompression ^= 1;
     } else {
-	AudioCompression = onoff;
+		AudioCompression = onoff;
     }
     AudioMaxCompression = maxfac;
     if (!AudioCompressionFactor) {
-	AudioCompressionFactor = 1000;
+		AudioCompressionFactor = 1000;
     }
     if (AudioCompressionFactor > AudioMaxCompression) {
-	AudioCompressionFactor = AudioMaxCompression;
+		AudioCompressionFactor = AudioMaxCompression;
     }
 }
 
@@ -2124,9 +2382,9 @@ void AudioSetStereoDescent(int delta)
 /**
 **	Set pcm audio device.
 **
-**	@param device	name of pcm device (fe. "hw:0,9" or "/dev/dsp")
+**	@param device	name of pcm device (fe. "hw:0,9")
 **
-**	@note this is currently used to select alsa/OSS output module.
+**	@note this is currently used to select alsa output module.
 */
 void AudioSetDevice(const char *device)
 {
@@ -2150,7 +2408,7 @@ void AudioSetPassthroughDevice(const char *device)
 **
 **	@param channel	name of the mixer channel (fe. PCM or Master)
 **
-**	@note this is currently used to select alsa/OSS output module.
+**	@note this is currently used to select alsa output module.
 */
 void AudioSetChannel(const char *channel)
 {
