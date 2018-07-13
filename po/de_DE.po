@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2018-04-22 18:23+0200\n"
+"POT-Creation-Date: 2018-07-13 10:27+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -317,6 +317,9 @@ msgstr "Verstecke Hauptmenüeintrag"
 msgid "Video"
 msgstr "Video"
 
+msgid "Use SW Deinterlacer"
+msgstr ""
+
 msgid "Clear decoder on channel switch"
 msgstr "Decoder bei Kanalwechsel leeren"
 
@@ -490,10 +493,6 @@ msgid "video/DRM: out of memory\n"
 msgstr ""
 
 msgid "video/DRM: decoder not in decoder list.\n"
-msgstr ""
-
-#, c-format
-msgid "video: repeated pict %d found, but not handled\n"
 msgstr ""
 
 msgid "video: out of memory\n"

@@ -262,21 +262,22 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 //		av_log_set_level(AV_LOG_ERROR );
 	}
 
-    if (!(decoder->VideoCtx = avcodec_alloc_context3(decoder->VideoCodec))) {
+	if (!(decoder->VideoCtx = avcodec_alloc_context3(decoder->VideoCodec))) {
 		Fatal(_("codec: can't allocate video codec context\n"));
 		fprintf(stderr, "codec: can't allocate video codec context\n");
     }
 
+//	decoder->VideoCtx->codec_id = codec_id;
 	decoder->VideoCtx->get_format = Codec_get_format;
-    decoder->VideoCtx->opaque = decoder;	// our structure
+	decoder->VideoCtx->opaque = decoder;	// our structure
 
-    pthread_mutex_lock(&CodecLockMutex);
-    // open codec
-    if (avcodec_open2(decoder->VideoCtx, decoder->VideoCodec, NULL) < 0) {
+	pthread_mutex_lock(&CodecLockMutex);
+	// open codec
+	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCodec, NULL) < 0) {
 		Fatal(_("codec: can't open video codec!\n"));
 		fprintf(stderr, "codec: can't open video codec!\n");
-    }
-    pthread_mutex_unlock(&CodecLockMutex);
+	}
+	pthread_mutex_unlock(&CodecLockMutex);
 }
 
 /**

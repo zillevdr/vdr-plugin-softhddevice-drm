@@ -65,6 +65,9 @@ extern void VideoDisplayWakeup(void);
     /// Set audio delay.
 extern void VideoSetAudioDelay(int);
 
+    /// Set use sw deinterlacer.
+extern void VideoSetSWDeinterlacer(int);
+
     /// Clear OSD.
 extern void VideoOsdClear(void);
 

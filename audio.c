@@ -667,7 +667,7 @@ void AudioSetEq(int band[17], int onoff)
 /**
 **	Filter init.
 */
-static int AudioFilterInit(AVFrame *frame)
+void AudioFilterInit(AVFrame *frame)
 {
 	const AVFilter  *abuffer;
 	AVFilterContext *filter_ctx[3];
@@ -758,8 +758,6 @@ static int AudioFilterInit(AVFrame *frame)
 	abuffersink_ctx = filter_ctx[n_filter - 1];
 	Filterchanged = 0;
 	FilterInit = 1;
-
-	return 0;
 }
 
 //----------------------------------------------------------------------------

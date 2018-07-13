@@ -65,6 +65,7 @@ static class cSoftHdDevice *MyDevice;
 static char ConfigMakePrimary;		///< config primary wanted
 static char ConfigHideMainMenuEntry;	///< config hide main menu entry
 
+char ConfigSWDeinterlacer;			///< config use sw deinterlacer
 char ConfigVideoClearOnSwitch;		///< config enable Clear on channel switch
 
 static int ConfigVideoAudioDelay;	///< config audio delay
@@ -490,6 +491,7 @@ class cMenuSetupSoft:public cMenuSetupPage
     int HideMainMenuEntry;
 
     int Video;
+    int SWDeinterlacer;
     int ClearOnSwitch;
 
     int Audio;
@@ -585,6 +587,8 @@ void cMenuSetupSoft::Create(void)
     //
     Add(CollapsedItem(tr("Video"), Video));
     if (Video) {
+	Add(new cMenuEditBoolItem(tr("Use SW Deinterlacer"),
+		&SWDeinterlacer, trVDR("no"), trVDR("yes")));
 	Add(new cMenuEditBoolItem(tr("Clear decoder on channel switch"),
 		&ClearOnSwitch, trVDR("no"), trVDR("yes")));
     }
@@ -714,6 +718,7 @@ cMenuSetupSoft::cMenuSetupSoft(void)
     //	video
     //
     Video = 0;
+    SWDeinterlacer = ConfigSWDeinterlacer;
     ClearOnSwitch = ConfigVideoClearOnSwitch;
 
     //
@@ -753,6 +758,9 @@ void cMenuSetupSoft::Store(void)
 {
     SetupStore("MakePrimary", ConfigMakePrimary = MakePrimary);
     SetupStore("HideMainMenuEntry", ConfigHideMainMenuEntry = HideMainMenuEntry);
+
+    SetupStore("SWDeinterlacer", ConfigSWDeinterlacer = SWDeinterlacer);
+	VideoSetSWDeinterlacer(ConfigSWDeinterlacer);
 
     SetupStore("ClearOnSwitch", ConfigVideoClearOnSwitch = ClearOnSwitch);
 
@@ -1709,6 +1717,11 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
     }
     if (!strcasecmp(name, "HideMainMenuEntry")) {
 	ConfigHideMainMenuEntry = atoi(value);
+	return true;
+    }
+
+    if (!strcasecmp(name, "SWDeinterlacer")) {
+	VideoSetSWDeinterlacer(ConfigSWDeinterlacer = atoi(value));
 	return true;
     }
 

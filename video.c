@@ -54,6 +54,9 @@
 #include <drm_fourcc.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext_drm.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 
 #include "iatomic.h"			// portable atomic_t
 #include "misc.h"
@@ -75,6 +78,7 @@ signed char VideoHardwareDecoder = -1;	///< flag use hardware decoder
 
     /// Default audio/video delay
 int VideoAudioDelay;
+int SWDeinterlacer;
 
 #ifdef DEBUG
 extern uint32_t VideoSwitch;		///< ticks for channel switch
@@ -83,7 +87,7 @@ extern void AudioVideoReady(int64_t);	///< tell audio video is ready
 
 static pthread_t VideoThread;		///< video decode thread
 static pthread_cond_t VideoWakeupCond;	///< wakeup condition variable
-static pthread_mutex_t VideoMutex;	///< video condition mutex
+static pthread_mutex_t VideoDeintMutex;	///< video condition mutex
 static pthread_mutex_t VideoLockMutex;	///< video lock mutex
 
 //----------------------------------------------------------------------------
@@ -103,35 +107,33 @@ typedef struct _Drm_decoder_ DrmDecoder;
 
 struct _Drm_decoder_
 {
-
 //    enum AVPixelFormat PixFmt;		///< ffmpeg frame pixfmt
-
-    int SurfacesNeeded;			///< number of surface to request
-    int SurfaceUsedN;			///< number of used video surfaces
-    AVFrame  SurfacesUsed[CODEC_SURFACES_MAX];
-    int SurfaceFreeN;			///< number of free surfaces
-    AVFrame  SurfacesFree[CODEC_SURFACES_MAX];
     AVFrame  *SurfacesRb[CODEC_SURFACES_MAX];
     int SurfaceWrite;			///< write pointer
     int SurfaceRead;			///< read pointer
     atomic_t SurfacesFilled;		///< how many of the buffer is used
 
+    AVFrame  *FramesRb[CODEC_SURFACES_MAX];
+    int FramesWrite;			///< write pointer
+    int FramesRead;			///< read pointer
+    atomic_t FramesFilled;		///< how many of the buffer is used
+
     int TrickSpeed;			///< current trick speed
     int TrickCounter;			///< current trick speed counter
-    struct timespec FrameTime;		///< time of last display
     VideoStream *Stream;		///< video stream
     int Closing;			///< flag about closing current stream
-    int SyncOnAudio;			///< flag sync to audio
     int64_t PTS;			///< video PTS clock
 
-    int LastAVDiff;			///< last audio - video difference
-    int SyncCounter;			///< counter to sync frames
     int StartCounter;			///< counter for video start
 //    int FramesMissed;			///< number of frames missed
     int FramesDuped;			///< number of frames duplicated
     int FramesDropped;			///< number of frames dropped
 //    int FrameCounter;			///< number of frames decoded
 //    int FramesDisplayed;		///< number of frames displayed
+
+    AVFilterGraph *filter_graph;
+    AVFilterContext *buffersrc_ctx, *buffersink_ctx;
+    int FilterInit;
 };
 
 static DrmDecoder *DrmDecoders[1];	///< open decoder streams
@@ -166,6 +168,7 @@ struct data_priv {
 
 static struct data_priv *d_priv = NULL;
 static pthread_t presentation_thread_id;
+static pthread_t deinterlacer_thread_id;
 static void DrmFrame2Drm(void);
 
 static uint64_t DrmGetPropertyValue(int fd_drm, uint32_t objectID,
@@ -310,7 +313,7 @@ void DrmSetBuf(struct drm_buf *buf)
 static int Drm_find_dev()
 {
 	struct data_priv *priv;
-	drmVersion *version;
+//	drmVersion *version;
 	drmModeRes *resources;
 	drmModeConnector *connector;
 	drmModeEncoder *encoder = 0;
@@ -329,7 +332,7 @@ static int Drm_find_dev()
 		return -errno;
 	}
 
-	version = drmGetVersion(fd_drm);
+//	version = drmGetVersion(fd_drm);
 //	fprintf(stderr, "open /dev/dri/card0: %i %s\n", version->name_len, version->name);
 
 	// allocate mem for d_priv
@@ -666,10 +669,6 @@ dequeue:
 		priv->front_buf = 0;
 	}
 
-//	if (fb_id != priv->act_fb_id)
-//		fprintf(stderr, "DrmFrame2Drm: FB page flip pending akt fb_id %i act_fb_id %i\n",
-//			fb_id, priv->act_fb_id);
-
 	while ((atomic_read(&decoder->SurfacesFilled)) == 0 ) {
 		if (decoder->Closing && priv->prime_buffers)
 			break;
@@ -706,14 +705,13 @@ closing:
 		}
 		if (priv->buf_black.fb_id && priv->buf_black.fb_id != fb_id) {
 			DrmSetBuf(&priv->buf_black);
-//			fprintf(stderr, "DrmFrame2Drm DrmSetBuf OHNE DrmSetupFB\n");
 			buf = &priv->buf_black;
 			goto page_flip;
 		}
 		goto dequeue;
 	}
 
-	if (frame->format & AV_PIX_FMT_DRM_PRIME) {
+	if (frame->format == AV_PIX_FMT_DRM_PRIME) {
 		// frame in prime fd
 		primedata = (AVDRMFrameDescriptor *)frame->data[0];
 		// search or made fd / FB combination
@@ -774,11 +772,13 @@ closing:
 				}
 		}
 
-		if (frame->interlaced_frame == 1 && priv->second_field == 0)
-			priv->second_field = 1;
-		else {
-			priv->second_field = 0;
-			frame->pts += 1800;
+		if (frame->interlaced_frame == 1) {
+			if (priv->second_field == 0) {
+				priv->second_field = 1;
+			} else {
+				priv->second_field = 0;
+				frame->pts += 1800;
+			}
 		}
 	}
 
@@ -795,6 +795,7 @@ audioclock:
 		usleep(20000);
 		goto audioclock;
 	}
+
 	int diff = frame->pts - audio_clock - VideoAudioDelay;
 	decoder->PTS = frame->pts;
 
@@ -854,7 +855,6 @@ page_flip:
 static void DrmDisplayHandlerThread(void)
 {
     int err;
-    int filled;
     DrmDecoder *decoder;
 
     if (!(decoder = DrmDecoders[0])) {	// no stream available
@@ -862,10 +862,9 @@ static void DrmDisplayHandlerThread(void)
 	return;
     }
     // manage fill frame output ring buffer
-    filled = atomic_read(&decoder->SurfacesFilled);
+    if (atomic_read(&decoder->SurfacesFilled) < VIDEO_SURFACES_MAX - 1 &&
+		atomic_read(&decoder->FramesFilled) < VIDEO_SURFACES_MAX - 1) {
 
-    if (filled < VIDEO_SURFACES_MAX - 1) {
-//    if ((filled < VIDEO_SURFACES_MAX - 1) && VideoGetBuffers(decoder->Stream)) {
 		// FIXME: hot polling
 		// fetch+decode or reopen
 		err = VideoDecodeInput(decoder->Stream);
@@ -1049,7 +1048,7 @@ static void *VideoDisplayHandlerThread(void *dummy)
 static void VideoThreadInit(void)
 {
 //	fprintf(stderr, "[video.c]: VideoThreadInit\n");
-    pthread_mutex_init(&VideoMutex, NULL);
+    pthread_mutex_init(&VideoDeintMutex, NULL);
     pthread_mutex_init(&VideoLockMutex, NULL);
     pthread_cond_init(&VideoWakeupCond, NULL);
     pthread_create(&VideoThread, NULL, VideoDisplayHandlerThread, NULL);
@@ -1087,7 +1086,7 @@ static void VideoThreadExit(void)
 		VideoThread = 0;
 		pthread_cond_destroy(&VideoWakeupCond);
 		pthread_mutex_destroy(&VideoLockMutex);
-		pthread_mutex_destroy(&VideoMutex);
+		pthread_mutex_destroy(&VideoDeintMutex);
     }
 }
 
@@ -1129,7 +1128,7 @@ VideoHwDecoder *VideoNewHwDecoder(VideoStream * stream)
     atomic_set(&decoder->SurfacesFilled, 0);
 //    decoder->PixFmt = AV_PIX_FMT_NONE;
     decoder->Stream = stream;
-	decoder->SyncOnAudio = 1;
+//	decoder->SyncOnAudio = 1;
     decoder->Closing = 0;
     decoder->PTS = AV_NOPTS_VALUE;
     DrmDecoders[0] = decoder;
@@ -1175,33 +1174,161 @@ void VideoDelHwDecoder(VideoHwDecoder * decoder)
 enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoHwDecoder * decoder,
     AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
-#ifdef DEBUG
-    int ms_delay;
+	while (*fmt != AV_PIX_FMT_NONE) {
+		if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+//			fprintf(stderr, "Video_get_format: AV_PIX_FMT_YUV420P Codecname: %s\n",
+//				video_ctx->codec->name);
+			return AV_PIX_FMT_YUV420P;
+		}
+		if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_H264) {
+//			fprintf(stderr, "Video_get_format: AV_PIX_FMT_NV12 Codecname: %s\n",
+//				video_ctx->codec->name);
+			return AV_PIX_FMT_NV12;
+		}
+		if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_HEVC) {
+//			fprintf(stderr, "Video_get_format: AV_PIX_FMT_NV12 Codecname: %s\n",
+//				video_ctx->codec->name);
+			return AV_PIX_FMT_NV12;
+		fmt++;
+		}
+	}
+	fprintf(stderr, "Video_get_format: No pixel format found!\n");
 
-    // FIXME: use frame time
-    ms_delay = (1000 * video_ctx->time_base.num * video_ctx->ticks_per_frame)
-	/ video_ctx->time_base.den;
+	return avcodec_default_get_format(video_ctx, fmt);
+}
 
-    Debug(3, "video: ready %s %2dms/frame %dms\n",
-	Timestamp2String(VideoGetClock(decoder)), ms_delay,
-	GetMsTicks() - VideoSwitch);
+/**
+**	Filter thread.
+*/
+static void *VideoFilterThread(__attribute__ ((unused))void * dummy)
+{
+	DrmDecoder *decoder;
+	decoder = DrmDecoders[0];
+	AVFrame *frame = 0;
+	int ret = 0;
+
+	while (1) {
+		while ((atomic_read(&decoder->FramesFilled)) == 0 ) {
+			usleep(20000);
+		}
+
+getframe:
+		pthread_mutex_lock(&VideoDeintMutex);
+		frame = decoder->FramesRb[decoder->FramesRead];
+		decoder->FramesRead = (decoder->FramesRead + 1) % VIDEO_SURFACES_MAX;
+		atomic_dec(&decoder->FramesFilled);
+		pthread_mutex_unlock(&VideoDeintMutex);
+
+		if (decoder->Closing) {
+			av_frame_free(&frame);
+			if (atomic_read(&decoder->FramesFilled)) {
+				goto getframe;
+			}
+			frame = NULL;
+		}
+
+		if (av_buffersrc_add_frame_flags(decoder->buffersrc_ctx,
+			frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+			fprintf(stderr, "VideoFilterThread can't send_packet.\n");
+		} else {
+			av_frame_free(&frame);
+		}
+
+		while (1) {
+			AVFrame *filt_frame = av_frame_alloc();
+
+			ret = av_buffersink_get_frame(decoder->buffersink_ctx, filt_frame);
+
+			if (ret == AVERROR(EAGAIN)) {
+				av_frame_free(&filt_frame);
+				break;
+			}
+			if (ret == AVERROR_EOF) {
+				av_frame_free(&filt_frame);
+				goto closing;
+			}
+
+			filt_frame->pts = filt_frame->pts / 2;
+fillframe:
+			if (atomic_read(&decoder->SurfacesFilled) < VIDEO_SURFACES_MAX - 1) {
+				pthread_mutex_lock(&VideoLockMutex);
+				decoder->SurfacesRb[decoder->SurfaceWrite] = filt_frame;
+				decoder->SurfaceWrite = (decoder->SurfaceWrite + 1) % VIDEO_SURFACES_MAX;
+				atomic_inc(&decoder->SurfacesFilled);
+				pthread_mutex_unlock(&VideoLockMutex);
+			} else {
+				usleep(20000);
+				goto fillframe;
+			}
+		}
+	}
+closing:
+	avfilter_graph_free(&decoder->filter_graph);
+	decoder->FilterInit = 0;
+	return 0;
+}
+
+/**
+**	Filter init.
+*/
+void VideoFilterInit(const AVCodecContext * video_ctx, AVFrame * frame)
+{
+	DrmDecoder *decoder;
+	decoder = DrmDecoders[0];
+	char args[512];
+	const AVFilter *buffersrc  = avfilter_get_by_name("buffer");
+	const AVFilter *buffersink = avfilter_get_by_name("buffersink");
+	AVFilterInOut *outputs = avfilter_inout_alloc();
+	AVFilterInOut *inputs  = avfilter_inout_alloc();
+	decoder->filter_graph = avfilter_graph_alloc();
+
+//	const char *filter_descr = "yadif=1:-1:0";
+//	const char *filter_descr = "bwdif=1:-1:0,format=nv12";
+	const char *filter_descr = "bwdif=1:-1:0";
+
+#if LIBAVFILTER_VERSION_INT < AV_VERSION_INT(7,16,100)
+	avfilter_register_all();
 #endif
 
-    while (*fmt != AV_PIX_FMT_NONE) {
-        if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO)
-            return AV_PIX_FMT_YUV420P;
-        if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_H264) {
-			fprintf(stderr, "AVPixelFormat: AV_PIX_FMT_NV12 Codecname: %s\n", video_ctx->codec->name);
-            return AV_PIX_FMT_NV12;
-		}
-        if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_HEVC) {
-            return AV_PIX_FMT_NV12;
-        fmt++;
-		}
-    }
-    fprintf(stderr, "AVPixelFormat: The RKMPP pixel format not offered in get_format()\n");
+	snprintf(args, sizeof(args),
+		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+		video_ctx->width, video_ctx->height, frame->format,
+		video_ctx->time_base.num, video_ctx->time_base.den,
+		video_ctx->sample_aspect_ratio.num, video_ctx->sample_aspect_ratio.den);
 
-    return avcodec_default_get_format(video_ctx, fmt);
+	if (avfilter_graph_create_filter(&decoder->buffersrc_ctx, buffersrc, "in",
+		args, NULL, decoder->filter_graph) < 0)
+			fprintf(stderr, "VideoFilterInit: Cannot create buffer source\n");
+
+	AVBufferSinkParams *params = av_buffersink_params_alloc();
+	enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_NV12, AV_PIX_FMT_NONE };
+	params->pixel_fmts = pix_fmts;
+
+	if (avfilter_graph_create_filter(&decoder->buffersink_ctx, buffersink, "out",
+		NULL, params, decoder->filter_graph) < 0)
+			fprintf(stderr, "VideoFilterInit: Cannot create buffer sink\n");
+	av_free(params);
+
+	outputs->name       = av_strdup("in");
+	outputs->filter_ctx = decoder->buffersrc_ctx;
+	outputs->pad_idx    = 0;
+	outputs->next       = NULL;
+
+	inputs->name       = av_strdup("out");
+	inputs->filter_ctx = decoder->buffersink_ctx;
+	inputs->pad_idx    = 0;
+	inputs->next       = NULL;
+
+	if ((avfilter_graph_parse_ptr(decoder->filter_graph, filter_descr,
+		&inputs, &outputs, NULL)) < 0)
+			fprintf(stderr, "VideoFilterInit: avfilter_graph_parse_ptr failed\n");
+
+	if ((avfilter_graph_config(decoder->filter_graph, NULL)) < 0)
+			fprintf(stderr, "VideoFilterInit: avfilter_graph_config failed\n");
+
+	avfilter_inout_free(&inputs);
+	avfilter_inout_free(&outputs);
+	decoder->FilterInit = 1;
 }
 
 ///
@@ -1212,26 +1339,33 @@ enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoHwDecoder * dec
 ///	@param frame		frame to display
 ///
 void VideoRenderFrame(VideoHwDecoder * decoder,
-    __attribute__ ((unused))const AVCodecContext * video_ctx, AVFrame * frame)
+    const AVCodecContext * video_ctx, AVFrame * frame)
 {
-    if (frame->repeat_pict) {
-		Warning(_("video: repeated pict %d found, but not handled\n"),
-			frame->repeat_pict);
-		fprintf(stderr, "VideoRenderFrame repeated pict %d found, but not handled\n",
-			frame->repeat_pict);
-    }
-
-	if(decoder->Closing) {
-//		fprintf(stderr, "VideoRenderFrame decoder->Closing %i frame %p\n", decoder->Closing, frame);
+	if (decoder->Closing) {
 		av_frame_free(&frame);
 		return;
 	}
 
-	pthread_mutex_lock(&VideoLockMutex);
-    decoder->SurfacesRb[decoder->SurfaceWrite] = frame;
-    decoder->SurfaceWrite = (decoder->SurfaceWrite + 1) % VIDEO_SURFACES_MAX;
-    atomic_inc(&decoder->SurfacesFilled);
-	pthread_mutex_unlock(&VideoLockMutex);
+	if (frame->interlaced_frame && SWDeinterlacer) {
+		if (!decoder->FilterInit) {
+			VideoFilterInit(video_ctx, frame);
+			pthread_create(&deinterlacer_thread_id, NULL, VideoFilterThread, NULL);
+			pthread_setname_np(deinterlacer_thread_id, "softhddev deint");
+			atomic_set(&decoder->FramesFilled, 0);
+		}
+
+		pthread_mutex_lock(&VideoDeintMutex);
+		decoder->FramesRb[decoder->FramesWrite] = frame;
+		decoder->FramesWrite = (decoder->FramesWrite + 1) % VIDEO_SURFACES_MAX;
+		atomic_inc(&decoder->FramesFilled);
+		pthread_mutex_unlock(&VideoDeintMutex);
+	} else {
+		pthread_mutex_lock(&VideoLockMutex);
+		decoder->SurfacesRb[decoder->SurfaceWrite] = frame;
+		decoder->SurfaceWrite = (decoder->SurfaceWrite + 1) % VIDEO_SURFACES_MAX;
+		atomic_inc(&decoder->SurfacesFilled);
+		pthread_mutex_unlock(&VideoLockMutex);
+	}
 }
 
 
@@ -1504,6 +1638,26 @@ void VideoSetAudioDelay(int ms)
 {
 //	fprintf(stderr, "VideoSetAudioDelay %i\n", ms);
     VideoAudioDelay = ms * 90;
+}
+
+///
+///	Set use sw deinterlacer.
+///
+void VideoSetSWDeinterlacer(int deint)
+{
+	DrmDecoder *decoder;
+	decoder = DrmDecoders[0];
+
+	if (SWDeinterlacer != deint) {
+		if (decoder) {
+			decoder->Closing = 1;
+			SWDeinterlacer = deint;
+			sleep(1);
+			decoder->Closing = 0;
+		} else {
+			SWDeinterlacer = deint;
+		}
+	}
 }
 
 ///
