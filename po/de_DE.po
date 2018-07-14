@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2018-07-13 10:27+0200\n"
+"POT-Creation-Date: 2018-07-14 09:40+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -320,9 +320,6 @@ msgstr "Video"
 msgid "Use SW Deinterlacer"
 msgstr ""
 
-msgid "Clear decoder on channel switch"
-msgstr "Decoder bei Kanalwechsel leeren"
-
 msgid "Audio"
 msgstr "Audio"
 
@@ -500,6 +497,9 @@ msgstr ""
 
 msgid "softhddev: grab unsupported\n"
 msgstr ""
+
+#~ msgid "Clear decoder on channel switch"
+#~ msgstr "Decoder bei Kanalwechsel leeren"
 
 #~ msgid "Audio drift correction"
 #~ msgstr "Audio Driftkorrektur"

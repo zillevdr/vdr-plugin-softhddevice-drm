@@ -41,11 +41,6 @@
 #define _N(str) str			///< gettext_noop shortcut
 
 #include <pthread.h>
-#ifndef HAVE_PTHREAD_NAME
-    /// only available with newer glibc
-#define pthread_setname_np(thread, name)
-#endif
-
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -443,19 +438,6 @@ static int Drm_find_dev()
 			priv->osd_plane_id = plane->plane_id;
 			break;
 		}
-
-		// test pixel format
-/*		for (k = 0; k < plane->count_formats; k++) {
-			switch (plane->formats[k]) {
-				case DRM_FORMAT_YUV420:
-					priv->pix_fmt = plane->formats[k];
-				case DRM_FORMAT_NV12:
-					priv->pix_fmt = plane->formats[k];
-				case DRM_FORMAT_ARGB8888:
-				break;
-			}
-		}*/
-
 		drmModeFreePlane(plane);
 	}
 
@@ -617,13 +599,12 @@ static void *DrmDisplayFrame()
 {
 	struct data_priv *priv = d_priv;
 	DrmDecoder *decoder;
+	decoder = DrmDecoders[0];
 
 	// Thread setcancelstate
 	pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
 
-	decoder = DrmDecoders[0];
-
-    //	Render videos into output
+	// Render video into output
 	while ((atomic_read(&decoder->SurfacesFilled)) < 2 ){
 		usleep(15000);
 	}
@@ -1126,9 +1107,7 @@ VideoHwDecoder *VideoNewHwDecoder(VideoStream * stream)
     }
     // setup video surface ring buffer
     atomic_set(&decoder->SurfacesFilled, 0);
-//    decoder->PixFmt = AV_PIX_FMT_NONE;
     decoder->Stream = stream;
-//	decoder->SyncOnAudio = 1;
     decoder->Closing = 0;
     decoder->PTS = AV_NOPTS_VALUE;
     DrmDecoders[0] = decoder;

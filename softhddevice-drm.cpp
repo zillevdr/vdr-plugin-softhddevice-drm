@@ -66,7 +66,6 @@ static char ConfigMakePrimary;		///< config primary wanted
 static char ConfigHideMainMenuEntry;	///< config hide main menu entry
 
 char ConfigSWDeinterlacer;			///< config use sw deinterlacer
-char ConfigVideoClearOnSwitch;		///< config enable Clear on channel switch
 
 static int ConfigVideoAudioDelay;	///< config audio delay
 static char ConfigAudioPassthrough;	///< config audio pass-through mask
@@ -492,7 +491,6 @@ class cMenuSetupSoft:public cMenuSetupPage
 
     int Video;
     int SWDeinterlacer;
-    int ClearOnSwitch;
 
     int Audio;
     int AudioDelay;
@@ -589,9 +587,7 @@ void cMenuSetupSoft::Create(void)
     if (Video) {
 	Add(new cMenuEditBoolItem(tr("Use SW Deinterlacer"),
 		&SWDeinterlacer, trVDR("no"), trVDR("yes")));
-	Add(new cMenuEditBoolItem(tr("Clear decoder on channel switch"),
-		&ClearOnSwitch, trVDR("no"), trVDR("yes")));
-    }
+	}
     //
     //	audio
     //
@@ -719,7 +715,6 @@ cMenuSetupSoft::cMenuSetupSoft(void)
     //
     Video = 0;
     SWDeinterlacer = ConfigSWDeinterlacer;
-    ClearOnSwitch = ConfigVideoClearOnSwitch;
 
     //
     //	audio
@@ -761,8 +756,6 @@ void cMenuSetupSoft::Store(void)
 
     SetupStore("SWDeinterlacer", ConfigSWDeinterlacer = SWDeinterlacer);
 	VideoSetSWDeinterlacer(ConfigSWDeinterlacer);
-
-    SetupStore("ClearOnSwitch", ConfigVideoClearOnSwitch = ClearOnSwitch);
 
     SetupStore("AudioDelay", ConfigVideoAudioDelay = AudioDelay);
     VideoSetAudioDelay(ConfigVideoAudioDelay);
@@ -1075,13 +1068,11 @@ class cSoftHdDevice:public cDevice
 
     virtual uchar *GrabImage(int &, bool, int, int, int);
 
-#ifdef USE_VDR_SPU
 // SPU facilities
   private:
     cDvbSpuDecoder * spuDecoder;
   public:
     virtual cSpuDecoder * GetSpuDecoder(void);
-#endif
 
   protected:
     virtual void MakePrimaryDevice(bool);
@@ -1093,10 +1084,7 @@ class cSoftHdDevice:public cDevice
 cSoftHdDevice::cSoftHdDevice(void)
 {
     //dsyslog("[softhddev]%s\n", __FUNCTION__);
-
-#ifdef USE_VDR_SPU
     spuDecoder = NULL;
-#endif
 }
 
 /**
@@ -1105,9 +1093,7 @@ cSoftHdDevice::cSoftHdDevice(void)
 cSoftHdDevice::~cSoftHdDevice(void)
 {
     //dsyslog("[softhddev]%s:\n", __FUNCTION__);
-#ifdef USE_VDR_SPU
     delete spuDecoder;
-#endif
 }
 
 /**
@@ -1125,7 +1111,6 @@ void cSoftHdDevice::MakePrimaryDevice(bool on)
     }
 }
 
-#ifdef USE_VDR_SPU
 
 /**
 **	Get the device SPU decoder.
@@ -1143,7 +1128,6 @@ cSpuDecoder *cSoftHdDevice::GetSpuDecoder(void)
     return spuDecoder;
 }
 
-#endif
 
 /**
 **	Tells whether this device has a MPEG decoder.
@@ -1722,11 +1706,6 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 
     if (!strcasecmp(name, "SWDeinterlacer")) {
 	VideoSetSWDeinterlacer(ConfigSWDeinterlacer = atoi(value));
-	return true;
-    }
-
-    if (!strcasecmp(name, "ClearOnSwitch")) {
-	ConfigVideoClearOnSwitch = atoi(value);
 	return true;
     }
 

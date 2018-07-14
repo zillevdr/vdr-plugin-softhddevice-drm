@@ -16,11 +16,8 @@ CONFIG := # -DDEBUG 			# enable debug output+functions
 #CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
 #CONFIG += -DSTILL_DEBUG=2		# still picture debug verbose level
 
-CONFIG += -DHAVE_PTHREAD_NAME		# supports new pthread_setname_np
 #CONFIG += -DNO_TS_AUDIO		# disable ts audio parser
 #CONFIG += -DUSE_TS_VIDEO		# build new ts video parser
-CONFIG += -DUSE_MPEG_COMPLETE		# support only complete mpeg packets
-CONFIG += -DUSE_VDR_SPU			# use VDR SPU decoder.
 
 ### The version number of this plugin (taken from the main source file):
 

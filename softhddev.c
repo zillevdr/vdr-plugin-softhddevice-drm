@@ -30,8 +30,6 @@
 #define _N(str) str			///< gettext_noop shortcut
 
 #include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavformat/avio.h>
 
 #ifndef __USE_GNU
 #define __USE_GNU
@@ -56,7 +54,6 @@ static void DumpMpeg(const uint8_t * data, int size);
 //////////////////////////////////////////////////////////////////////////////
 
 extern int ConfigAudioBufferTime;	///< config size ms of audio buffer
-extern int ConfigVideoClearOnSwitch;	//<  clear decoder on channel switch
 static char ConfigStillDecoder;		///< hw/sw decoder for still picture
 
 static pthread_mutex_t SuspendLockMutex;	///< suspend lock mutex
@@ -1293,7 +1290,6 @@ struct __video_stream__
     volatile char TrickSpeed;		///< current trick speed
     volatile char Close;		///< command close video stream
     volatile char ClearBuffers;		///< command clear video buffers
-    volatile char ClearClose;		///< clear video buffers for close
 
     int InvalidPesCounter;		///< counter of invalid PES packets
 
@@ -2182,16 +2178,6 @@ int PlayVideo3(VideoStream * stream, const uint8_t * data, int size)
     if (stream->CodecID == AV_CODEC_ID_MPEG2VIDEO) {
 		// SKIP PES header
 		VideoMpegEnqueue(stream, pts, data + 9 + n, size - 9 - n);
-#ifndef USE_MPEG_COMPLETE
-		if (size < 65526) {
-			// mpeg codec supports incomplete packets
-			// waiting for a full complete packages, increases needed delays
-			// PES recordings sends incomplete packets
-			// incomplete packets  breaks the decoder for some stations
-			// for the new USE_PIP code, this is only a very little improvement
-			VideoNextPacket(stream, stream->CodecID);
-		}
-#endif
     } else {
 		// SKIP PES header
 		VideoEnqueue(stream, pts, data + 9 + n, size - 9 - n);
@@ -2320,24 +2306,19 @@ int SetPlayMode(int play_mode)
 	case 0:			// audio/video from decoder
 	    // tell video parser we get new stream
 	    if (MyVideoStream->Decoder && !MyVideoStream->SkipStream) {
-		// clear buffers on close configured always or replay only
-		if (ConfigVideoClearOnSwitch || MyVideoStream->ClearClose) {
-//			fprintf(stderr, "SetPlayMode ConfigVideoClearOnSwitch: %i play_mode %i\n",
-//				ConfigVideoClearOnSwitch, play_mode);
+			// clear buffers on close configured always or replay only
 		    Clear();		// flush all buffers
-		    MyVideoStream->ClearClose = 0;
-		}
-		if (MyVideoStream->CodecID != AV_CODEC_ID_NONE) {
-		    MyVideoStream->NewStream = 1;
-		    MyVideoStream->InvalidPesCounter = 0;
-		    // tell hw decoder we are closing stream
-		    VideoSetClosing(MyVideoStream->HwDecoder, 1);
-		    VideoResetStart(MyVideoStream->HwDecoder);
+			if (MyVideoStream->CodecID != AV_CODEC_ID_NONE) {
+				MyVideoStream->NewStream = 1;
+				MyVideoStream->InvalidPesCounter = 0;
+				// tell hw decoder we are closing stream
+				VideoSetClosing(MyVideoStream->HwDecoder, 1);
+				VideoResetStart(MyVideoStream->HwDecoder);
 #ifdef DEBUG
-		    VideoSwitch = GetMsTicks();
-		    Debug(3, "video: new stream start\n");
+				VideoSwitch = GetMsTicks();
+				Debug(3, "video: new stream start\n");
 #endif
-		}
+			}
 	    }
 	    if (MyAudioDecoder) {	// tell audio parser we have new stream
 		if (AudioCodecID != AV_CODEC_ID_NONE) {
@@ -2635,7 +2616,6 @@ void StillPicture(const uint8_t * data, int size)
 int Poll(int timeout)
 {
     // poll is only called during replay, flush buffers after replay
-    MyVideoStream->ClearClose = 1;
     for (;;) {
 	int full;
 	int t;
