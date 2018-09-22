@@ -612,11 +612,6 @@ static void *DrmDisplayFrame()
 	while (1){
 		if (drmHandleEvent(priv->fd_drm, &priv->ev) != 0)
 			fprintf(stderr, "DrmDisplayFrame: drmHandleEvent failed!\n");
-
-		// Destroy black FB
-		if (decoder->StartCounter == 2 && priv->buf_black.fb_id != 0) {
-			DrmDestroyFB(priv->fd_drm, &priv->buf_black);
-		}
 	}
 	return 0;
 }
@@ -674,17 +669,7 @@ closing:
 		}
 
 		// set a black FB
-		if (!(priv->buf_black.fb_id)) {
-			priv->buf_black.width = 720;
-			priv->buf_black.height = 576;
-			if (DrmSetupFB(&priv->buf_black, NULL))
-				fprintf(stderr, "DrmFrame2Drm: DrmSetupFB black FB %i x %i failed\n",
-					priv->buf_black.width, priv->buf_black.height);
-			DrmSetBuf(&priv->buf_black);
-			buf = &priv->buf_black;
-			goto page_flip;
-		}
-		if (priv->buf_black.fb_id && priv->buf_black.fb_id != fb_id) {
+		if (priv->buf_black.fb_id != fb_id) {
 			DrmSetBuf(&priv->buf_black);
 			buf = &priv->buf_black;
 			goto page_flip;
@@ -1654,8 +1639,21 @@ void VideoInit(void)
 	priv->bufs[0].height = priv->bufs[1].height = 0;
 	priv->bufs[0].pix_fmt = priv->bufs[1].pix_fmt = DRM_FORMAT_NV12;
 	priv->buf_osd.pix_fmt = DRM_FORMAT_ARGB8888;
-	priv->buf_black.width = 0;
-	priv->buf_black.pix_fmt = DRM_FORMAT_ARGB8888;
+
+	priv->buf_black.pix_fmt = DRM_FORMAT_NV12;
+	priv->buf_black.width = 720;
+	priv->buf_black.height = 576;
+	if (DrmSetupFB(&priv->buf_black, NULL))
+		fprintf(stderr, "DrmFrame2Drm: DrmSetupFB black FB %i x %i failed\n",
+			priv->buf_black.width, priv->buf_black.height);
+
+	// black fb
+	unsigned int i;
+	for (i = 0; i < priv->buf_black.width * priv->buf_black.height; ++i) {
+		priv->buf_black.plane[0][i] = 0x10;
+		if (i < priv->buf_black.width * priv->buf_black.height / 2)
+		priv->buf_black.plane[1][i] = 0x80;
+	}
 
 	// save actual modesetting for connector + CRTC
 	priv->saved_crtc = drmModeGetCrtc(priv->fd_drm, priv->crtc_id);
@@ -1706,6 +1704,9 @@ void VideoExit(void)
 				priv->saved_crtc->x, priv->saved_crtc->y, &priv->connector_id, 1, &priv->saved_crtc->mode);
 			drmModeFreeCrtc(priv->saved_crtc);
 		}
+
+	// Destroy black FB
+	DrmDestroyFB(priv->fd_drm, &priv->buf_black);
 
 		// free allocated memory
 		free(priv);
