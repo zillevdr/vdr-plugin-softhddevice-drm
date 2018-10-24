@@ -78,12 +78,6 @@ extern void VideoOsdDrawARGB(int, int, int, int, int, const uint8_t *, int,
     /// Get OSD size.
 extern void VideoGetOsdSize(int *, int *);
 
-    /// Set video clock.
-extern void VideoSetClock(VideoHwDecoder *, int64_t);
-
-    /// Get video clock.
-extern int64_t VideoGetClock(const VideoHwDecoder *);
-
     /// Set closing flag.
 extern void VideoSetClosing(VideoHwDecoder *, int);
 

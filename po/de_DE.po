@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2018-07-14 09:40+0200\n"
+"POT-Creation-Date: 2018-10-17 19:13+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -260,10 +260,6 @@ msgstr ""
 msgid "[softhddev] empty video packet %d bytes\n"
 msgstr ""
 
-#, c-format
-msgid "softhddev: %s called without hw decoder\n"
-msgstr ""
-
 msgid "[softhddev] invalid still video packet\n"
 msgstr ""
 
@@ -456,25 +452,19 @@ msgid "[softhddev]: hot key %d is not supported\n"
 msgstr ""
 
 #, c-format
-msgid "[softhddev]: Setting mode  %ix%i@%i crtc_id %i plane_id %i connector_id %i\n"
+msgid "[DrmSetMode]: Setting mode  %ix%i@%i crtc_id %i plane_id %i connector_id %i\n"
 msgstr ""
 
 #, c-format
-msgid "[softhddev] DRM have %i connectors, %i crtcs, %i encoders\n"
+msgid "[Drm_find_dev] DRM have %i connectors, %i crtcs, %i encoders\n"
 msgstr ""
 
 #, c-format
-msgid "[softhddev] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"
+msgid "[Drm_find_dev] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"
 msgstr ""
 
 #, c-format
-msgid "[softhddev] DRM setup CRTC: %i plane_id: %i osd_plane_id %i\n"
-msgstr ""
-
-msgid "video: can't lock thread\n"
-msgstr ""
-
-msgid "video: can't unlock thread\n"
+msgid "[Drm_find_dev] DRM setup CRTC: %i plane_id: %i osd_plane_id %i\n"
 msgstr ""
 
 msgid "video: can't queue cancel video display thread\n"

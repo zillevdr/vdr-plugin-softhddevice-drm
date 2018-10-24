@@ -547,6 +547,7 @@ static void PesInit(PesDemux * pesdx)
     pesdx->Size = PES_MAX_PAYLOAD;
 //    pesdx->Buffer = av_malloc(PES_MAX_PAYLOAD + FF_INPUT_BUFFER_PADDING_SIZE);
     pesdx->Buffer = av_malloc(PES_MAX_PAYLOAD);
+//	fprintf(stderr, "PesInit: av_malloc %i\n", PES_MAX_PAYLOAD);
     if (!pesdx->Buffer) {
 	Fatal(_("pesdemux: out of memory\n"));
     }
@@ -1327,13 +1328,15 @@ static void VideoPacketInit(VideoStream * stream)
     for (i = 0; i < VIDEO_PACKET_MAX; ++i) {
 	AVPacket *avpkt;
 
-	avpkt = &stream->PacketRb[i];
-	// build a clean ffmpeg av packet
-	if (av_new_packet(avpkt, VIDEO_BUFFER_SIZE)) {
-	    Fatal(_("[softhddev] out of memory\n"));
-	}
+		avpkt = &stream->PacketRb[i];
+		// build a clean ffmpeg av packet
+		if (av_new_packet(avpkt, VIDEO_BUFFER_SIZE)) {
+			Fatal(_("[softhddev] out of memory\n"));
+		}
     }
 
+//	fprintf(stderr, "VideoPacketInit: %i Packete erstellt.\n",
+//		VIDEO_PACKET_MAX);
     atomic_set(&stream->PacketsFilled, 0);
     stream->PacketRead = stream->PacketWrite = 0;
 }
@@ -1353,6 +1356,8 @@ static void VideoPacketExit(VideoStream * stream)
 //	av_free_packet(&stream->PacketRb[i]);
 	av_packet_unref(&stream->PacketRb[i]);
     }
+//	fprintf(stderr, "VideoPacketExit: %i Packete zerstört.\n",
+//		VIDEO_PACKET_MAX);
 }
 
 /**
@@ -1777,7 +1782,7 @@ int VideoDecodeInput(VideoStream * stream)
 	    stream->ClosingStream = 0;
 	    ret = 1;
 	    if (stream->LastCodecID != AV_CODEC_ID_NONE) {
-			VideoSetClosing(stream->HwDecoder, 0);
+//			VideoSetClosing(stream->HwDecoder, 0);
 			stream->LastCodecID = AV_CODEC_ID_NONE;
 			CodecVideoClose(stream->Decoder);
 //			fprintf(stderr, "VideoDecodeInput: AV_CODEC_ID_NONE\n");
@@ -2308,17 +2313,17 @@ int SetPlayMode(int play_mode)
 	    if (MyVideoStream->Decoder && !MyVideoStream->SkipStream) {
 			// clear buffers on close configured always or replay only
 		    Clear();		// flush all buffers
-			if (MyVideoStream->CodecID != AV_CODEC_ID_NONE) {
-				MyVideoStream->NewStream = 1;
-				MyVideoStream->InvalidPesCounter = 0;
-				// tell hw decoder we are closing stream
-				VideoSetClosing(MyVideoStream->HwDecoder, 1);
-				VideoResetStart(MyVideoStream->HwDecoder);
+		}
+		if (MyVideoStream->CodecID != AV_CODEC_ID_NONE) {
+			MyVideoStream->NewStream = 1;
+			MyVideoStream->InvalidPesCounter = 0;
+			// tell hw decoder we are closing stream
+			VideoSetClosing(MyVideoStream->HwDecoder, 1);
+			VideoResetStart(MyVideoStream->HwDecoder);
 #ifdef DEBUG
-				VideoSwitch = GetMsTicks();
-				Debug(3, "video: new stream start\n");
+			VideoSwitch = GetMsTicks();
+			Debug(3, "video: new stream start\n");
 #endif
-			}
 	    }
 	    if (MyAudioDecoder) {	// tell audio parser we have new stream
 		if (AudioCodecID != AV_CODEC_ID_NONE) {
@@ -2350,12 +2355,14 @@ int SetPlayMode(int play_mode)
 */
 int64_t GetSTC(void)
 {
-    if (MyVideoStream->HwDecoder) {
-	return VideoGetClock(MyVideoStream->HwDecoder);
-    }
+	fprintf(stderr, "GetSTC: Audioclock\n");
+	return AudioGetClock();
+//    if (MyVideoStream->HwDecoder) {
+//	return VideoGetClock(MyVideoStream->HwDecoder); FIXME: Audioclock is master!!!
+//    }
     // could happen during dettached
-    Warning(_("softhddev: %s called without hw decoder\n"), __FUNCTION__);
-    return AV_NOPTS_VALUE;
+//    Warning(_("softhddev: %s called without hw decoder\n"), __FUNCTION__);
+//    return AV_NOPTS_VALUE;
 }
 
 /**

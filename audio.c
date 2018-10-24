@@ -1151,11 +1151,9 @@ static snd_pcm_t *AlsaOpenPCM(int passthrough)
 	Info(_("audio/alsa: using %sdevice '%s'\n"),
 	    passthrough ? "pass-through " : "", device);
     }
-    //
-    // for AC3 pass-through try to set the non-audio bit, use AES0=6
-    //
-    if (passthrough && AudioAppendAES) {
 #if 0
+    // for AC3 pass-through try to set the non-audio bit, use AES0=6
+    if (passthrough && AudioAppendAES) {
 	// FIXME: not yet finished
 	char *buf;
 	const char *s;
@@ -1169,8 +1167,8 @@ static snd_pcm_t *AlsaOpenPCM(int passthrough)
 	    strcpy(buf + n, ":AES=6");
 	}
 	Debug(3, "audio/alsa: try '%s'\n", buf);
-#endif
     }
+#endif
     // open none blocking; if device is already used, we don't want wait
     if ((err =
 	    snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK,
@@ -1291,45 +1289,6 @@ static void AlsaInitMixer(void)
 //----------------------------------------------------------------------------
 //	Alsa API
 //----------------------------------------------------------------------------
-
-/**
-**	Get alsa audio delay in time-stamps.
-**
-**	@returns audio delay in time-stamps.
-**
-**	@todo FIXME: handle the case no audio running
-*/
-static int64_t AlsaGetDelay(void)
-{
-    int err;
-    snd_pcm_sframes_t delay;
-    int64_t pts;
-
-    // setup error
-    if (!AlsaPCMHandle || !AudioRing[AudioRingRead].HwSampleRate) {
-	return 0L;
-    }
-    // delay in frames in alsa + kernel buffers
-    if ((err = snd_pcm_delay(AlsaPCMHandle, &delay)) < 0) {
-	//Debug(3, "audio/alsa: no hw delay\n");
-	delay = 0L;
-#ifdef DEBUG
-    } else if (snd_pcm_state(AlsaPCMHandle) != SND_PCM_STATE_RUNNING) {
-	//Debug(3, "audio/alsa: %ld frames delay ok, but not running\n", delay);
-#endif
-    }
-    //Debug(3, "audio/alsa: %ld frames hw delay\n", delay);
-
-    // delay can be negative, when underrun occur
-    if (delay < 0) {
-	delay = 0L;
-    }
-
-    pts =
-	((int64_t) delay * 90 * 1000) / AudioRing[AudioRingRead].HwSampleRate;
-
-    return pts;
-}
 
 /**
 **	Setup alsa audio for requested format.
@@ -1791,7 +1750,7 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 
 	if (inframe) {
 	if (inframe->sample_rate != (int)AudioRing[AudioRingWrite].HwSampleRate) {
-//		fprintf(stderr, "audio: AudioEnqueue sample_rate changed!!!\n");
+//		fprintf(stderr, "AudioEnqueue: sample_rate changed!!!\n");
 		AudioSetup(&inframe->sample_rate, &inframe->channels, 0);
 	}
 
@@ -1799,36 +1758,46 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 		|| Filterchanged)) {
 		avfilter_graph_free(&filter_graph);
 		FilterInit = 0;
-//		fprintf(stderr, "audio: AudioEnqueue Free the filter graph.\n");
+//		fprintf(stderr, "AudioEnqueue: Free the filter graph.\n");
 	}
 
 	if (!FilterInit) {
 		AudioFilterInit(inframe);
-//		fprintf(stderr, "audio: AudioFilterInit\n");
+//		fprintf(stderr, "AudioEnqueue: AudioFilterInit\n");
 	}
+
+/*		fprintf(stderr, "AudioEnqueue IN: PTS %" PRId64 " PTS %" PRId64 "ms %dms nb_samples %d sample_rate%d\n",
+			inframe->pts, inframe->pts /90,
+			inframe->nb_samples * 1000 / inframe->sample_rate,
+			inframe->nb_samples, inframe->sample_rate);
+*/
 	if (av_buffersrc_add_frame(abuffersrc_ctx, inframe) < 0)
-		fprintf(stderr, "audio: Error submitting the frame to the filtergraph\n");
+		fprintf(stderr, "AudioEnqueue: Error submitting the frame to the filtergraph\n");
 	while ((err = av_buffersink_get_frame(abuffersink_ctx, outframe)) >= 0) {
 		if (err < 0)
-			fprintf(stderr, "audio: Error processing the filtered frame\n");
+			fprintf(stderr, "AudioEnqueue: Error processing the filtered frame\n");
 	}
 /*	if (err == AVERROR(EAGAIN)) {
-		fprintf(stderr, "audio: Error filtering AVERROR(EAGAIN)\n");
+		fprintf(stderr, "AudioEnqueue: Error filtering AVERROR(EAGAIN)\n");
 	} else if (err == AVERROR_EOF) {
-		fprintf(stderr, "audio: Error filtering AVERROR_EOF\n");
+		fprintf(stderr, "AudioEnqueue: Error filtering AVERROR_EOF\n");
 	} else if (err < 0) {
-		fprintf(stderr, "audio: Error filtering the data\n");
+		fprintf(stderr, "AudioEnqueue: Error filtering the data\n");
 	}*/
 	} // Hack if (inframe)
 
 	if (outframe->channels) {
-/*		fprintf(stderr, "codec/audio in %s %dHz *%d NS %i linesize %d out %s %dHz *%d NS %i linesize %d count %d\n",
+/*		fprintf(stderr, "AudioEnqueue IN: %s %dHz *%d NS %i linesize %d out %s %dHz *%d NS %i linesize %d count %d\n",
 			av_get_sample_fmt_name(inframe->format), inframe->sample_rate,
 			inframe->channels, inframe->nb_samples, inframe->linesize[0],
 			av_get_sample_fmt_name(outframe->format), outframe->sample_rate,
 			outframe->channels, outframe->nb_samples, outframe->linesize[0],
 			count);*/
-
+/*		fprintf(stderr, "AudioEnqueue OUT: PTS %" PRId64 " PTS %" PRId64 "ms %dms nb_samples %d sample_rate%d\n",
+			outframe->pts, outframe->pts /90,
+			outframe->nb_samples * 1000 / outframe->sample_rate,
+			outframe->nb_samples, outframe->sample_rate);
+*/
 #ifdef noDEBUG
 		static uint32_t last_tick;
 		uint32_t tick;
@@ -1845,13 +1814,14 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 
 		if (!AudioRing[AudioRingWrite].HwSampleRate) {
 			Debug(3, "audio: enqueue not ready\n");
+//			fprintf(stderr, "AudioEnqueue: enqueue not ready\n");
 			return;				// no setup yet
 		}
 		// save packet size
 		if (!AudioRing[AudioRingWrite].PacketSize) {
 			AudioRing[AudioRingWrite].PacketSize = count;
 			Debug(3, "audio: a/v packet size %d bytes\n", count);
-//			fprintf(stderr, "audio: AudioEnqueue a/v packet size %d bytes\n", count);
+//			fprintf(stderr, "AudioEnqueue: a/v packet size %d bytes\n", count);
 		}
 		buffer = (void *)data;
 		// audio sample modification allowed and needed?
@@ -1860,7 +1830,7 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 			|| AudioRing[AudioRingWrite].InChannels !=
 			AudioRing[AudioRingWrite].HwChannels)) {
 			int frames;
-			fprintf(stderr, "audio: AudioEnqueue audio sample modification allowed and needed\n");
+			fprintf(stderr, "AudioEnqueue: audio sample modification allowed and needed\n");
 
 			// resample into ring-buffer is too complex in the case of a roundabout
 			// just use a temporary buffer
@@ -1879,7 +1849,7 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 			if (AudioRing[AudioRingWrite].InChannels !=
 				AudioRing[AudioRingWrite].HwChannels) {
 				Debug(3, "audio: internal failure channels mismatch\n");
-				fprintf(stderr, "audio: AudioEnqueue internal failure channels mismatch\n");
+				fprintf(stderr, "AudioEnqueue: internal failure channels mismatch\n");
 				return;
 			}
 #endif
@@ -1897,7 +1867,7 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 			}
 		}
 
-/*		fprintf(stderr, "audio: RingBufferWrite count %d PacketSize %d "
+/*		fprintf(stderr, "AudioEnqueue: RingBufferWrite count %d PacketSize %d "
 			"RingBufferUsedBytes %6zu RingBufferFreeBytes %zu\n",
 			count, AudioRing[AudioRingWrite].PacketSize,
 			RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer),
@@ -1906,7 +1876,7 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 		n = RingBufferWrite(AudioRing[AudioRingWrite].RingBuffer, buffer, count);
 		if (n != (size_t) count) {
 			Error(_("audio: can't place %d samples in ring buffer\n"), count);
-			fprintf(stderr, "audio: AudioEnqueue can't place %d samples in ring buffer\n", count);
+			fprintf(stderr, "AudioEnqueue: can't place %d samples in ring buffer\n", count);
 			// too many bytes are lost
 			// FIXME: caller checks buffer full.
 			// FIXME: should skip more, longer skip, but less often?
@@ -1926,7 +1896,7 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 				(skip * 1000)
 				/ (AudioRing[AudioRingWrite].HwSampleRate *
 				AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample));
-/*			fprintf(stderr, "audio: AudioEnqueue start? %4zdms skip %dms\n", (n * 1000)
+/*			fprintf(stderr, "AudioEnqueue: start? %4zdms skip %dms\n", (n * 1000)
 				/ (AudioRing[AudioRingWrite].HwSampleRate *
 				AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample),
 				(skip * 1000)
@@ -1947,6 +1917,7 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 				&& AudioStartThreshold < n)) {
 				// restart play-back
 				// no lock needed, can wakeup next time
+//				fprintf(stderr, "AudioEnqueue: start play-back\n");
 				AudioRunning = 1;
 				pthread_cond_signal(&AudioStartCond);
 			}
@@ -1963,77 +1934,89 @@ void AudioEnqueue(__attribute__ ((unused)) const void *samples, int count, AVFra
 */
 void AudioVideoReady(int64_t pts)
 {
-    int64_t audio_pts;
-    size_t used;
+	int64_t audio_pts;
+	size_t used;
 
-    if (pts == (int64_t) INT64_C(0x8000000000000000)) {
-	Debug(3, "audio: a/v start, no valid video\n");
-	return;
-    }
-    // no valid audio known
-    if (!AudioRing[AudioRingWrite].HwSampleRate
-	|| !AudioRing[AudioRingWrite].HwChannels
-	|| AudioRing[AudioRingWrite].PTS ==
-	(int64_t) INT64_C(0x8000000000000000)) {
-	Debug(3, "audio: a/v start, no valid audio\n");
-	AudioVideoIsReady = 1;
-	return;
-    }
-    // Audio.PTS = next written sample time stamp
+	if (pts == AV_NOPTS_VALUE) {
+		Debug(3, "audio: a/v start, no valid video\n");
+//		fprintf(stderr, "audio: a/v start, no valid video\n");
+		return;
+	}
+	// no valid audio known
+	if (!AudioRing[AudioRingWrite].HwSampleRate
+		|| !AudioRing[AudioRingWrite].HwChannels
+		|| AudioRing[AudioRingWrite].PTS == AV_NOPTS_VALUE) {
+		Debug(3, "audio: a/v start, no valid audio\n");
+//		fprintf(stderr, "AudioVideoReady: a/v start, no valid audio\n");
+		AudioVideoIsReady = 1;
+		return;
+	}
 
-    used = RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer);
-    audio_pts =
-	AudioRing[AudioRingWrite].PTS -
-	(used * 90 * 1000) / (AudioRing[AudioRingWrite].HwSampleRate *
-	AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample);
+	used = RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer);
+	audio_pts =
+		AudioRing[AudioRingWrite].PTS -
+		(used * 90 * 1000) / (AudioRing[AudioRingWrite].HwSampleRate *
+		AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample);
 
-    Debug(3, "audio: a/v sync buf(%d,%4zdms) %s|%s = %dms %s\n",
-	atomic_read(&AudioRingFilled),
-	(used * 1000) / (AudioRing[AudioRingWrite].HwSampleRate *
-	    AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample),
-	Timestamp2String(pts), Timestamp2String(audio_pts),
-	(int)(pts - audio_pts) / 90, AudioRunning ? "running" : "ready");
+	Debug(3, "audio: a/v sync buf(%d,%4zdms) %s|%s = %dms %s\n",
+		atomic_read(&AudioRingFilled),
+		(used * 1000) / (AudioRing[AudioRingWrite].HwSampleRate *
+		AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample),
+		Timestamp2String(pts), Timestamp2String(audio_pts),
+		(int)(pts - audio_pts) / 90, AudioRunning ? "running" : "ready");
 
-    if (!AudioRunning) {
-	int skip;
+/*	fprintf(stderr, "AudioVideoReady: a/v sync buf(%d,%4zdms) %s|%s = %dms %s\n",
+		atomic_read(&AudioRingFilled),
+		(used * 1000) / (AudioRing[AudioRingWrite].HwSampleRate *
+		AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample),
+		Timestamp2String(pts), Timestamp2String(audio_pts),
+		(int)(pts - audio_pts) / 90, AudioRunning ? "running" : "ready");
+*/
+	if (!AudioRunning) {
+		int skip;
 
-	// buffer ~15 video frames
-	// FIXME: HDTV can use smaller video buffer
-	skip =
-	    pts - 15 * 20 * 90 - AudioBufferTime * 90 - audio_pts +
-	    VideoAudioDelay;
+		// buffer ~15 video frames
+		// FIXME: HDTV can use smaller video buffer
+		skip =
+			pts - AudioBufferTime * 90 - audio_pts +
+			VideoAudioDelay;
 #ifdef DEBUG
-	fprintf(stderr, "%dms %dms %dms\n", (int)(pts - audio_pts) / 90,
-	    VideoAudioDelay / 90, skip / 90);
+		fprintf(stderr, "AudioVideoReady: diff AV %dms VideoAudioDelay %dms skip %dms\n",
+			(int)(pts - audio_pts) / 90, VideoAudioDelay / 90, skip / 90);
 #endif
-	// guard against old PTS
-	if (skip > 0 && skip < 2000 * 90) {
-	    skip = (((int64_t) skip * AudioRing[AudioRingWrite].HwSampleRate)
-		/ (1000 * 90))
-		* AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample;
-	    // FIXME: round to packet size
-	    if ((unsigned)skip > used) {
-		AudioSkip = skip - used;
-		skip = used;
-	    }
-	    Debug(3, "audio: sync advance %dms %d/%zd\n",
-		(skip * 1000) / (AudioRing[AudioRingWrite].HwSampleRate *
-		    AudioRing[AudioRingWrite].HwChannels *
-		    AudioBytesProSample), skip, used);
-	    RingBufferReadAdvance(AudioRing[AudioRingWrite].RingBuffer, skip);
+		// guard against old PTS
+		if (skip > 0 && skip < 2000 * 90) {
+			skip = (((int64_t) skip * AudioRing[AudioRingWrite].HwSampleRate)
+				/ (1000 * 90))
+				* AudioRing[AudioRingWrite].HwChannels * AudioBytesProSample;
+			// FIXME: round to packet size
+			if ((unsigned)skip > used) {
+			AudioSkip = skip - used;
+			skip = used;
+			}
+			Debug(3, "audio: sync advance %dms %d/%zd\n",
+				(skip * 1000) / (AudioRing[AudioRingWrite].HwSampleRate *
+				AudioRing[AudioRingWrite].HwChannels *
+				AudioBytesProSample), skip, used);
 
-	    used = RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer);
+			RingBufferReadAdvance(AudioRing[AudioRingWrite].RingBuffer, skip);
+
+			used = RingBufferUsedBytes(AudioRing[AudioRingWrite].RingBuffer);
+		}
+		// FIXME: skip<0 we need bigger audio buffer
+
+//		fprintf(stderr, "AudioVideoReady: AudioStartThreshold %dms RingBufferUsedBytes %dms\n",
+//			AudioStartThreshold / 90, used / 90);
+
+		// enough video + audio buffered
+		if (AudioStartThreshold < used) {
+			AudioRunning = 1;
+//			fprintf(stderr, "AudioVideoReady: start play-back\n");
+			pthread_cond_signal(&AudioStartCond);
+		}
 	}
-	// FIXME: skip<0 we need bigger audio buffer
 
-	// enough video + audio buffered
-	if (AudioStartThreshold < used) {
-	    AudioRunning = 1;
-	    pthread_cond_signal(&AudioStartCond);
-	}
-    }
-
-    AudioVideoIsReady = 1;
+	AudioVideoIsReady = 1;
 #if 0
     if (AudioRing[AudioRingWrite].HwSampleRate
 	&& AudioRing[AudioRingWrite].HwChannels) {
@@ -2166,53 +2149,45 @@ int AudioUsedBytes(void)
 }
 
 /**
-**	Get audio delay in time stamps.
-**
-**	@returns audio delay in time stamps.
-*/
-int64_t AudioGetDelay(void)
-{
-    int64_t pts;
-
-    if (!AudioRunning) {
-	return 0L;			// audio not running
-    }
-    if (!AudioRing[AudioRingRead].HwSampleRate) {
-	return 0L;			// audio not setup
-    }
-    if (atomic_read(&AudioRingFilled)) {
-	return 0L;			// multiple buffers, invalid delay
-    }
-    pts = AlsaGetDelay();
-    pts += ((int64_t) RingBufferUsedBytes(AudioRing[AudioRingRead].RingBuffer)
-	* 90 * 1000) / (AudioRing[AudioRingRead].HwSampleRate *
-	AudioRing[AudioRingRead].HwChannels * AudioBytesProSample);
-    Debug(4, "audio: hw+sw delay %zd %" PRId64 "ms\n",
-	RingBufferUsedBytes(AudioRing[AudioRingRead].RingBuffer), pts / 90);
-
-    return pts;
-}
-
-/**
 **	Get current audio clock.
 **
 **	@returns the audio clock in time stamps.
 */
 int64_t AudioGetClock(void)
 {
-    // (cast) needed for the evil gcc
-    if (AudioRing[AudioRingRead].PTS != (int64_t) INT64_C(0x8000000000000000)) {
-	int64_t delay;
-
-	// delay zero, if no valid time stamp
-	if ((delay = AudioGetDelay())) {
-	    if (AudioRing[AudioRingRead].Passthrough) {
-		return AudioRing[AudioRingRead].PTS + 0 * 90 - delay;
-	    }
-	    return AudioRing[AudioRingRead].PTS + 0 * 90 - delay;
+	if (!AudioRunning || !AudioRing[AudioRingRead].HwSampleRate ||
+		!AlsaPCMHandle || atomic_read(&AudioRingFilled) ||
+		AudioRing[AudioRingRead].PTS == AV_NOPTS_VALUE) {
+//		printf("AudioGetClock: AV_NOPTS_VALUE!\n");
+		return AV_NOPTS_VALUE;
 	}
-    }
-    return INT64_C(0x8000000000000000);
+	snd_pcm_sframes_t delay;
+	int64_t pts;
+
+	// delay in frames in alsa + kernel buffers
+	if (snd_pcm_delay(AlsaPCMHandle, &delay) < 0) {
+		//Debug(3, "audio/alsa: no hw delay\n");
+		delay = 0L;
+	}
+
+	if (delay < 0) {
+		delay = 0L;
+	}
+
+	pts = ((int64_t) delay * 90 * 1000) / AudioRing[AudioRingRead].HwSampleRate;
+
+	pts += ((int64_t) RingBufferUsedBytes(AudioRing[AudioRingRead].RingBuffer)
+		* 90 * 1000) / (AudioRing[AudioRingRead].HwSampleRate *
+		AudioRing[AudioRingRead].HwChannels * AudioBytesProSample);
+
+/*	printf("AudioGetClock: PTS %" PRId64 " PTS %" PRId64 " PTS %s hw delay %ld ms hw+sw delay %" PRId64 "ms\n",
+		AudioRing[AudioRingRead].PTS,
+		AudioRing[AudioRingRead].PTS + 0 * 90 - pts,
+		Timestamp2String(AudioRing[AudioRingRead].PTS + 0 * 90 - pts),
+		((delay * 90 * 1000) / AudioRing[AudioRingRead].HwSampleRate) / 90,
+		pts / 90);*/
+
+	return AudioRing[AudioRingRead].PTS + 0 * 90 - pts;
 }
 
 /**
