@@ -99,9 +99,6 @@ extern void VideoGetStats(VideoHwDecoder *, int *, int *, int *, int *);
     /// Get video stream size
 extern void VideoGetVideoSize(VideoHwDecoder *, int *, int *, int *, int *);
 
-extern void VideoOsdInit(void);		///< Setup osd.
-extern void VideoOsdExit(void);		///< Cleanup osd.
-
 extern void VideoInit(void);	///< Setup video module.
 extern void VideoExit(void);		///< Cleanup and exit video module.
 

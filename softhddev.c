@@ -69,7 +69,7 @@ static volatile char SkipAudio;		///< skip audio stream
 static AudioDecoder *MyAudioDecoder;	///< audio decoder
 static enum AVCodecID AudioCodecID;	///< current codec id
 static int AudioChannelID;		///< current audio channel id
-static VideoStream *AudioSyncStream;	///< video stream for audio/video sync
+//static VideoStream *AudioSyncStream;	///< video stream for audio/video sync
 
     /// Minimum free space in audio buffer 8 packets for 8 channels
 #define AUDIO_MIN_BUFFER_FREE (3072 * 8 * 8)
@@ -1353,8 +1353,7 @@ static void VideoPacketExit(VideoStream * stream)
     atomic_set(&stream->PacketsFilled, 0);
 
     for (i = 0; i < VIDEO_PACKET_MAX; ++i) {
-//	av_free_packet(&stream->PacketRb[i]);
-	av_packet_unref(&stream->PacketRb[i]);
+		av_packet_unref(&stream->PacketRb[i]);
     }
 //	fprintf(stderr, "VideoPacketExit: %i Packete zerstört.\n",
 //		VIDEO_PACKET_MAX);
@@ -1869,10 +1868,10 @@ int VideoGetBuffers(const VideoStream * stream)
 static void StartVideo(void)
 {
     VideoInit();
-    VideoOsdInit();
+//    VideoOsdInit();
     if (!MyVideoStream->Decoder) {
 	VideoStreamOpen(MyVideoStream);
-	AudioSyncStream = MyVideoStream;
+//	AudioSyncStream = MyVideoStream;
     }
 }
 
@@ -1881,9 +1880,9 @@ static void StartVideo(void)
 */
 static void StopVideo(void)
 {
-    VideoOsdExit();
+//    VideoOsdExit();
     VideoExit();
-    AudioSyncStream = NULL;
+//    AudioSyncStream = NULL;
 
 #if 1
     // FIXME: done by exit: VideoDelHwDecoder(MyVideoStream->HwDecoder);

@@ -136,19 +136,22 @@ struct drm_buf {
 
 struct data_priv {
 	int fd_drm;
-	drmModeModeInfo mode_sd;
 	drmModeModeInfo mode_hdr;
 	drmModeModeInfo mode_hd;
 	drmModeCrtc *saved_crtc;
-	drmEventContext ev;   ///< event context page flip
+	drmEventContext ev;
+	struct drm_buf *act_buf;
 	struct drm_buf bufs[36];
-    struct drm_buf buf_osd;
-    struct drm_buf buf_black;
-	uint32_t connector_id, crtc_id, plane_id, osd_plane_id, front_buf, act_fb_id;
+	struct drm_buf buf_osd;
+	struct drm_buf buf_black;
+	int use_zpos;
+	uint64_t zpos_overlay;
+	uint64_t zpos_primary;
+	uint32_t connector_id, crtc_id, video_plane, osd_plane, front_buf, act_fb_id;
 	bool pflip_pending, cleanup;
-    int second_field;
+	int second_field;
 	AVFrame *lastframe;
-    int prime_buffers;
+	int prime_buffers;
 };
 
 static struct data_priv *d_priv = NULL;
@@ -183,10 +186,11 @@ static uint64_t DrmGetPropertyValue(int fd_drm, uint32_t objectID,
 
 	drmModeFreeObjectProperties(objectProps);
 
+#ifdef DRM_DEBUG
 	if (!found)
 		fprintf(stderr, "DrmGetPropertyValue: Unable to find value for property \'%s\'.\n",
 			propName);
-
+#endif
 	return value;
 }
 
@@ -222,48 +226,67 @@ static int DrmSetPropertyRequest(drmModeAtomicReqPtr ModeReq, int fd_drm,
 	return drmModeAtomicAddProperty(ModeReq, objectID, id, value);
 }
 
-void DrmSetMode(drmModeModeInfo mode)
+///
+/// If primary plane support only rgb and overlay plane nv12
+/// must the zpos change. At the end it must change back.
+/// @param backward		if set change to origin.
+///
+void DrmChangePlanes(int back)
 {
 	struct data_priv *priv = d_priv;
 	drmModeAtomicReqPtr ModeReq;
 	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
-	uint32_t modeID = 0;
-
-#ifdef DRM_DEBUG
-	Info(_("[DrmSetMode]: Setting mode  %ix%i@%i crtc_id %i plane_id %i connector_id %i\n"),
-		mode.hdisplay, mode.vdisplay, mode.vrefresh, priv->crtc_id, priv->plane_id, priv->connector_id);
-#endif
+	uint64_t zpos_video;
+	uint64_t zpos_osd;
 
 	if (!(ModeReq = drmModeAtomicAlloc()))
-		fprintf(stderr, "DrmSetMode: cannot allocate atomic request (%d): %m\n", errno);
+		fprintf(stderr, "DrmChangePlanes: cannot allocate atomic request (%d): %m\n", errno);
 
-	if (drmModeCreatePropertyBlob(priv->fd_drm, &mode, sizeof(mode), &modeID) != 0)
-		fprintf(stderr, "DrmSetMode: Failed to create mode property.\n");
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
-						DRM_MODE_OBJECT_CRTC, "MODE_ID", modeID);
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
-						DRM_MODE_OBJECT_CRTC, "ACTIVE", 1);
-
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->connector_id,
-						DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID", priv->crtc_id);
-
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "CRTC_X", 0);
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "CRTC_Y", 0);
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "CRTC_W", mode.hdisplay);
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "CRTC_H", mode.vdisplay);
+	if (back) {
+		zpos_video = priv->zpos_overlay;
+		zpos_osd = priv->zpos_primary;
+	} else {
+		zpos_video = priv->zpos_primary;
+		zpos_osd = priv->zpos_overlay;
+	}
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->video_plane,
+			DRM_MODE_OBJECT_PLANE, "zpos", zpos_video);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->osd_plane,
+			DRM_MODE_OBJECT_PLANE, "zpos", zpos_osd);
 
 	if (drmModeAtomicCommit(priv->fd_drm, ModeReq, flags, NULL) != 0)
-		fprintf(stderr, "DrmSetMode: Cannot set atomic mode %i x %i (%d): %m\n",
-			mode.hdisplay, mode.vdisplay, errno);
+		fprintf(stderr, "DrmChangePlanes: cannot change planes (%d): %m\n", errno);
 
 	drmModeAtomicFree(ModeReq);
 }
 
-void DrmSetBuf(struct drm_buf *buf)
+void DrmSetCrtc(struct data_priv *priv, drmModeAtomicReqPtr ModeReq,
+				uint32_t plane_id)
+{
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
+						DRM_MODE_OBJECT_PLANE, "CRTC_X", 0);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
+						DRM_MODE_OBJECT_PLANE, "CRTC_Y", 0);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
+						DRM_MODE_OBJECT_PLANE, "CRTC_W", priv->mode_hd.hdisplay);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
+						DRM_MODE_OBJECT_PLANE, "CRTC_H", priv->mode_hd.vdisplay);
+}
+
+void DrmSetSrc(struct data_priv *priv, drmModeAtomicReqPtr ModeReq,
+				uint32_t plane_id, struct drm_buf *buf)
+{
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
+						DRM_MODE_OBJECT_PLANE, "SRC_X", 0);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
+						DRM_MODE_OBJECT_PLANE, "SRC_Y", 0);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
+						DRM_MODE_OBJECT_PLANE, "SRC_W", buf->width << 16);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
+						DRM_MODE_OBJECT_PLANE, "SRC_H", buf->height << 16);
+}
+
+void DrmSetBuf(struct drm_buf *buf, uint32_t plane_id)
 {
 	struct data_priv *priv = d_priv;
 	drmModeAtomicReqPtr ModeReq;
@@ -275,16 +298,8 @@ void DrmSetBuf(struct drm_buf *buf)
 	if (!(ModeReq = drmModeAtomicAlloc()))
 		fprintf(stderr, "DrmSetBuf: cannot allocate atomic request (%d): %m\n", errno);
 
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "SRC_X", 0);
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "SRC_Y", 0);
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "SRC_W", buf->width << 16);
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
-						DRM_MODE_OBJECT_PLANE, "SRC_H", buf->height << 16);
-
-	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->plane_id,
+	DrmSetSrc(priv, ModeReq, plane_id, buf);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
 						DRM_MODE_OBJECT_PLANE, "FB_ID", buf->fb_id);
 
 	if (drmModeAtomicCommit(priv->fd_drm, ModeReq, flags, NULL) != 0)
@@ -297,7 +312,7 @@ void DrmSetBuf(struct drm_buf *buf)
 static int Drm_find_dev(void)
 {
 	struct data_priv *priv;
-	drmVersion *version;
+//	drmVersion *version;
 	drmModeRes *resources;
 	drmModeConnector *connector;
 	drmModeEncoder *encoder = 0;
@@ -305,7 +320,7 @@ static int Drm_find_dev(void)
 	drmModePlane *plane;
 	drmModePlaneRes *plane_res;
 	int i, fd_drm;
-	uint32_t j;
+	uint32_t j, k;
 	uint64_t has_dumb;
 	uint64_t has_prime;
 
@@ -315,8 +330,8 @@ static int Drm_find_dev(void)
 		return -errno;
 	}
 
-	version = drmGetVersion(fd_drm);
-	fprintf(stderr, "Drm_find_dev: open /dev/dri/card0: %i %s\n", version->name_len, version->name);
+//	version = drmGetVersion(fd_drm);
+//	fprintf(stderr, "Drm_find_dev: open /dev/dri/card0: %i %s\n", version->name_len, version->name);
 
 	// allocate mem for d_priv
 	priv = (struct data_priv *) malloc(sizeof(struct data_priv));
@@ -384,11 +399,6 @@ static int Drm_find_dev(void)
 				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE)) {
 				memcpy(&priv->mode_hdr, &connector->modes[i], sizeof(drmModeModeInfo));
 			}
-			// Mode SD
-			if(mode->hdisplay == 720 && mode->vdisplay == 576 && mode->vrefresh == 50
-				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE)) {
-				memcpy(&priv->mode_sd, &connector->modes[i], sizeof(drmModeModeInfo));
-			}
 		}
 		drmModeFreeConnector(connector);
 	}
@@ -410,32 +420,54 @@ static int Drm_find_dev(void)
 
 		uint64_t type = DrmGetPropertyValue(fd_drm, plane_res->planes[j],
 							DRM_MODE_OBJECT_PLANE, "type");
+		uint64_t zpos = DrmGetPropertyValue(fd_drm, plane_res->planes[j],
+							DRM_MODE_OBJECT_PLANE, "zpos");
 
 #ifdef DRM_DEBUG // If more then 2 crtcs this must rewriten!!!
 		Info(_("[Drm_find_dev] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"),
-			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i],
+			plane->video_plane, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i],
 			(type == DRM_PLANE_TYPE_PRIMARY) ? "primary plane" :
 			(type == DRM_PLANE_TYPE_OVERLAY) ? "overlay plane" :
 			(type == DRM_PLANE_TYPE_CURSOR) ? "cursor plane" : "No plane type");
 #endif
 
-		if (type == DRM_PLANE_TYPE_PRIMARY && plane->crtc_id == priv->crtc_id) {
-			priv->plane_id = plane->plane_id;
-		}
-		if (type == DRM_PLANE_TYPE_OVERLAY && (encoder->possible_crtcs & plane->possible_crtcs)) {
-			priv->osd_plane_id = plane->plane_id;
-			break;
+		// test pixel format and plane caps
+		for (k = 0; k < plane->count_formats; k++) {
+			if (encoder->possible_crtcs & plane->possible_crtcs) {
+				switch (plane->formats[k]) {
+					case DRM_FORMAT_NV12:
+						if (!priv->video_plane) {
+							if (type != DRM_PLANE_TYPE_PRIMARY) {
+								priv->use_zpos = 1;
+								priv->zpos_overlay = zpos;
+							}
+							priv->video_plane = plane->plane_id;
+							if (plane->plane_id == priv->osd_plane)
+								priv->osd_plane = 0;
+						}
+						break;
+					case DRM_FORMAT_ARGB8888:
+						if (!priv->osd_plane) {
+							if (type != DRM_PLANE_TYPE_OVERLAY)
+								priv->zpos_primary = zpos;
+							priv->osd_plane = plane->plane_id;
+						}
+						break;
+					default:
+						break;
+				}
+			}
 		}
 		drmModeFreePlane(plane);
 	}
 
-	drmModeFreeResources(resources);
-	drmModeFreeEncoder(encoder);
 	drmModeFreePlaneResources(plane_res);
+	drmModeFreeEncoder(encoder);
+	drmModeFreeResources(resources);
 
 #ifdef DRM_DEBUG
-	Info(_("[Drm_find_dev] DRM setup CRTC: %i plane_id: %i osd_plane_id %i\n"),
-		priv->crtc_id, priv->plane_id, priv->osd_plane_id);
+	Info(_("[Drm_find_dev] DRM setup CRTC: %i video_plane: %i osd_plane %i\n"),
+		priv->crtc_id, priv->video_plane, priv->osd_plane);
 #endif
 
 	d_priv = priv;
@@ -539,35 +571,41 @@ static int DrmSetupFB(struct drm_buf *buf, AVDRMFrameDescriptor *primedata)
 }
 
 static void Drm_page_flip_event( __attribute__ ((unused)) int fd,
-                    __attribute__ ((unused)) unsigned int frame,
-				    __attribute__ ((unused)) unsigned int sec,
-				    __attribute__ ((unused)) unsigned int usec,
-				    void *data)
+					__attribute__ ((unused)) unsigned int frame,
+					__attribute__ ((unused)) unsigned int sec,
+					__attribute__ ((unused)) unsigned int usec,
+					__attribute__ ((unused)) void *data)
 {
 	struct data_priv *priv = d_priv;
-	struct drm_buf *buf = data;
+//	struct drm_buf *buf = data;
 
 	priv->pflip_pending = false;
-	DrmFrame2Drm();
 
 	if (priv->lastframe)
 		av_frame_free(&priv->lastframe);
-	priv->lastframe = buf->frame;
+	priv->lastframe = priv->act_buf->frame;
+
+	DrmFrame2Drm();
 }
 
 static void DrmDestroyFB(int fd_drm, struct drm_buf *buf)
 {
 	struct drm_mode_destroy_dumb dreq;
 
-	if (buf->plane[0] != 0)
-		munmap(buf->plane[0], buf->size);
+//	fprintf(stderr, "DrmDestroyFB: destroy FB.\n");
 
-	drmModeRmFB(fd_drm, buf->fb_id);
+	if (buf->plane[0] != 0) {
+		munmap(buf->plane[0], buf->size);
+	}
+
+	if (drmModeRmFB(fd_drm, buf->fb_id) < 0)
+		fprintf(stderr, "DrmDestroyFB: cannot remake FB (%d): %m\n", errno);
 
 	if (buf->plane[0] != 0) {
 		memset(&dreq, 0, sizeof(dreq));
 		dreq.handle = buf->handle[0];
-		drmIoctl(fd_drm, DRM_IOCTL_MODE_DESTROY_DUMB, &dreq);
+		if (drmIoctl(fd_drm, DRM_IOCTL_MODE_DESTROY_DUMB, &dreq) < 0)
+			fprintf(stderr, "DrmDestroyFB: cannot destroy dumb buffer (%d): %m\n", errno);
 	}
 	buf->width = 0;
 	buf->height = 0;
@@ -611,15 +649,11 @@ static void DrmCleanDrm(AVFrame *frame)
 	decoder = DrmDecoders[0];
 
 	if (priv->lastframe) {
-//		fprintf(stderr, "DrmCleanDrm: lastframe av_frame_free %p %i\n",
-//			priv->lastframe, atomic_read(&decoder->SurfacesFilled));
 		av_frame_free(&priv->lastframe);
 	}
 
 dequeue:
 	if (frame) {
-//		fprintf(stderr, "DrmCleanDrm: av_frame_free %p %i\n",
-//			frame, atomic_read(&decoder->SurfacesFilled));
 		av_frame_free(&frame);
 		pthread_mutex_lock(&VideoLockMutex);
 		decoder->SurfaceRead = (decoder->SurfaceRead + 1) % VIDEO_SURFACES_MAX;
@@ -637,17 +671,13 @@ dequeue:
 	if (priv->prime_buffers) {
 		for (i = 0; i < priv->prime_buffers; ++i) {
 			DrmDestroyFB(priv->fd_drm, &priv->bufs[i]);
-//			fprintf(stderr, "DrmCleanDrm: DrmDestroyFB %i\n", i);
 		}
 		priv->prime_buffers = 0;
 		priv->front_buf = 0;
 	}
 
-	fprintf(stderr, "Cleaned DRM buffers %i Closing %i Queue %i Filter %i\n",
-		priv->prime_buffers, decoder->Closing, atomic_read(&decoder->SurfacesFilled), decoder->FilterInit);
-//	if (decoder->FilterInit)
-//		goto dequeue;
 	decoder->Closing = 0;
+//	fprintf(stderr, "DrmCleanDrm: DRM cleaned.\n");
 }
 
 
@@ -667,10 +697,15 @@ static void DrmFrame2Drm(void)
 
 dequeue:
 	while ((atomic_read(&decoder->SurfacesFilled)) == 0 ) {
-		if (decoder->Closing && priv->prime_buffers)
-			break;
-		if (decoder->Closing && !priv->prime_buffers)
-			decoder->Closing = 0;
+		if (decoder->Closing) {
+			if (priv->prime_buffers) {
+				break;
+			} else {
+				decoder->Closing = 0;
+//				fprintf(stderr, "DrmFrame2Drm: set Closing = 0\n");
+			}
+		}
+
 		usleep(20000);
 	}
 
@@ -685,7 +720,7 @@ dequeue:
 closing:
 		// set a black FB
 		if (priv->buf_black.fb_id != priv->act_fb_id) {
-			DrmSetBuf(&priv->buf_black);
+			DrmSetBuf(&priv->buf_black, priv->video_plane);
 			buf = &priv->buf_black;
 			goto page_flip;
 		}
@@ -712,7 +747,7 @@ closing:
 			if (DrmSetupFB(buf, primedata))
 				fprintf(stderr, "DrmFrame2Drm: DrmSetupFB FB %i x %i failed\n", buf->width, buf->height);
 			if (priv->prime_buffers == 0) {
-				DrmSetBuf(buf);
+				DrmSetBuf(buf, priv->video_plane);
 				priv->act_fb_id = buf->fb_id;
 			}
 			priv->prime_buffers++;
@@ -729,7 +764,7 @@ closing:
 			if (DrmSetupFB(buf, NULL))
 				fprintf(stderr, "DrmFrame2Drm: DrmSetupFB FB %i x %i failed\n", buf->width, buf->height);
 			if (priv->prime_buffers == 0) {
-				DrmSetBuf(buf);
+				DrmSetBuf(buf, priv->video_plane);
 				priv->act_fb_id = buf->fb_id;
 			}
 			priv->prime_buffers++;
@@ -821,14 +856,21 @@ audioclock:
 
 page_flip:
 	priv->act_fb_id = buf->fb_id;
-	if (drmModePageFlip(priv->fd_drm, priv->crtc_id, buf->fb_id,
-			DRM_MODE_PAGE_FLIP_EVENT, buf)) {
-		fprintf(stderr, "DrmFrame2Drm: cannot page flip fb_id %i %i x %i (%d): %m\n",
-			buf->fb_id, frame->width, frame->height, errno);
-	} else {
-		priv->front_buf ^= 1;
-		priv->pflip_pending = true;
-	}
+	priv->act_buf = buf;
+
+	drmModeAtomicReqPtr ModeReq;
+	const uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT;
+	if (!(ModeReq = drmModeAtomicAlloc()))
+		fprintf(stderr, "DrmFrame2Drm: cannot allocate atomic request (%d): %m\n", errno);
+
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->video_plane,
+					DRM_MODE_OBJECT_PLANE, "FB_ID", buf->fb_id);
+	if (drmModeAtomicCommit(priv->fd_drm, ModeReq, flags, NULL) != 0)
+		fprintf(stderr, "DrmFrame2Drm: cannot page flip to FB %i (%d): %m\n",
+			buf->fb_id, errno);
+
+	drmModeAtomicFree(ModeReq);
+	priv->front_buf ^= 1;
 }
 
 ///
@@ -872,10 +914,16 @@ void VideoOsdClear(void)
 {
 	struct data_priv *priv = d_priv;
 
-	if (drmModeSetPlane(priv->fd_drm, priv->osd_plane_id, priv->crtc_id,
-		0, 0, 0, 0, 0, 0, 0, 0, 0 << 16, 0 << 16))
-			fprintf(stderr, "VideoOsdClear: failed to clear plane: (%d): %m\n", (errno));
-	priv->buf_osd.x = 0;
+	if (priv->use_zpos) {
+		DrmChangePlanes(1);
+		memset((void *)priv->buf_osd.plane[0], 0,
+			(size_t)(priv->buf_osd.pitch[0] * priv->buf_osd.height));
+	} else {
+		if (drmModeSetPlane(priv->fd_drm, priv->osd_plane, priv->crtc_id, 0, 0,
+			0, 0, priv->buf_osd.width, priv->buf_osd.height, 0, 0, 0 << 16, 0 << 16))
+				fprintf(stderr, "VideoOsdClear: failed to clear plane: (%d): %m\n", (errno));
+		priv->buf_osd.x = 0;
+	}
 }
 
 ///
@@ -891,18 +939,22 @@ void VideoOsdClear(void)
 ///	@param y	y-coordinate on screen of argb image
 ///
 void VideoOsdDrawARGB(__attribute__ ((unused)) int xi, __attribute__ ((unused)) int yi,
-    int width, int height, int pitch, const uint8_t * argb, int x, int y)
+		int width, int height, int pitch, const uint8_t * argb, int x, int y)
 {
 	struct data_priv *priv = d_priv;
 	int i;
 
-	if (priv->buf_osd.x == 0){
-		if (drmModeSetPlane(priv->fd_drm, priv->osd_plane_id, priv->crtc_id, priv->buf_osd.fb_id,
-            0, x, y, width, height, 0, 0, width << 16, height << 16))
-                fprintf(stderr, "VideoOsdDrawARGB: failed to enable plane: (%d): %m\n", (errno));
-        priv->buf_osd.x = x;
-        priv->buf_osd.y = y;
-    }
+	if (priv->use_zpos) {
+		DrmChangePlanes(0);
+	} else {
+		if (priv->buf_osd.x == 0){
+			if (drmModeSetPlane(priv->fd_drm, priv->osd_plane, priv->crtc_id, priv->buf_osd.fb_id,
+				0, x, y, width, height, 0, 0, width << 16, height << 16))
+					fprintf(stderr, "VideoOsdDrawARGB: failed to enable plane: (%d): %m\n", (errno));
+			priv->buf_osd.x = x;
+			priv->buf_osd.y = y;
+		}
+	}
 
 	for (i = 0; i < height; ++i) {
 		memcpy(priv->buf_osd.plane[0] + (x - priv->buf_osd.x) * 4 + (i + y - priv->buf_osd.y)
@@ -931,37 +983,6 @@ void VideoGetOsdSize(int *width, int *height)
     }
 }
 
-///
-///	Setup osd.
-///
-///	FIXME: looking for BGRA, but this fourcc isn't supported by the
-///	drawing functions yet.
-///
-void VideoOsdInit(void)
-{
-	struct data_priv *priv = d_priv;
-
-    priv->buf_osd.x = 0;
-    priv->buf_osd.width = priv->mode_hd.hdisplay;
-    priv->buf_osd.height = priv->mode_hd.vdisplay;
-
-    if (DrmSetupFB(&priv->buf_osd, NULL)){
-	    fprintf(stderr, "VideoOsdInit: DrmSetupFB FB OSD failed\n");
-    }
-
-    VideoOsdClear();
-}
-
-///
-///	Cleanup OSD.
-///
-void VideoOsdExit(void)
-{
-	struct data_priv *priv = d_priv;
-
-	if (priv)
-		DrmDestroyFB(priv->fd_drm, &priv->buf_osd);
-}
 
 //----------------------------------------------------------------------------
 //	Thread
@@ -1056,7 +1077,7 @@ void VideoDisplayWakeup(void)
 VideoHwDecoder *VideoNewHwDecoder(VideoStream * stream)
 {
     DrmDecoder *decoder;
-	fprintf(stderr, "VideoNewHwDecoder\n");
+//	fprintf(stderr, "VideoNewHwDecoder\n");
 
     if (!(decoder = calloc(1, sizeof(*decoder)))) {
 		Error(_("video/DRM: out of memory\n"));
@@ -1219,7 +1240,7 @@ closing:
 	avfilter_graph_free(&decoder->filter_graph);
 	decoder->FilterInit = 0;
 	decoder->Deint_Close = 0;
-	fprintf(stderr, "VideoFilterThread: closed!!!\n");
+//	fprintf(stderr, "VideoFilterThread: closed!!!\n");
 	return 0;
 }
 
@@ -1333,8 +1354,8 @@ void VideoSetClosing(VideoHwDecoder * decoder, int closing)
 	decoder->Closing = closing;
 	if (decoder->FilterInit)
 		decoder->Deint_Close = 1;
-	fprintf(stderr, "DrmSetClosing %i %i\n",
-		decoder->Closing, decoder->Deint_Close);
+//	fprintf(stderr, "VideoSetClosing %i %i\n",
+//		decoder->Closing, decoder->Deint_Close);
 }
 
 ///
@@ -1594,13 +1615,22 @@ void VideoInit(void)
 	priv->bufs[0].pix_fmt = priv->bufs[1].pix_fmt = DRM_FORMAT_NV12;
 	priv->buf_osd.pix_fmt = DRM_FORMAT_ARGB8888;
 
+	// osd FB
+    priv->buf_osd.x = 0;
+    priv->buf_osd.width = priv->mode_hd.hdisplay;
+    priv->buf_osd.height = priv->mode_hd.vdisplay;
+    if (DrmSetupFB(&priv->buf_osd, NULL)){
+	    fprintf(stderr, "VideoOsdInit: DrmSetupFB FB OSD failed\n");
+    }
+//    VideoOsdClear();
+
+	// black fb
 	priv->buf_black.pix_fmt = DRM_FORMAT_NV12;
 	priv->buf_black.width = 720;
 	priv->buf_black.height = 576;
 	if (DrmSetupFB(&priv->buf_black, NULL))
 		fprintf(stderr, "VideoInit: DrmSetupFB black FB %i x %i failed\n",
 			priv->buf_black.width, priv->buf_black.height);
-	// black fb
 	unsigned int i;
 	for (i = 0; i < priv->buf_black.width * priv->buf_black.height; ++i) {
 		priv->buf_black.plane[0][i] = 0x10;
@@ -1608,10 +1638,58 @@ void VideoInit(void)
 		priv->buf_black.plane[1][i] = 0x80;
 	}
 
-	// save actual modesetting for connector + CRTC
+	// save actual modesetting
 	priv->saved_crtc = drmModeGetCrtc(priv->fd_drm, priv->crtc_id);
 
-	DrmSetMode(priv->mode_hd);
+	drmModeAtomicReqPtr ModeReq;
+	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
+	uint32_t modeID = 0;
+	uint32_t prime_plane;
+	uint32_t overlay_plane;
+
+	if (priv->use_zpos) {
+		prime_plane = priv->osd_plane;
+		overlay_plane = priv->video_plane;
+	} else {
+		prime_plane = priv->video_plane;
+		overlay_plane = priv->osd_plane;
+	}
+
+	if (drmModeCreatePropertyBlob(priv->fd_drm, &priv->mode_hd, sizeof(priv->mode_hd), &modeID) != 0)
+		fprintf(stderr, "Failed to create mode property.\n");
+	if (!(ModeReq = drmModeAtomicAlloc()))
+		fprintf(stderr, "cannot allocate atomic request (%d): %m\n", errno);
+
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
+						DRM_MODE_OBJECT_CRTC, "MODE_ID", modeID);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->connector_id,
+						DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID", priv->crtc_id);
+	DrmSetPropertyRequest(ModeReq, priv->fd_drm, priv->crtc_id,
+						DRM_MODE_OBJECT_CRTC, "ACTIVE", 1);
+	DrmSetCrtc(priv, ModeReq, prime_plane);
+
+	if (priv->use_zpos) {
+		// Primary plane
+		DrmSetSrc(priv, ModeReq, prime_plane, &priv->buf_osd);
+		DrmSetPropertyRequest(ModeReq, priv->fd_drm, prime_plane,
+						DRM_MODE_OBJECT_PLANE, "FB_ID", priv->buf_osd.fb_id);
+		// Black Buffer
+		DrmSetCrtc(priv, ModeReq, overlay_plane);
+		DrmSetPropertyRequest(ModeReq, priv->fd_drm, overlay_plane,
+						DRM_MODE_OBJECT_PLANE, "CRTC_ID", priv->crtc_id);
+		DrmSetSrc(priv, ModeReq, overlay_plane, &priv->buf_black);
+		DrmSetPropertyRequest(ModeReq, priv->fd_drm, overlay_plane,
+						DRM_MODE_OBJECT_PLANE, "FB_ID", priv->buf_black.fb_id);
+	} else {
+		// Black Buffer
+		DrmSetSrc(priv, ModeReq, prime_plane, &priv->buf_black);
+		DrmSetPropertyRequest(ModeReq, priv->fd_drm, prime_plane,
+						DRM_MODE_OBJECT_PLANE, "FB_ID", priv->buf_black.fb_id);
+	}
+	if (drmModeAtomicCommit(priv->fd_drm, ModeReq, flags, NULL) != 0)
+		fprintf(stderr, "cannot set atomic mode (%d): %m\n", errno);
+
+	drmModeAtomicFree(ModeReq);
 
 	// init variables page flip
     if (priv->ev.page_flip_handler != Drm_page_flip_event) {
@@ -1621,13 +1699,7 @@ void VideoInit(void)
 		priv->ev.page_flip_handler = Drm_page_flip_event;
 	}
 
-    // FIXME: make it configurable from gui
-    if (getenv("NO_MPEG_HW")) {
-		VideoHardwareDecoder = 1;
-    }
-    if (getenv("NO_HW")) {
-		VideoHardwareDecoder = 0;
-    }
+//	VideoHardwareDecoder = 1;
 }
 
 ///
@@ -1660,6 +1732,7 @@ void VideoExit(void)
 
 		// Destroy black FB
 		DrmDestroyFB(priv->fd_drm, &priv->buf_black);
+		DrmDestroyFB(priv->fd_drm, &priv->buf_osd);
 
 		// free allocated memory
 		free(priv);

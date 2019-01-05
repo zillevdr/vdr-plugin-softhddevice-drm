@@ -254,6 +254,7 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 		char *codec_name = (char *) malloc(1 + sizeof(avcodec_get_name(codec_id)) + 7);
 		strcpy(codec_name, avcodec_get_name(codec_id));
 		strcat(codec_name, "_rkmpp");
+//		strcat(codec_name, "_v4l2m2m");
 		if (!(decoder->VideoCodec = avcodec_find_decoder_by_name(codec_name)))
 			fprintf(stderr, "The HW video_codec is not present in libavcodec\n");
 //		fprintf(stderr, "codec_name: %s codec_id: %#06x\n", codec_name, codec_id);

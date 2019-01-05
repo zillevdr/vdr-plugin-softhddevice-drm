@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2018-10-17 19:13+0200\n"
+"POT-Creation-Date: 2018-12-16 17:48+0100\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -452,10 +452,6 @@ msgid "[softhddev]: hot key %d is not supported\n"
 msgstr ""
 
 #, c-format
-msgid "[DrmSetMode]: Setting mode  %ix%i@%i crtc_id %i plane_id %i connector_id %i\n"
-msgstr ""
-
-#, c-format
 msgid "[Drm_find_dev] DRM have %i connectors, %i crtcs, %i encoders\n"
 msgstr ""
 
@@ -464,7 +460,7 @@ msgid "[Drm_find_dev] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i 
 msgstr ""
 
 #, c-format
-msgid "[Drm_find_dev] DRM setup CRTC: %i plane_id: %i osd_plane_id %i\n"
+msgid "[Drm_find_dev] DRM setup CRTC: %i video_plane: %i osd_plane %i\n"
 msgstr ""
 
 msgid "video: can't queue cancel video display thread\n"
