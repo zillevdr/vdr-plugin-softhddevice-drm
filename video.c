@@ -72,6 +72,7 @@ signed char VideoHardwareDecoder = -1;	///< flag use hardware decoder
 
 int VideoAudioDelay;
 int SWDeinterlacer;
+int hdr;
 
 extern void AudioVideoReady(int64_t);	///< tell audio video is ready
 
@@ -136,8 +137,7 @@ struct drm_buf {
 
 struct data_priv {
 	int fd_drm;
-	drmModeModeInfo mode_hdr;
-	drmModeModeInfo mode_hd;
+	drmModeModeInfo mode;
 	drmModeCrtc *saved_crtc;
 	drmEventContext ev;
 	struct drm_buf *act_buf;
@@ -268,9 +268,9 @@ void DrmSetCrtc(struct data_priv *priv, drmModeAtomicReqPtr ModeReq,
 	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
 						DRM_MODE_OBJECT_PLANE, "CRTC_Y", 0);
 	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
-						DRM_MODE_OBJECT_PLANE, "CRTC_W", priv->mode_hd.hdisplay);
+						DRM_MODE_OBJECT_PLANE, "CRTC_W", priv->mode.hdisplay);
 	DrmSetPropertyRequest(ModeReq, priv->fd_drm, plane_id,
-						DRM_MODE_OBJECT_PLANE, "CRTC_H", priv->mode_hd.vdisplay);
+						DRM_MODE_OBJECT_PLANE, "CRTC_H", priv->mode.vdisplay);
 }
 
 void DrmSetSrc(struct data_priv *priv, drmModeAtomicReqPtr ModeReq,
@@ -391,13 +391,13 @@ static int Drm_find_dev(void)
 			mode = &connector->modes[i];
 			// Mode HD
 			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 && mode->vrefresh == 50
-				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE)) {
-				memcpy(&priv->mode_hd, &connector->modes[i], sizeof(drmModeModeInfo));
+				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE) && !hdr) {
+				memcpy(&priv->mode, &connector->modes[i], sizeof(drmModeModeInfo));
 			}
 			// Mode HDready
 			if(mode->hdisplay == 1280 && mode->vdisplay == 720 && mode->vrefresh == 50
-				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE)) {
-				memcpy(&priv->mode_hdr, &connector->modes[i], sizeof(drmModeModeInfo));
+				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE) && hdr) {
+				memcpy(&priv->mode, &connector->modes[i], sizeof(drmModeModeInfo));
 			}
 		}
 		drmModeFreeConnector(connector);
@@ -964,25 +964,6 @@ void VideoOsdDrawARGB(__attribute__ ((unused)) int xi, __attribute__ ((unused)) 
 //	   width, height, pitch, x, y, xi, yi, y - priv->buf_osd.y, x - priv->buf_osd.x);
 }
 
-///
-///	Get OSD size.
-///
-///	@param[out] width	OSD width
-///	@param[out] height	OSD height
-///
-void VideoGetOsdSize(int *width, int *height)
-{
-	struct data_priv *priv = d_priv;
-
-    *width = 1920;
-    *height = 1080;			// unknown default
-
-    if (priv->mode_hd.hdisplay && priv->mode_hd.vdisplay) {
-	*width = priv->mode_hd.hdisplay;
-	*height = priv->mode_hd.vdisplay;
-    }
-}
-
 
 //----------------------------------------------------------------------------
 //	Thread
@@ -1545,7 +1526,7 @@ void VideoGetStats(VideoHwDecoder * decoder, int *missed, int *duped,
 }
 
 ///
-///	Get decoder video stream size.
+///	Get screen size.
 ///
 ///	@param hw_decoder	video hardware decoder
 ///	@param[out] width	video stream width
@@ -1553,20 +1534,30 @@ void VideoGetStats(VideoHwDecoder * decoder, int *missed, int *duped,
 ///	@param[out] aspect_num	video stream aspect numerator
 ///	@param[out] aspect_den	video stream aspect denominator
 ///
-void VideoGetVideoSize(__attribute__ ((unused)) VideoHwDecoder * hw_decoder, int *width, int *height,
+void VideoGetScreenSize(__attribute__ ((unused)) VideoHwDecoder * hw_decoder, int *width, int *height,
     int *aspect_num, int *aspect_den)
 {
-	fprintf(stderr, "VideoGetVideoSize\n");
-    *width = 1920;
-    *height = 1080;
+	struct data_priv *priv = d_priv;
+
+    *width = priv->mode.hdisplay;
+    *height = priv->mode.vdisplay;
     *aspect_num = 16;
     *aspect_den = 9;
-    // FIXME: test to check if working, than make module function
 }
 
 //----------------------------------------------------------------------------
 //	Setup
 //----------------------------------------------------------------------------
+///
+///	Set screen size.
+///
+///	@param width	screen width
+///
+void VideoSetScreenSize(char *size)
+{
+	if (!strcasecmp("hdr", size))
+		hdr = 1;
+}
 
 ///
 ///	Set audio delay.
@@ -1617,8 +1608,8 @@ void VideoInit(void)
 
 	// osd FB
     priv->buf_osd.x = 0;
-    priv->buf_osd.width = priv->mode_hd.hdisplay;
-    priv->buf_osd.height = priv->mode_hd.vdisplay;
+    priv->buf_osd.width = priv->mode.hdisplay;
+    priv->buf_osd.height = priv->mode.vdisplay;
     if (DrmSetupFB(&priv->buf_osd, NULL)){
 	    fprintf(stderr, "VideoOsdInit: DrmSetupFB FB OSD failed\n");
     }
@@ -1655,7 +1646,7 @@ void VideoInit(void)
 		overlay_plane = priv->osd_plane;
 	}
 
-	if (drmModeCreatePropertyBlob(priv->fd_drm, &priv->mode_hd, sizeof(priv->mode_hd), &modeID) != 0)
+	if (drmModeCreatePropertyBlob(priv->fd_drm, &priv->mode, sizeof(priv->mode), &modeID) != 0)
 		fprintf(stderr, "Failed to create mode property.\n");
 	if (!(ModeReq = drmModeAtomicAlloc()))
 		fprintf(stderr, "cannot allocate atomic request (%d): %m\n", errno);

@@ -285,7 +285,7 @@ void cSoftOsd::Flush(void)
 		    }
 		    ys = 0;
 		}
-		::GetOsdSize(&width, &height, &video_aspect);
+		::GetScreenSize(&width, &height, &video_aspect);
 		if (w > width - xs - x1) {
 		    w = width - xs - x1;
 		    if (w <= 0) {
@@ -388,7 +388,7 @@ void cSoftOsd::Flush(void)
 		y = 0;
 	    }
 
-	    ::GetOsdSize(&width, &height, &video_aspect);
+	    ::GetScreenSize(&width, &height, &video_aspect);
 	    if (w > width - x) {
 		w = width - x;
 	    }
@@ -1343,7 +1343,7 @@ void cSoftHdDevice::SetVideoFormat(bool video_format16_9)
 */
 void cSoftHdDevice::GetVideoSize(int &width, int &height, double &video_aspect)
 {
-    ::GetVideoSize(&width, &height, &video_aspect);
+    ::GetScreenSize(&width, &height, &video_aspect);
 }
 
 /**
@@ -1353,7 +1353,7 @@ void cSoftHdDevice::GetVideoSize(int &width, int &height, double &video_aspect)
 */
 void cSoftHdDevice::GetOsdSize(int &width, int &height, double &pixel_aspect)
 {
-    ::GetOsdSize(&width, &height, &pixel_aspect);
+    ::GetScreenSize(&width, &height, &pixel_aspect);
 }
 
 // ----------------------------------------------------------------------------

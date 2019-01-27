@@ -2371,7 +2371,7 @@ int64_t GetSTC(void)
 **	@param height[OUT]	height of video stream
 **	@param aspect[OUT]	aspect ratio (4/3, 16/9, ...) of video stream
 */
-void GetVideoSize(int *width, int *height, double *aspect)
+void GetScreenSize(int *width, int *height, double *aspect)
 {
 #ifdef DEBUG
     static int done_width;
@@ -2381,7 +2381,7 @@ void GetVideoSize(int *width, int *height, double *aspect)
     int aspect_den;
 
     if (MyVideoStream->HwDecoder) {
-	VideoGetVideoSize(MyVideoStream->HwDecoder, width, height, &aspect_num,
+	VideoGetScreenSize(MyVideoStream->HwDecoder, width, height, &aspect_num,
 	    &aspect_den);
 	*aspect = (double)aspect_num / (double)aspect_den;
     } else {
@@ -2670,33 +2670,6 @@ int Flush(int timeout)
 //////////////////////////////////////////////////////////////////////////////
 
 /**
-**	Get OSD size and aspect.
-**
-**	@param width[OUT]	width of OSD
-**	@param height[OUT]	height of OSD
-**	@param aspect[OUT]	aspect ratio (4/3, 16/9, ...) of OSD
-*/
-void GetOsdSize(int *width, int *height, double *aspect)
-{
-#ifdef DEBUG
-    static int done_width;
-    static int done_height;
-#endif
-
-    VideoGetOsdSize(width, height);
-    *aspect = 16.0 / 9.0 / (double)*width * (double)*height;
-
-#ifdef DEBUG
-    if (done_width != *width || done_height != *height) {
-	Debug(3, "[softhddev]%s: %dx%d %g\n", __FUNCTION__, *width, *height,
-	    *aspect);
-	done_width = *width;
-	done_height = *height;
-    }
-#endif
-}
-
-/**
 **	Close OSD.
 */
 void OsdClose(void)
@@ -2734,6 +2707,7 @@ const char *CommandLineHelp(void)
     return "  -a device\taudio device (fe. alsa: hw:0,0)\n"
 	"  -p device\taudio device for pass-through (hw:0,1)\n"
 	"  -c channel\taudio mixer channel name (fe. PCM)\n"
+	"  -s screen size\tset screen size  (hdr for 1280 x 720)\n"
 	"  -w workaround\tenable/disable workarounds\n"
 	"\talsa-driver-broken\tdisable broken alsa driver message\n"
 	"\talsa-no-close-open\tdisable close open to fix alsa no sound bug\n"
@@ -2754,7 +2728,7 @@ int ProcessArgs(int argc, char *const argv[])
     //
 
     for (;;) {
-	switch (getopt(argc, argv, "-a:c:p:w:")) {
+	switch (getopt(argc, argv, "-a:c:p:s:w:")) {
 	    case 'a':			// audio device for pcm
 		AudioSetDevice(optarg);
 		continue;
@@ -2763,6 +2737,9 @@ int ProcessArgs(int argc, char *const argv[])
 		continue;
 	    case 'p':			// pass-through audio device
 		AudioSetPassthroughDevice(optarg);
+		continue;
+	    case 's':			// screen size
+		VideoSetScreenSize(optarg);
 		continue;
 	    case 'w':			// workarounds
 		if (!strcasecmp("no-hw-decoder", optarg)) {

@@ -25,7 +25,8 @@ extern "C"
 {
 #endif
     /// C plugin get osd size and ascpect
-    extern void GetOsdSize(int *, int *, double *);
+//    extern void GetOsdSize(int *, int *, double *);
+    extern void GetScreenSize(int *, int *, double *);
 
     /// C plugin close osd
     extern void OsdClose(void);
@@ -54,7 +55,7 @@ extern "C"
     /// C plugin get current system time counter
     extern int64_t GetSTC(void);
     /// C plugin get video stream size and aspect
-    extern void GetVideoSize(int *, int *, double *);
+//    extern void GetVideoSize(int *, int *, double *);
     /// C plugin set trick speed
     extern void TrickSpeed(int);
     /// C plugin clears all video and audio data from the device

@@ -112,6 +112,7 @@ Commandline:
     -a audio_device
     -p device for pass-through
     -c audio mixer channel name
+    -s set screen size  (hdr for 1280 x 720)
 
 SVDRP:
 ------

@@ -75,9 +75,6 @@ extern void VideoOsdClear(void);
 extern void VideoOsdDrawARGB(int, int, int, int, int, const uint8_t *, int,
     int);
 
-    /// Get OSD size.
-extern void VideoGetOsdSize(int *, int *);
-
     /// Set closing flag.
 extern void VideoSetClosing(VideoHwDecoder *, int);
 
@@ -96,8 +93,11 @@ extern uint8_t *VideoGrabService(int *, int *, int *);
     /// Get decoder statistics.
 extern void VideoGetStats(VideoHwDecoder *, int *, int *, int *, int *);
 
-    /// Get video stream size
-extern void VideoGetVideoSize(VideoHwDecoder *, int *, int *, int *, int *);
+    /// Get screen size
+extern void VideoGetScreenSize(VideoHwDecoder *, int *, int *, int *, int *);
+
+    /// Set screen size
+extern void VideoSetScreenSize(char *);
 
 extern void VideoInit(void);	///< Setup video module.
 extern void VideoExit(void);		///< Cleanup and exit video module.
