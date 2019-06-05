@@ -425,7 +425,7 @@ static int Drm_find_dev(void)
 
 #ifdef DRM_DEBUG // If more then 2 crtcs this must rewriten!!!
 		Info(_("[Drm_find_dev] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"),
-			plane->video_plane, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i],
+			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i],
 			(type == DRM_PLANE_TYPE_PRIMARY) ? "primary plane" :
 			(type == DRM_PLANE_TYPE_OVERLAY) ? "overlay plane" :
 			(type == DRM_PLANE_TYPE_CURSOR) ? "cursor plane" : "No plane type");
