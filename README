@@ -1,5 +1,5 @@
 Copyright (c) 2011 - 2013 by Johns.  All Rights Reserved.
-Copyright (c) 2018 by zillevdr.  All Rights Reserved.
+Copyright (c) 2018 - 2019 by zillevdr.  All Rights Reserved.
 
 License: AGPLv3
 
@@ -18,6 +18,7 @@ Install:
 --------
 	git clone https://github.com/zillevdr/vdr-plugin-softhddevice-drm.git
 	cd vdr-plugin-softhddevice-drm
+	For mmal (Raspberry Pi) set MMAL to 1 in Makefile.
 	make
 	make install
 
@@ -30,10 +31,9 @@ Requirement:
 		for DVB.
 		http://www.tvdr.de/
 
-	media-video/ffmpeg (version >=4.0)
-		Complete solution to record, convert and stream audio and
-		video. Includes libavcodec and libavfilter.
-		http://ffmpeg.org
+	media-video/ffmpeg
+		MMAL (RaspberryPi) 	version >=3.2
+		rkmpp (Rockchip)	version >=4.0
 
 	media-libs/alsa-lib
 		Advanced Linux Sound Architecture Library
@@ -42,7 +42,7 @@ Requirement:
 TODO:
 -----
 	cleaning
-	Testing
+	testing
 	other devices
 	deinterlacing
 
@@ -112,7 +112,7 @@ Commandline:
     -a audio_device
     -p device for pass-through
     -c audio mixer channel name
-    -s set screen size  (hdr for 1280 x 720)
+    -s set screen size  (hdr for 1280 x 720 else 1920 x 1080)
 
 SVDRP:
 ------

@@ -683,9 +683,9 @@ void AudioFilterInit(AVFrame *frame)
 
 	// input buffer
 	if (!(abuffer = avfilter_get_by_name("abuffer")))
-		fprintf(stderr, "Could not find the abuffer filter.\n");
+		fprintf(stderr, "AudioFilterInit: Could not find the abuffer filter.\n");
 	if (!(abuffersrc_ctx = avfilter_graph_alloc_filter(filter_graph, abuffer, "src")))
-		fprintf(stderr, "Could not allocate the abuffersrc_ctx instance.\n");
+		fprintf(stderr, "AudioFilterInit: Could not allocate the abuffersrc_ctx instance.\n");
 	av_get_channel_layout_string(ch_layout, sizeof(ch_layout), frame->channels, frame->channel_layout);
 //	fprintf(stderr, "CodecAudioFilterInit: ch_layout %s sample_fmt %s sample_rate %d\n",
 //		ch_layout, av_get_sample_fmt_name(frame->format), frame->sample_rate);
@@ -695,45 +695,45 @@ void AudioFilterInit(AVFrame *frame)
 	av_opt_set_int(abuffersrc_ctx, "sample_rate",    frame->sample_rate,                    AV_OPT_SEARCH_CHILDREN);
 	// initialize the filter with NULL options, set all options above.
 	if (avfilter_init_str(abuffersrc_ctx, NULL) < 0)
-		fprintf(stderr, "Could not initialize the abuffer filter.\n");
+		fprintf(stderr, "AudioFilterInit: Could not initialize the abuffer filter.\n");
 
 	if (AudioEq) {
 		// superequalizer
 		if (!(eq = avfilter_get_by_name("superequalizer")))
-			fprintf(stderr, "Could not find the superequalizer filter.\n");
+			fprintf(stderr, "AudioFilterInit: Could not find the superequalizer filter.\n");
 		if (!(filter_ctx[n_filter] = avfilter_graph_alloc_filter(filter_graph, eq, "superequalizer")))
-			fprintf(stderr, "Could not allocate the superequalizer instance.\n");
+			fprintf(stderr, "AudioFilterInit: Could not allocate the superequalizer instance.\n");
 		snprintf(options_str, sizeof(options_str),"1b=%.2f:2b=%.2f:3b=%.2f:4b=%.2f:5b=%.2f"
 			":6b=%.2f:7b=%.2f:8b=%.2f:9b=%.2f:10b=%.2f:11b=%.2f:12b=%.2f:13b=%.2f:14b=%.2f:"
-			"15b=%.2f:16b=%.2f:17b=%.2f:18b=%.2f", AudioEqBand[0], AudioEqBand[1],
+			"15b=%.2f:16b=%.2f:17b=%.2f:18b=%.2f ", AudioEqBand[0], AudioEqBand[1],
 			AudioEqBand[2], AudioEqBand[3], AudioEqBand[4], AudioEqBand[5],
 			AudioEqBand[6], AudioEqBand[7], AudioEqBand[8], AudioEqBand[9],
 			AudioEqBand[10], AudioEqBand[11], AudioEqBand[12], AudioEqBand[13],
 			AudioEqBand[14], AudioEqBand[15], AudioEqBand[16], AudioEqBand[17]);
 		if (avfilter_init_str(filter_ctx[n_filter], options_str) < 0)
-			fprintf(stderr, "Could not initialize the superequalizer filter.\n");
+			fprintf(stderr, "AudioFilterInit: Could not initialize the superequalizer filter.\n");
 		n_filter++;
 	}
 	// aformat
 	if (!(aformat = avfilter_get_by_name("aformat")))
-		fprintf(stderr, "Could not find the aformat filter.\n");
+		fprintf(stderr, "AudioFilterInit: Could not find the aformat filter.\n");
 	if (!(filter_ctx[n_filter] = avfilter_graph_alloc_filter(filter_graph, aformat, "aformat")))
-		fprintf(stderr, "Could not allocate the aformat instance.\n");
+		fprintf(stderr, "AudioFilterInit: Could not allocate the aformat instance.\n");
 	snprintf(options_str, sizeof(options_str),
 		"sample_fmts=%s:sample_rates=%d:channel_layouts=%s",
 		av_get_sample_fmt_name(AV_SAMPLE_FMT_S16),
 		frame->sample_rate, ch_layout);
 	if (avfilter_init_str(filter_ctx[n_filter], options_str) < 0)
-		fprintf(stderr, "Could not initialize the aformat filter.\n");
+		fprintf(stderr, "AudioFilterInit: Could not initialize the aformat filter.\n");
 	n_filter++;
 
 	// abuffersink
 	if (!(abuffersink = avfilter_get_by_name("abuffersink")))
-		fprintf(stderr, "Could not find the abuffersink filter.\n");
+		fprintf(stderr, "AudioFilterInit: Could not find the abuffersink filter.\n");
 	if (!(filter_ctx[n_filter] = avfilter_graph_alloc_filter(filter_graph, abuffersink, "sink")))
-		fprintf(stderr, "Could not allocate the abuffersink instance.\n");
+		fprintf(stderr, "AudioFilterInit: Could not allocate the abuffersink instance.\n");
 	if (avfilter_init_str(filter_ctx[n_filter], NULL) < 0)
-		fprintf(stderr, "Could not initialize the abuffersink instance.\n");
+		fprintf(stderr, "AudioFilterInit: Could not initialize the abuffersink instance.\n");
 	n_filter++;
 
 	// Connect the filters
@@ -745,11 +745,11 @@ void AudioFilterInit(AVFrame *frame)
 		}
 	}
 	if (err < 0)
-		fprintf(stderr, "Error connecting audio filters\n");
+		fprintf(stderr, "AudioFilterInit: Error connecting audio filters\n");
 
 	// Configure the graph.
 	if (avfilter_graph_config(filter_graph, NULL) < 0)
-		fprintf(stderr, "Error configuring the audio filter graph\n");
+		fprintf(stderr, "AudioFilterInit: Error configuring the audio filter graph\n");
 
 	abuffersink_ctx = filter_ctx[n_filter - 1];
 	Filterchanged = 0;

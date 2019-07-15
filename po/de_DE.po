@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2018-12-16 17:48+0100\n"
+"POT-Creation-Date: 2019-07-14 17:36+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -142,16 +142,6 @@ msgstr ""
 msgid "codec: can't allocate vodeo decoder\n"
 msgstr ""
 
-#, c-format
-msgid "codec: codec ID %#06x not found\n"
-msgstr ""
-
-msgid "codec: can't allocate video codec context\n"
-msgstr ""
-
-msgid "codec: can't open video codec!\n"
-msgstr ""
-
 msgid "codec: can't allocate decoder frame\n"
 msgstr ""
 
@@ -159,6 +149,10 @@ msgid "codec: can't allocate audio decoder\n"
 msgstr ""
 
 msgid "codec: can't allocate audio decoder frame buffer\n"
+msgstr ""
+
+#, c-format
+msgid "codec: codec ID %#06x not found\n"
 msgstr ""
 
 msgid "codec: can't allocate audio codec context\n"
@@ -236,7 +230,7 @@ msgstr ""
 msgid "video: packet buffer too small for %d\n"
 msgstr ""
 
-msgid "video: no empty slot in packet ringbuffer\n"
+msgid "[VideoNextPacket] no empty slot in packet ringbuffer\n"
 msgstr ""
 
 msgid "[softhddev] too short PES video packet\n"
@@ -451,31 +445,16 @@ msgstr ""
 msgid "[softhddev]: hot key %d is not supported\n"
 msgstr ""
 
-#, c-format
-msgid "[Drm_find_dev] DRM have %i connectors, %i crtcs, %i encoders\n"
-msgstr ""
-
-#, c-format
-msgid "[Drm_find_dev] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"
-msgstr ""
-
-#, c-format
-msgid "[Drm_find_dev] DRM setup CRTC: %i video_plane: %i osd_plane %i\n"
-msgstr ""
-
 msgid "video: can't queue cancel video display thread\n"
-msgstr ""
-
-msgid "video: can't cancel DrmDisplayFrame thread\n"
 msgstr ""
 
 msgid "video: can't cancel video display thread\n"
 msgstr ""
 
-msgid "video/DRM: out of memory\n"
+msgid "video/MMAL: out of decoders\n"
 msgstr ""
 
-msgid "video/DRM: decoder not in decoder list.\n"
+msgid "video/MMAL: out of memory\n"
 msgstr ""
 
 msgid "video: out of memory\n"

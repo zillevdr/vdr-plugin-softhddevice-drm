@@ -1729,3 +1729,17 @@ void VideoExit(void)
 		free(priv);
 	}
 }
+
+const char *VideoGetDecoderName(const char *codec_name)
+{
+	if (!(strcmp("mpeg2video", codec_name)))
+		return "mpeg2video";
+
+	if (!(strcmp("h264", codec_name)))
+		return "h264_rkmpp";
+
+	if (!(strcmp("hevc", codec_name)))
+		return "hevc_rkmpp";
+
+	return codec_name;
+}

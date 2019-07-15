@@ -127,80 +127,6 @@ static enum AVPixelFormat Codec_get_format(AVCodecContext * video_ctx,
     return Video_get_format(decoder->HwDecoder, video_ctx, fmt);
 }
 
-/**
-**	Video buffer management, get buffer for frame.
-**
-**	Called at the beginning of each frame to get a buffer for it.
-**
-**	@param video_ctx	Codec context
-**	@param frame		Get buffer for this frame
-*/
-/*static int Codec_get_buffer(AVCodecContext * video_ctx, AVFrame * frame)
-{
-    VideoDecoder *decoder;
-
-    decoder = video_ctx->opaque;
-    if (!decoder->GetFormatDone) {	// get_format missing
-	enum AVPixelFormat fmts[2];
-
-	fprintf(stderr, "codec: buggy libav, use ffmpeg\n");
-	Warning(_("codec: buggy libav, use ffmpeg\n"));
-	fmts[0] = video_ctx->pix_fmt;
-	fmts[1] = AV_PIX_FMT_NONE;
-	Codec_get_format(video_ctx, fmts);
-    }
-    // VA-API:
-    if (video_ctx->hwaccel_context) {
-	unsigned surface;
-
-	surface = VideoGetSurface(decoder->HwDecoder, video_ctx);
-
-	//Debug(3, "codec: use surface %#010x\n", surface);
-
-	// vaapi needs both fields set
-	frame->data[0] = (void *)(size_t) surface;
-	frame->data[3] = (void *)(size_t) surface;
-
-	return 0;
-    }
-    //Debug(3, "codec: fallback to default get_buffer\n");
-    return avcodec_default_get_buffer(video_ctx, frame);
-}*/
-
-/*static int Codec_get_buffer2(AVCodecContext * video_ctx, AVFrame * frame)
-{
-    return avcodec_default_get_buffer2(video_ctx, frame, 0);
-}*/
-
-/**
-**	Video buffer management, release buffer for frame.
-**	Called to release buffers which were allocated with get_buffer.
-**
-**	@param video_ctx	Codec context
-**	@param frame		Release buffer for this frame
-*/
-/*static void Codec_release_buffer(AVCodecContext * video_ctx, AVFrame * frame)
-{
-    // VA-API
-    if (video_ctx->hwaccel_context) {
-	VideoDecoder *decoder;
-	unsigned surface;
-
-	decoder = video_ctx->opaque;
-	surface = (unsigned)(size_t) frame->data[3];
-
-	//Debug(3, "codec: release surface %#010x\n", surface);
-	VideoReleaseSurface(decoder->HwDecoder, surface);
-
-	frame->data[0] = NULL;
-	frame->data[3] = NULL;
-
-	return;
-    }
-    //Debug(3, "codec: fallback to default release_buffer\n");
-    return avcodec_default_release_buffer(video_ctx, frame);
-}*/
-
 //----------------------------------------------------------------------------
 //	Test
 //----------------------------------------------------------------------------
@@ -242,42 +168,23 @@ void CodecVideoDelDecoder(VideoDecoder * decoder)
 */
 void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 {
+	if (!(decoder->VideoCodec = avcodec_find_decoder_by_name(VideoGetDecoderName(
+		avcodec_get_name(codec_id)))))
+		fprintf(stderr, "[CodecVideoOpen] The video_codec %s is not present in libavcodec\n",
+			VideoGetDecoderName(avcodec_get_name(codec_id)));
 
-	if (codec_id == AV_CODEC_ID_MPEG2VIDEO) {
-		if (!(decoder->VideoCodec = avcodec_find_decoder(codec_id))) {
-			Fatal(_("codec: codec ID %#06x not found\n"), codec_id);
-			fprintf(stderr, "codec: codec ID %#06x not found\n", codec_id);
-		}
-//		fprintf(stderr, "codec_name: %s codec_id: %#06x\n", avcodec_get_name(codec_id), codec_id);
-	} else {
-		// strlen statt sizeof???
-		char *codec_name = (char *) malloc(1 + sizeof(avcodec_get_name(codec_id)) + 7);
-		strcpy(codec_name, avcodec_get_name(codec_id));
-		strcat(codec_name, "_rkmpp");
-//		strcat(codec_name, "_v4l2m2m");
-		if (!(decoder->VideoCodec = avcodec_find_decoder_by_name(codec_name)))
-			fprintf(stderr, "The HW video_codec is not present in libavcodec\n");
-//		fprintf(stderr, "codec_name: %s codec_id: %#06x\n", codec_name, codec_id);
-		free(codec_name);
-//		av_log_set_level(AV_LOG_DEBUG);
-//		av_log_set_level(AV_LOG_ERROR );
+	decoder->VideoCtx = avcodec_alloc_context3(decoder->VideoCodec);
+	if (!decoder->VideoCtx) {
+		fprintf(stderr, "[CodecVideoOpen]: can't open video codec!\n");
 	}
 
-	if (!(decoder->VideoCtx = avcodec_alloc_context3(decoder->VideoCodec))) {
-		Fatal(_("codec: can't allocate video codec context\n"));
-		fprintf(stderr, "codec: can't allocate video codec context\n");
-    }
-
-//	decoder->VideoCtx->codec_id = codec_id;
+	decoder->VideoCtx->codec_id = codec_id;
 	decoder->VideoCtx->get_format = Codec_get_format;
-	decoder->VideoCtx->opaque = decoder;	// our structure
+	decoder->VideoCtx->opaque = decoder;
 
 	pthread_mutex_lock(&CodecLockMutex);
-	// open codec
-	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCodec, NULL) < 0) {
-		Fatal(_("codec: can't open video codec!\n"));
-		fprintf(stderr, "codec: can't open video codec!\n");
-	}
+	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCodec, NULL) < 0)
+		fprintf(stderr, "[CodecVideoOpen] Error opening the decoder: ");
 	pthread_mutex_unlock(&CodecLockMutex);
 }
 
@@ -294,18 +201,17 @@ void CodecVideoClose(VideoDecoder * video_decoder)
 		av_init_packet(&avpkt);
 		avpkt.data = NULL;
 		avpkt.size = 0;
-
 		CodecVideoDecode(video_decoder, &avpkt);
 		av_packet_unref(&avpkt);
 	}
 
-    if (video_decoder->VideoCtx) {
-	pthread_mutex_lock(&CodecLockMutex);
-	avcodec_close(video_decoder->VideoCtx);
-	avcodec_free_context(&video_decoder->VideoCtx);
-	av_freep(&video_decoder->VideoCtx);
-	pthread_mutex_unlock(&CodecLockMutex);
-    }
+	if (video_decoder->VideoCtx) {
+		pthread_mutex_lock(&CodecLockMutex);
+		avcodec_close(video_decoder->VideoCtx);
+		avcodec_free_context(&video_decoder->VideoCtx);
+		av_freep(&video_decoder->VideoCtx);
+		pthread_mutex_unlock(&CodecLockMutex);
+	}
 }
 
 #if 0
@@ -349,21 +255,59 @@ void DisplayPts(AVCodecContext * video_ctx, AVFrame * frame)
 */
 int CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 {
-    AVCodecContext *video_ctx;
-    AVFrame *frame;
-    int ret_in, ret_out;
-//    int used;
-    int got_frame;
-    int cap_delay = 0;
+	AVCodecContext *video_ctx;
+	AVFrame *frame;
+	int ret_in, ret_out;
+	int got_frame;
+	int cap_delay = 0;
 
-    if (!(decoder->Frame = av_frame_alloc())) {
-	Fatal(_("codec: can't allocate decoder frame\n"));
-    }
-    decoder->Frame->format = AV_PIX_FMT_NONE;
+	if (!(decoder->Frame = av_frame_alloc())) {
+		Fatal(_("codec: can't allocate decoder frame\n"));
+	}
+	decoder->Frame->format = AV_PIX_FMT_NONE;
 
-    video_ctx = decoder->VideoCtx;
-    frame = decoder->Frame;
-    if (avpkt->data == NULL)
+	video_ctx = decoder->VideoCtx;
+
+#if 0
+	if (!video_ctx->extradata_size) {
+		AVBSFContext *bsf_ctx;
+		const AVBitStreamFilter *f;
+		int extradata_size;
+		uint8_t *extradata;
+
+		f = av_bsf_get_by_name("extract_extradata");
+		if (!f)
+			fprintf(stderr, "extradata av_bsf_get_by_name failed!\n");
+
+		if (av_bsf_alloc(f, &bsf_ctx) < 0)
+			fprintf(stderr, "extradata av_bsf_alloc failed!\n");
+
+		bsf_ctx->par_in->codec_id = video_ctx->codec_id;
+
+		if (av_bsf_init(bsf_ctx) < 0)
+			fprintf(stderr, "extradata av_bsf_init failed!\n");
+
+		if (av_bsf_send_packet(bsf_ctx, avpkt) < 0)
+			fprintf(stderr, "extradata av_bsf_send_packet failed!\n");
+
+		if (av_bsf_receive_packet(bsf_ctx, avpkt) < 0)
+			fprintf(stderr, "extradata av_bsf_send_packet failed!\n");
+
+		extradata = av_packet_get_side_data(avpkt, AV_PKT_DATA_NEW_EXTRADATA,
+			&extradata_size);
+
+		video_ctx->extradata = av_mallocz(extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
+		memcpy(video_ctx->extradata, extradata, extradata_size);
+		video_ctx->extradata_size = extradata_size;
+
+		av_bsf_free(&bsf_ctx);
+
+		fprintf(stderr, "extradata %p %d\n", video_ctx->extradata, video_ctx->extradata_size);
+	}
+#endif
+
+	frame = decoder->Frame;
+	if (avpkt->data == NULL)
 		cap_delay = 1;
 
 	ret_in = avcodec_send_packet(video_ctx, avpkt);
@@ -389,7 +333,7 @@ int CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 //			cap_delay, frame->width, frame->height,
 //			video_ctx->width, video_ctx->height, frame);
 
-    if (got_frame && !frame->width == 0 && !cap_delay && frame->width == video_ctx->width) {
+    if (got_frame && frame->width != 0 && !cap_delay && frame->width == video_ctx->width) {
 		VideoRenderFrame(decoder->HwDecoder, video_ctx, frame);
 	} else {
 //		fprintf(stderr, "CodecVideoDecode cap_delay %i frame %i x %i ctx %i x %i frame %p\n",
@@ -498,7 +442,7 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
     AVCodec *audio_codec;
 
     Debug(3, "codec: using audio codec ID %#06x (%s)\n", codec_id,
-	avcodec_get_name(codec_id));
+		avcodec_get_name(codec_id));
 
     if (!(audio_codec = avcodec_find_decoder(codec_id))) {
 	Fatal(_("codec: codec ID %#06x not found\n"), codec_id);
@@ -672,9 +616,11 @@ void CodecInit(void)
     pthread_mutex_init(&CodecLockMutex, NULL);
 #ifndef DEBUG
     // disable display ffmpeg error messages
-    av_log_set_callback(CodecNoopCallback);
+//    av_log_set_callback(CodecNoopCallback);
 #else
     (void)CodecNoopCallback;
+//		av_log_set_level(AV_LOG_DEBUG);
+//		av_log_set_level(AV_LOG_ERROR );
 #endif
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58,18,100)

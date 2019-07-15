@@ -27,10 +27,13 @@
 //----------------------------------------------------------------------------
 //	Typedefs
 //----------------------------------------------------------------------------
-
+#ifdef MMAL
+    /// Video hardware decoder typedef
+typedef struct _Mmal_decoder_ VideoHwDecoder;
+#else
     /// Video hardware decoder typedef
 typedef struct _Drm_decoder_ VideoHwDecoder;
-
+#endif
     /// Video output stream typedef
 typedef struct __video_stream__ VideoStream;
 
@@ -65,9 +68,10 @@ extern void VideoDisplayWakeup(void);
     /// Set audio delay.
 extern void VideoSetAudioDelay(int);
 
+#ifndef MMAL
     /// Set use sw deinterlacer.
 extern void VideoSetSWDeinterlacer(int);
-
+#endif
     /// Clear OSD.
 extern void VideoOsdClear(void);
 
@@ -110,5 +114,7 @@ extern int VideoDecodeInput(VideoStream *);
 
     /// Get number of input buffers.
 extern int VideoGetBuffers(const VideoStream *);
+
+extern const char * VideoGetDecoderName(const char *);
 
 /// @}

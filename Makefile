@@ -11,7 +11,10 @@ PLUGIN = softhddevice-drm
 
 ### Configuration (edit this for your needs)
 
-CONFIG := # -DDEBUG 			# enable debug output+functions
+	# enable this for MMAL (RaspberryPi)
+MMAL ?= 1
+
+CONFIG := #-DDEBUG 			# enable debug output+functions
 #CONFIG += -DOSD_DEBUG			# enable debug messages OSD
 #CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
 #CONFIG += -DSTILL_DEBUG=2		# still picture debug verbose level
@@ -65,8 +68,16 @@ SOFILE = libvdr-$(PLUGIN).so
 
 ### softhddevice config
 
+ifeq ($(MMAL),1)
+CONFIG += -DMMAL
+INCLUDES += -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux
+LDFLAGS += -L/opt/vc/lib
+_CFLAGS += $(shell pkg-config --cflags alsa libavcodec libavfilter)
+LIBS += -lrt -lmmal -lmmal_core -lbcm_host -lvcos $(shell pkg-config --libs alsa libavcodec libavfilter)
+else
 _CFLAGS += $(shell pkg-config --cflags alsa libavcodec libavfilter libdrm)
 LIBS += $(shell pkg-config --libs alsa libavcodec libavfilter libdrm)
+endif
 
 ### Includes and Defines (add further entries here):
 
@@ -86,7 +97,11 @@ override CFLAGS	  += $(_CFLAGS) $(DEFINES) $(INCLUDES) \
 
 ### The object files (add further files here):
 
-OBJS = $(PLUGIN).o softhddev.o video.o audio.o codec.o ringbuffer.o
+ifeq ($(MMAL),1)
+OBJS = $(PLUGIN).o softhddev.o video_mmal.o audio.o codec.o ringbuffer.o
+else
+OBJS = $(PLUGIN).o softhddev.o video_drm.o audio.o codec.o ringbuffer.o
+endif
 
 SRCS = $(wildcard $(OBJS:.o=.c)) $(PLUGIN).cpp
 
@@ -153,7 +168,7 @@ dist: $(I18Npo) clean
 
 clean:
 	@-rm -f $(PODIR)/*.mo $(PODIR)/*.pot
-	@-rm -f $(OBJS) $(DEPFILE) *.so *.tgz core* *~
+	@-rm -f $(DEPFILE) *.o *.so *.tgz core* *~
 
 ## Private Targets:
 

@@ -754,9 +754,10 @@ void cMenuSetupSoft::Store(void)
     SetupStore("MakePrimary", ConfigMakePrimary = MakePrimary);
     SetupStore("HideMainMenuEntry", ConfigHideMainMenuEntry = HideMainMenuEntry);
 
+#ifndef MMAL
     SetupStore("SWDeinterlacer", ConfigSWDeinterlacer = SWDeinterlacer);
 	VideoSetSWDeinterlacer(ConfigSWDeinterlacer);
-
+#endif
     SetupStore("AudioDelay", ConfigVideoAudioDelay = AudioDelay);
     VideoSetAudioDelay(ConfigVideoAudioDelay);
 
@@ -1704,11 +1705,12 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 	return true;
     }
 
+#ifndef MMAL
     if (!strcasecmp(name, "SWDeinterlacer")) {
 	VideoSetSWDeinterlacer(ConfigSWDeinterlacer = atoi(value));
 	return true;
     }
-
+#endif
     if (!strcasecmp(name, "AudioDelay")) {
 	VideoSetAudioDelay(ConfigVideoAudioDelay = atoi(value));
 	return true;
