@@ -24,20 +24,15 @@
 extern "C"
 {
 #endif
-    /// C plugin get osd size and ascpect
-//    extern void GetOsdSize(int *, int *, double *);
-    extern void GetScreenSize(int *, int *, double *);
 
     /// C plugin close osd
     extern void OsdClose(void);
     /// C plugin draw osd pixmap
     extern void OsdDrawARGB(int, int, int, int, int, const uint8_t *, int,
-	int);
+		int);
 
     /// C plugin play audio packet
     extern int PlayAudio(const uint8_t *, int, uint8_t);
-    /// C plugin play TS audio packet
-    extern int PlayTsAudio(const uint8_t *, int);
     /// C plugin set audio volume
     extern void SetVolumeDevice(int);
     /// C plugin reset channel id (restarts audio)
@@ -45,17 +40,11 @@ extern "C"
 
     /// C plugin play video packet
     extern int PlayVideo(const uint8_t *, int);
-    /// C plugin play TS video packet
-    extern void PlayTsVideo(const uint8_t *, int);
     /// C plugin grab an image
     extern uint8_t *GrabImage(int *, int, int, int, int);
 
     /// C plugin set play mode
     extern int SetPlayMode(int);
-    /// C plugin get current system time counter
-    extern int64_t GetSTC(void);
-    /// C plugin get video stream size and aspect
-//    extern void GetVideoSize(int *, int *, double *);
     /// C plugin set trick speed
     extern void TrickSpeed(int);
     /// C plugin clears all video and audio data from the device
@@ -72,7 +61,10 @@ extern "C"
     extern int Poll(int);
     /// C plugin flush output buffers
     extern int Flush(int);
-
+    /// C plugin get video stream size and aspect
+    extern void GetScreenSize(int *, int *, double *);
+    /// C plugin set sw deinterlacer
+    extern void SetSWDeinterlacer(int);
     /// C plugin command line help
     extern const char *CommandLineHelp(void);
     /// C plugin process the command line arguments
@@ -85,9 +77,6 @@ extern "C"
     /// C plugin stop code
     extern void Stop(void);
     /// C plugin house keeping
-    extern void Housekeeping(void);
-    /// C plugin main thread hook
-    extern void MainThreadHook(void);
 
     /// Get decoder statistics
     extern void GetStats(int *, int *, int *, int *);

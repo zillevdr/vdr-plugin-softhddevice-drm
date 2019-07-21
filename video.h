@@ -29,13 +29,13 @@
 //----------------------------------------------------------------------------
 #ifdef MMAL
     /// Video hardware decoder typedef
-typedef struct _Mmal_decoder_ VideoHwDecoder;
+typedef struct _Mmal_Render_ VideoRender;
 #else
     /// Video hardware decoder typedef
-typedef struct _Drm_decoder_ VideoHwDecoder;
+typedef struct _Drm_Render_ VideoRender;
 #endif
     /// Video output stream typedef
-typedef struct __video_stream__ VideoStream;
+typedef struct __video_stream__ VideoStream; 		// in softhddev.h ?
 
 //----------------------------------------------------------------------------
 //	Variables
@@ -49,44 +49,44 @@ extern int VideoAudioDelay;		///< audio/video delay
 //----------------------------------------------------------------------------
 
     /// Allocate new video hardware decoder.
-extern VideoHwDecoder *VideoNewHwDecoder(VideoStream *);
+extern VideoRender *VideoNewRender(VideoStream *);
 
     /// Deallocate video hardware decoder.
-extern void VideoDelHwDecoder(VideoHwDecoder *);
+extern void VideoDelRender(VideoRender *);
 
     /// Callback to negotiate the PixelFormat.
-extern enum AVPixelFormat Video_get_format(VideoHwDecoder *, AVCodecContext *,
+extern enum AVPixelFormat Video_get_format(VideoRender *, AVCodecContext *,
     const enum AVPixelFormat *);
 
     /// Render a ffmpeg frame.
-extern void VideoRenderFrame(VideoHwDecoder *, const AVCodecContext *,
+extern void VideoRenderFrame(VideoRender *, const AVCodecContext *,
     AVFrame *);
 
     /// Wakeup display handler.
-extern void VideoDisplayWakeup(void);
+extern void VideoDisplayWakeup(VideoRender *);
 
     /// Set audio delay.
 extern void VideoSetAudioDelay(int);
 
 #ifndef MMAL
     /// Set use sw deinterlacer.
-extern void VideoSetSWDeinterlacer(int);
+extern void VideoSetSWDeinterlacer(VideoRender * ,int);
 #endif
     /// Clear OSD.
-extern void VideoOsdClear(void);
+extern void VideoOsdClear(VideoRender *);
 
     /// Draw an OSD ARGB image.
-extern void VideoOsdDrawARGB(int, int, int, int, int, const uint8_t *, int,
-    int);
+extern void VideoOsdDrawARGB(VideoRender *, int, int, int,
+		int, int, const uint8_t *, int, int);
 
     /// Set closing flag.
-extern void VideoSetClosing(VideoHwDecoder *, int);
+extern void VideoSetClosing(VideoRender *, int);
 
     /// Reset start of frame counter
-extern void VideoResetStart(VideoHwDecoder *);
+extern void VideoResetStart(VideoRender *);
 
     /// Set trick play speed.
-extern void VideoSetTrickSpeed(VideoHwDecoder *, int);
+extern void VideoSetTrickSpeed(VideoRender *, int);
 
     /// Grab screen.
 extern uint8_t *VideoGrab(int *, int *, int *, int);
@@ -95,16 +95,16 @@ extern uint8_t *VideoGrab(int *, int *, int *, int);
 extern uint8_t *VideoGrabService(int *, int *, int *);
 
     /// Get decoder statistics.
-extern void VideoGetStats(VideoHwDecoder *, int *, int *, int *, int *);
+extern void VideoGetStats(VideoRender *, int *, int *, int *, int *);
 
     /// Get screen size
-extern void VideoGetScreenSize(VideoHwDecoder *, int *, int *, int *, int *);
+extern void VideoGetScreenSize(VideoRender * render, int *, int *, double *);
 
     /// Set screen size
 extern void VideoSetScreenSize(char *);
 
-extern void VideoInit(void);	///< Setup video module.
-extern void VideoExit(void);		///< Cleanup and exit video module.
+extern void VideoInit(VideoRender *);	///< Setup video module.
+extern void VideoExit(VideoRender *);		///< Cleanup and exit video module.
 
     /// Poll video input buffers.
 extern int VideoPollInput(VideoStream *);

@@ -69,33 +69,19 @@
       ///
 static pthread_mutex_t CodecLockMutex;
 
-    /// Flag prefer fast channel switch
-char CodecUsePossibleDefectFrames;
-
 //----------------------------------------------------------------------------
 //	Video
 //----------------------------------------------------------------------------
-
-#if 0
-///
-///	Video decoder typedef.
-///
-//typedef struct _video_decoder_ Decoder;
-#endif
 
 ///
 ///	Video decoder structure.
 ///
 struct _video_decoder_
 {
-    VideoHwDecoder *HwDecoder;		///< video hardware decoder
+    VideoRender *Render;		///< video hardware decoder
 
     int GetFormatDone;			///< flag get format called!
-    AVCodec *VideoCodec;		///< video codec
     AVCodecContext *VideoCtx;		///< video codec context
-#ifdef FFMPEG_WORKAROUND_ARTIFACTS
-    int FirstKeyFrame;			///< flag first frame
-#endif
     AVFrame *Frame;			///< decoded video frame
 };
 
@@ -109,8 +95,7 @@ struct _video_decoder_
 **	@param video_ctx	codec context
 **	@param fmt		is the list of formats which are supported by
 **				the codec, it is terminated by -1 as 0 is a
-**				valid format, the formats are ordered by
-**				quality.
+**				valid format, the formats are ordered by quality.
 */
 static enum AVPixelFormat Codec_get_format(AVCodecContext * video_ctx,
     const enum AVPixelFormat *fmt)
@@ -124,7 +109,7 @@ static enum AVPixelFormat Codec_get_format(AVCodecContext * video_ctx,
     }
 
     decoder->GetFormatDone = 1;
-    return Video_get_format(decoder->HwDecoder, video_ctx, fmt);
+    return Video_get_format(decoder->Render, video_ctx, fmt);
 }
 
 //----------------------------------------------------------------------------
@@ -138,14 +123,14 @@ static enum AVPixelFormat Codec_get_format(AVCodecContext * video_ctx,
 **
 **	@returns private decoder pointer for video decoder.
 */
-VideoDecoder *CodecVideoNewDecoder(VideoHwDecoder * hw_decoder)
+VideoDecoder *CodecVideoNewDecoder(VideoRender * render)
 {
     VideoDecoder *decoder;
 
     if (!(decoder = calloc(1, sizeof(*decoder)))) {
 	Fatal(_("codec: can't allocate vodeo decoder\n"));
     }
-    decoder->HwDecoder = hw_decoder;
+    decoder->Render = render;
 
     return decoder;
 }
@@ -168,84 +153,74 @@ void CodecVideoDelDecoder(VideoDecoder * decoder)
 */
 void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 {
-	if (!(decoder->VideoCodec = avcodec_find_decoder_by_name(VideoGetDecoderName(
-		avcodec_get_name(codec_id)))))
-		fprintf(stderr, "[CodecVideoOpen] The video_codec %s is not present in libavcodec\n",
-			VideoGetDecoderName(avcodec_get_name(codec_id)));
+	AVCodec * codec;
 
-	decoder->VideoCtx = avcodec_alloc_context3(decoder->VideoCodec);
+	if (!(codec = avcodec_find_decoder_by_name(VideoGetDecoderName(
+		avcodec_get_name(codec_id)))))
+		fprintf(stderr, "[CodecVideoOpen] The video codec %s is not present in libavcodec\n",
+			VideoGetDecoderName(avcodec_get_name(codec_id)));
+//	fprintf(stderr, "[CodecVideoOpen] The video codec %s is used\n",
+//		VideoGetDecoderName(avcodec_get_name(codec_id)));
+
+	decoder->VideoCtx = avcodec_alloc_context3(codec);
 	if (!decoder->VideoCtx) {
 		fprintf(stderr, "[CodecVideoOpen]: can't open video codec!\n");
 	}
 
+	if (decoder->VideoCtx->codec != codec) {
+		fprintf(stderr, "[CodecVideoOpen]: VideoCtx->codec != codec!\n");
+		decoder->VideoCtx->codec = codec;
+	}
 	decoder->VideoCtx->codec_id = codec_id;
 	decoder->VideoCtx->get_format = Codec_get_format;
 	decoder->VideoCtx->opaque = decoder;
+	decoder->VideoCtx->flags |= AV_CODEC_FLAG_BITEXACT;
+	decoder->VideoCtx->flags2 |= AV_CODEC_FLAG2_FAST;
+	if (codec->capabilities & AV_CODEC_CAP_DR1)
+		fprintf(stderr, "[CodecVideoOpen] AV_CODEC_CAP_DR1 => get_buffer()\n");
+	if (codec->capabilities & AV_CODEC_CAP_FRAME_THREADS ||
+		AV_CODEC_CAP_SLICE_THREADS) {
+		fprintf(stderr, "[CodecVideoOpen] codec use threads\n");
+		decoder->VideoCtx->thread_count = 4;
+		decoder->VideoCtx->thread_type = FF_THREAD_SLICE;
+	}
 
 	pthread_mutex_lock(&CodecLockMutex);
-	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCodec, NULL) < 0)
+	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0)
 		fprintf(stderr, "[CodecVideoOpen] Error opening the decoder: ");
 	pthread_mutex_unlock(&CodecLockMutex);
+
+	if (decoder->VideoCtx->active_thread_type != FF_THREAD_SLICE) {
+		fprintf(stderr, "[CodecVideoOpen] Couldn't activate slice threading: %d\n",
+			decoder->VideoCtx->active_thread_type);
+	}
 }
 
 /**
 **	Close video decoder.
 **
-**	@param video_decoder	private video decoder
+**	@param decoder	private video decoder
 */
-void CodecVideoClose(VideoDecoder * video_decoder)
+void CodecVideoClose(VideoDecoder * decoder)
 {
-	if (video_decoder->VideoCodec->capabilities & AV_CODEC_CAP_DELAY) {
+	if (decoder->VideoCtx->codec->capabilities & AV_CODEC_CAP_DELAY) {
 		AVPacket avpkt;
 
 		av_init_packet(&avpkt);
 		avpkt.data = NULL;
 		avpkt.size = 0;
-		CodecVideoDecode(video_decoder, &avpkt);
+		CodecVideoDecode(decoder, &avpkt);
 		av_packet_unref(&avpkt);
 	}
 
-	if (video_decoder->VideoCtx) {
+	if (decoder->VideoCtx) {
 		pthread_mutex_lock(&CodecLockMutex);
-		avcodec_close(video_decoder->VideoCtx);
-		avcodec_free_context(&video_decoder->VideoCtx);
-		av_freep(&video_decoder->VideoCtx);
+		avcodec_close(decoder->VideoCtx);
+		avcodec_free_context(&decoder->VideoCtx);
+		av_freep(&decoder->VideoCtx);
 		pthread_mutex_unlock(&CodecLockMutex);
 	}
 }
-
-#if 0
-
-/**
-**	Display pts...
-**
-**	ffmpeg-0.9 pts always AV_NOPTS_VALUE
-**	ffmpeg-0.9 pkt_pts nice monotonic (only with HD)
-**	ffmpeg-0.9 pkt_dts wild jumping -160 - 340 ms
-*/
-void DisplayPts(AVCodecContext * video_ctx, AVFrame * frame)
-{
-    int ms_delay;
-    int64_t pts;
-    static int64_t last_pts;
-
-    pts = frame->pkt_pts;
-    if (pts == (int64_t) AV_NOPTS_VALUE) {
-	printf("*");
-    }
-    ms_delay = (1000 * video_ctx->time_base.num) / video_ctx->time_base.den;
-    ms_delay += frame->repeat_pict * ms_delay / 2;
-    printf("codec: PTS %s%s %" PRId64 " %d %d/%d %dms\n",
-	frame->repeat_pict ? "r" : " ", frame->interlaced_frame ? "I" : " ",
-	pts, (int)(pts - last_pts) / 90, video_ctx->time_base.num,
-	video_ctx->time_base.den, ms_delay);
-
-    if (pts != (int64_t) AV_NOPTS_VALUE) {
-	last_pts = pts;
-    }
-}
-
-#endif
 
 /**
 **	Decode a video packet.
@@ -334,7 +309,7 @@ int CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 //			video_ctx->width, video_ctx->height, frame);
 
     if (got_frame && frame->width != 0 && !cap_delay && frame->width == video_ctx->width) {
-		VideoRenderFrame(decoder->HwDecoder, video_ctx, frame);
+		VideoRenderFrame(decoder->Render, video_ctx, frame);
 	} else {
 //		fprintf(stderr, "CodecVideoDecode cap_delay %i frame %i x %i ctx %i x %i frame %p\n",
 //			cap_delay, frame->width, frame->height,
@@ -362,19 +337,11 @@ void CodecVideoFlushBuffers(VideoDecoder * decoder)
 //	Audio
 //----------------------------------------------------------------------------
 
-#if 0
-///
-///	Audio decoder typedef.
-///
-typedef struct _audio_decoder_ AudioDecoder;
-#endif
-
 ///
 ///	Audio decoder structure.
 ///
 struct _audio_decoder_
 {
-    AVCodec *AudioCodec;		///< audio codec
     AVCodecContext *AudioCtx;		///< audio codec context
 
     AVFrame *Frame;			///< decoded audio frame buffer
@@ -439,48 +406,47 @@ void CodecAudioDelDecoder(AudioDecoder * decoder)
 */
 void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 {
-    AVCodec *audio_codec;
+	AVCodec *codec;
 
-    Debug(3, "codec: using audio codec ID %#06x (%s)\n", codec_id,
+	Debug(3, "codec: using audio codec ID %#06x (%s)\n", codec_id,
 		avcodec_get_name(codec_id));
 
-    if (!(audio_codec = avcodec_find_decoder(codec_id))) {
-	Fatal(_("codec: codec ID %#06x not found\n"), codec_id);
-	// FIXME: errors aren't fatal
-    }
-    audio_decoder->AudioCodec = audio_codec;
-
-    if (!(audio_decoder->AudioCtx = avcodec_alloc_context3(audio_codec))) {
-	Fatal(_("codec: can't allocate audio codec context\n"));
-    }
-
-    if (CodecDownmix) {
-	audio_decoder->AudioCtx->request_channel_layout =
-	    AV_CH_LAYOUT_STEREO_DOWNMIX;
-    }
-    pthread_mutex_lock(&CodecLockMutex);
-    // open codec
-    if (1) {
-	AVDictionary *av_dict;
-
-	av_dict = NULL;
-	// FIXME: import settings
-	//av_dict_set(&av_dict, "dmix_mode", "0", 0);
-	//av_dict_set(&av_dict, "ltrt_cmixlev", "1.414", 0);
-	//av_dict_set(&av_dict, "loro_cmixlev", "1.414", 0);
-	if (avcodec_open2(audio_decoder->AudioCtx, audio_codec, &av_dict) < 0) {
-	    pthread_mutex_unlock(&CodecLockMutex);
-	    Fatal(_("codec: can't open audio codec\n"));
+	if (!(codec = avcodec_find_decoder(codec_id))) {
+		Fatal(_("codec: codec ID %#06x not found\n"), codec_id);
+		// FIXME: errors aren't fatal
 	}
-	av_dict_free(&av_dict);
-    }
-    pthread_mutex_unlock(&CodecLockMutex);
-    Debug(3, "codec: audio '%s'\n", audio_decoder->AudioCodec->long_name);
 
-    if (audio_codec->capabilities & AV_CODEC_CAP_TRUNCATED) {
-	Debug(3, "codec: audio can use truncated packets\n");
-	// we send only complete frames
-	// audio_decoder->AudioCtx->flags |= CODEC_FLAG_TRUNCATED;
+	if (!(audio_decoder->AudioCtx = avcodec_alloc_context3(codec))) {
+		Fatal(_("codec: can't allocate audio codec context\n"));
+	}
+
+	if (CodecDownmix) {
+		audio_decoder->AudioCtx->request_channel_layout =
+			AV_CH_LAYOUT_STEREO_DOWNMIX;
+	}
+	pthread_mutex_lock(&CodecLockMutex);
+	// open codec
+	if (1) {
+		AVDictionary *av_dict;
+
+		av_dict = NULL;
+		// FIXME: import settings
+		//av_dict_set(&av_dict, "dmix_mode", "0", 0);
+		//av_dict_set(&av_dict, "ltrt_cmixlev", "1.414", 0);
+		//av_dict_set(&av_dict, "loro_cmixlev", "1.414", 0);
+		if (avcodec_open2(audio_decoder->AudioCtx, audio_decoder->AudioCtx->codec, &av_dict) < 0) {
+			pthread_mutex_unlock(&CodecLockMutex);
+			Fatal(_("codec: can't open audio codec\n"));
+		}
+		av_dict_free(&av_dict);
+	}
+	pthread_mutex_unlock(&CodecLockMutex);
+	Debug(3, "codec: audio '%s'\n", audio_decoder->AudioCodec->long_name);
+
+	if (audio_decoder->AudioCtx->codec->capabilities & AV_CODEC_CAP_TRUNCATED) {
+		Debug(3, "codec: audio can use truncated packets\n");
+		// we send only complete frames
+		// audio_decoder->AudioCtx->flags |= CODEC_FLAG_TRUNCATED;
     }
 }
 
@@ -491,12 +457,16 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 */
 void CodecAudioClose(AudioDecoder * audio_decoder)
 {
-    // FIXME: output any buffered data
-    if (audio_decoder->AudioCtx) {
-	pthread_mutex_lock(&CodecLockMutex);
-	avcodec_close(audio_decoder->AudioCtx);
-	av_freep(&audio_decoder->AudioCtx);
-	pthread_mutex_unlock(&CodecLockMutex);
+//		Das muss später getestet werden > momentan wird CodecAudioClose aufgerufen OHNE audio_decoder!!!
+//	if (audio_decoder->AudioCtx->codec->capabilities & AV_CODEC_CAP_DELAY)
+//		fprintf(stderr, "[CodecAudioClose] codec use AV_CODEC_CAP_DELAY\n");
+
+	// FIXME: output any buffered data
+	if (audio_decoder->AudioCtx) {
+		pthread_mutex_lock(&CodecLockMutex);
+		avcodec_close(audio_decoder->AudioCtx);
+		av_freep(&audio_decoder->AudioCtx);
+		pthread_mutex_unlock(&CodecLockMutex);
     }
 }
 
@@ -616,7 +586,7 @@ void CodecInit(void)
     pthread_mutex_init(&CodecLockMutex, NULL);
 #ifndef DEBUG
     // disable display ffmpeg error messages
-//    av_log_set_callback(CodecNoopCallback);
+    av_log_set_callback(CodecNoopCallback);
 #else
     (void)CodecNoopCallback;
 //		av_log_set_level(AV_LOG_DEBUG);

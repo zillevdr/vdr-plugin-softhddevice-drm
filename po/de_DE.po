@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2019-07-14 17:36+0200\n"
+"POT-Creation-Date: 2019-07-21 18:20+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -173,27 +173,6 @@ msgstr ""
 msgid "codec/audio: no frame\n"
 msgstr ""
 
-msgid "pesdemux: out of memory\n"
-msgstr ""
-
-msgid "pesdemux: mpeg1 pes packet unsupported\n"
-msgstr ""
-
-#, c-format
-msgid "softhddev: LPCM %d bits per sample aren't supported\n"
-msgstr ""
-
-#, c-format
-msgid "softhddev: LPCM %d sample-rate is unsupported\n"
-msgstr ""
-
-#, c-format
-msgid "softhddev: LPCM %d channels are unsupported\n"
-msgstr ""
-
-msgid "tsdemux: transport stream out of sync\n"
-msgstr ""
-
 msgid "[softhddev] invalid PES audio packet\n"
 msgstr ""
 
@@ -280,12 +259,6 @@ msgstr ""
 msgid "Unhandled argument '%s'\n"
 msgstr ""
 
-msgid "A software and GPU emulated HD device"
-msgstr "Ein Software und GPU emulieres HD-Gerät"
-
-msgid "SoftHdDevice-drm"
-msgstr ""
-
 msgid "[softhddev]: dirty area too big\n"
 msgstr ""
 
@@ -367,58 +340,58 @@ msgstr ""
 msgid " Enable Audio Equalizer"
 msgstr ""
 
-msgid "  65 Hz band gain"
+msgid "  60 Hz band gain"
 msgstr ""
 
-msgid "  92 Hz band gain"
+msgid "  72 Hz band gain"
 msgstr ""
 
-msgid "  131 Hz band gain"
+msgid "  107 Hz band gain"
 msgstr ""
 
-msgid "  185 Hz band gain"
+msgid "  150 Hz band gain"
 msgstr ""
 
-msgid "  262 Hz band gain"
+msgid "  220 Hz band gain"
 msgstr ""
 
-msgid "  370 Hz band gain"
+msgid "  310 Hz band gain"
 msgstr ""
 
-msgid "  523 Hz band gain"
+msgid "  430 Hz band gain"
 msgstr ""
 
-msgid "  740 Hz band gain"
+msgid "  620 Hz band gain"
 msgstr ""
 
-msgid "  1047 Hz band gain"
+msgid "  860 Hz band gain"
 msgstr ""
 
-msgid "  1480 Hz band gain"
+msgid "  1200 Hz band gain"
 msgstr ""
 
-msgid "  2093 Hz band gain"
+msgid "  1700 Hz band gain"
 msgstr ""
 
-msgid "  2960 Hz band gain"
+msgid "  2500 Hz band gain"
 msgstr ""
 
-msgid "  4186 Hz band gain"
+msgid "  3500 Hz band gain"
 msgstr ""
 
-msgid "  5920 Hz band gain"
+msgid "  4800 Hz band gain"
 msgstr ""
 
-msgid "  8372 Hz band gain"
+msgid "  7000 Hz band gain"
 msgstr ""
 
-msgid "  11840 Hz band gain"
+msgid "  9500 Hz band gain"
 msgstr ""
 
-msgid "  16744 Hz band gain"
+msgid "  13500 Hz band gain"
 msgstr ""
 
-msgid "  20000 Hz band gain"
+msgid "  17200 Hz band gain"
 msgstr ""
 
 #, c-format
@@ -445,23 +418,35 @@ msgstr ""
 msgid "[softhddev]: hot key %d is not supported\n"
 msgstr ""
 
+#, c-format
+msgid "[Drm_find_dev] DRM have %i connectors, %i crtcs, %i encoders\n"
+msgstr ""
+
+#, c-format
+msgid "[Drm_find_dev] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"
+msgstr ""
+
+#, c-format
+msgid "[Drm_find_dev] DRM setup CRTC: %i video_plane: %i osd_plane %i\n"
+msgstr ""
+
 msgid "video: can't queue cancel video display thread\n"
+msgstr ""
+
+msgid "video: can't cancel DrmDisplayFrame thread\n"
 msgstr ""
 
 msgid "video: can't cancel video display thread\n"
 msgstr ""
 
-msgid "video/MMAL: out of decoders\n"
-msgstr ""
-
-msgid "video/MMAL: out of memory\n"
-msgstr ""
-
-msgid "video: out of memory\n"
+msgid "video/DRM: out of memory\n"
 msgstr ""
 
 msgid "softhddev: grab unsupported\n"
 msgstr ""
+
+#~ msgid "A software and GPU emulated HD device"
+#~ msgstr "Ein Software und GPU emulieres HD-Gerät"
 
 #~ msgid "Clear decoder on channel switch"
 #~ msgstr "Decoder bei Kanalwechsel leeren"

@@ -47,15 +47,13 @@ typedef struct _audio_decoder_ AudioDecoder;
 //	Variables
 //----------------------------------------------------------------------------
 
-    /// Flag prefer fast xhannel switch
-extern char CodecUsePossibleDefectFrames;
 
 //----------------------------------------------------------------------------
 //	Prototypes
 //----------------------------------------------------------------------------
 
     /// Allocate a new video decoder context.
-extern VideoDecoder *CodecVideoNewDecoder(VideoHwDecoder *);
+extern VideoDecoder *CodecVideoNewDecoder(VideoRender *);
 
     /// Deallocate a video decoder context.
 extern void CodecVideoDelDecoder(VideoDecoder *);

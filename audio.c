@@ -576,37 +576,10 @@ void AudioSetEq(int band[17], int onoff)
 /*	fprintf(stderr, "AudioSetEq %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i %i onoff %d\n",
 		band[0], band[1], band[2], band[3], band[4], band[5], band[6], band[7],
 		band[8], band[9], band[10], band[11], band[12], band[13], band[14],
-		band[15], band[16], band[17], onoff);
-*/
-    for (i = 0; i < 18; i++) {
+		band[15], band[16], band[17], onoff);*/
+
+	for (i = 0; i < 18; i++) {
 		switch (band[i]) {
-			case 10:
-				AudioEqBand[i] = 6;
-				break;
-			case 9:
-				AudioEqBand[i] = 5.5;
-				break;
-			case 8:
-				AudioEqBand[i] = 5;
-				break;
-			case 7:
-				AudioEqBand[i] = 4.5;
-				break;
-			case 6:
-				AudioEqBand[i] = 4;
-				break;
-			case 5:
-				AudioEqBand[i] = 3.5;
-				break;
-			case 4:
-				AudioEqBand[i] = 3;
-				break;
-			case 3:
-				AudioEqBand[i] = 2.5;
-				break;
-			case 2:
-				AudioEqBand[i] = 2;
-				break;
 			case 1:
 				AudioEqBand[i] = 1.5;
 				break;
@@ -643,20 +616,25 @@ void AudioSetEq(int band[17], int onoff)
 			case -10:
 				AudioEqBand[i] = 0.5;
 				break;
+			case -11:
+				AudioEqBand[i] = 0.45;
+				break;
+			case -12:
+				AudioEqBand[i] = 0.4;
+				break;
+			case -13:
+				AudioEqBand[i] = 0.35;
+				break;
+			case -14:
+				AudioEqBand[i] = 0.3;
+				break;
+			case -15:
+				AudioEqBand[i] = 0.25;
+				break;
 		}
 	}
 
-/*		fprintf(stderr, "1b=%.2f 2b=%.2f 3b=%.2f 4b=%.2f 5b=%.2f 6b=%.2f"
-			" 7b=%.2f 8b=%.2f 9b=%.2f 10b=%.2f 11b=%.2f 12b=%.2f 13b=%.2f"
-			" 14b=%.2f 15b=%.2f 16b=%.2f 17b=%.2f 18b=%.2f\n",
-			AudioEqBand[0], AudioEqBand[1], AudioEqBand[2], AudioEqBand[3],
-			AudioEqBand[4], AudioEqBand[5], AudioEqBand[6], AudioEqBand[7],
-			AudioEqBand[8], AudioEqBand[9], AudioEqBand[10], AudioEqBand[11],
-			AudioEqBand[12], AudioEqBand[13], AudioEqBand[14], AudioEqBand[15],
-			AudioEqBand[16], AudioEqBand[17]);
-*/
-	if (AudioEq && onoff)
-		Filterchanged = 1;
+	Filterchanged = 1;
 	AudioEq = onoff;
 }
 
@@ -2125,7 +2103,7 @@ void AudioFlushBuffers(void)
 void AudioPoller(void)
 {
     // FIXME: write poller
-	fprintf(stderr, "FIXME: write audio poller!\n");
+//	fprintf(stderr, "FIXME: write audio poller!\n");
 }
 
 /**

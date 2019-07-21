@@ -29,7 +29,7 @@
 
 extern void AudioEnqueue(const void *, int, AVFrame *);	///< buffer audio samples
 extern void AudioFlushBuffers(void);	///< flush audio buffers
-extern void AudioPoller(void);		///< poll audio events/handling
+extern void AudioPoller(void);		///< poll audio events/handling		not used!
 extern int AudioFreeBytes(void);	///< free bytes in audio output
 extern int AudioUsedBytes(void);	///< used bytes in audio output
 extern int64_t AudioGetClock();		///< get current audio clock

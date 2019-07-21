@@ -41,73 +41,9 @@ extern "C"
 
 //////////////////////////////////////////////////////////////////////////////
 
-    /// vdr-plugin version number.
-    /// Makefile extracts the version number for generating the file name
-    /// for the distribution archive.
-static const char *const VERSION = "0.0.1rc1"
-#ifdef GIT_REV
-    "-GIT" GIT_REV
-#endif
-    ;
-
-    /// vdr-plugin description.
-static const char *const DESCRIPTION =
-trNOOP("A software and GPU emulated HD device");
-
-    /// vdr-plugin text of main menu entry
-static const char *MAINMENUENTRY = trNOOP("SoftHdDevice-drm");
-
-    /// single instance of softhddevice plugin device.
-static class cSoftHdDevice *MyDevice;
-
-//////////////////////////////////////////////////////////////////////////////
-
-static char ConfigMakePrimary;		///< config primary wanted
-static char ConfigHideMainMenuEntry;	///< config hide main menu entry
-
-char ConfigSWDeinterlacer;			///< config use sw deinterlacer
-
-static int ConfigVideoAudioDelay;	///< config audio delay
-static char ConfigAudioPassthrough;	///< config audio pass-through mask
-static char AudioPassthroughState;	///< flag audio pass-through on/off
-static char ConfigAudioDownmix;		///< config ffmpeg audio downmix
-static char ConfigAudioSoftvol;		///< config use software volume
-static char ConfigAudioNormalize;	///< config use normalize volume
-static int ConfigAudioMaxNormalize;	///< config max normalize factor
-static char ConfigAudioCompression;	///< config use volume compression
-static int ConfigAudioMaxCompression;	///< config max volume compression
-static int ConfigAudioStereoDescent;	///< config reduce stereo loudness
-int ConfigAudioBufferTime;			///< config size ms of audio buffer
-static int ConfigAudioAutoAES;		///< config automatic AES handling
-static int ConfigAudioEq;			///< config equalizer filter 
-static int SetupAudioEqBand[18];	///< config equalizer filter bands
-
-static volatile int DoMakePrimary;	///< switch primary device to this
-
-//////////////////////////////////////////////////////////////////////////////
-
 //////////////////////////////////////////////////////////////////////////////
 //	OSD
 //////////////////////////////////////////////////////////////////////////////
-
-/**
-**	Soft device plugin OSD class.
-*/
-class cSoftOsd:public cOsd
-{
-  public:
-    static volatile char Dirty;		///< flag force redraw everything
-    int OsdLevel;			///< current osd level FIXME: remove
-
-     cSoftOsd(int, int, uint);		///< osd constructor
-     virtual ~ cSoftOsd(void);		///< osd destructor
-    /// set the sub-areas to the given areas
-    virtual eOsdError SetAreas(const tArea *, int);
-    virtual void Flush(void);		///< commits all data to the hardware
-    virtual void SetActive(bool);	///< sets OSD to be the active one
-};
-
-volatile char cSoftOsd::Dirty;		///< flag force redraw everything
 
 /**
 **	Sets this OSD to be the active one.
@@ -195,7 +131,7 @@ eOsdError cSoftOsd::SetAreas(const tArea * areas, int n)
 	}
     }
     if (Active()) {
-	VideoOsdClear();
+	OsdClose();
 	Dirty = 1;
     }
     return cOsd::SetAreas(areas, n);
@@ -412,22 +348,6 @@ void cSoftOsd::Flush(void)
 //////////////////////////////////////////////////////////////////////////////
 
 /**
-**	Soft device plugin OSD provider class.
-*/
-class cSoftOsdProvider:public cOsdProvider
-{
-  private:
-    static cOsd *Osd;			///< single OSD
-  public:
-    virtual cOsd * CreateOsd(int, int, uint);
-    virtual bool ProvidesTrueColor(void);
-    cSoftOsdProvider(void);		///< OSD provider constructor
-    //virtual ~cSoftOsdProvider();	///< OSD provider destructor
-};
-
-cOsd *cSoftOsdProvider::Osd;		///< single osd
-
-/**
 **	Create a new OSD.
 **
 **	@param left	x-coordinate of OSD
@@ -475,52 +395,6 @@ cSoftOsdProvider::~cSoftOsdProvider()
 //////////////////////////////////////////////////////////////////////////////
 //	cMenuSetupPage
 //////////////////////////////////////////////////////////////////////////////
-
-/**
-**	Soft device plugin menu setup page class.
-*/
-class cMenuSetupSoft:public cMenuSetupPage
-{
-  protected:
-    ///
-    /// local copies of global setup variables:
-    /// @{
-    int General;
-    int MakePrimary;
-    int HideMainMenuEntry;
-
-    int Video;
-    int SWDeinterlacer;
-
-    int Audio;
-    int AudioDelay;
-    int AudioPassthroughDefault;
-    int AudioPassthroughPCM;
-    int AudioPassthroughAC3;
-    int AudioPassthroughEAC3;
-    int AudioDownmix;
-    int AudioSoftvol;
-    int AudioNormalize;
-    int AudioMaxNormalize;
-    int AudioCompression;
-    int AudioMaxCompression;
-    int AudioStereoDescent;
-    int AudioBufferTime;
-    int AudioAutoAES;
-    int AudioFilter;
-    int AudioEq;
-    int AudioEqBand[18];
-
-    /// @}
-  private:
-     inline cOsdItem * CollapsedItem(const char *, int &, const char * = NULL);
-    void Create(void);			// create sub-menu
-  protected:
-     virtual void Store(void);
-  public:
-     cMenuSetupSoft(void);
-    virtual eOSState ProcessKey(eKeys);	// handle input
-};
 
 /**
 **	Create a seperator item.
@@ -628,42 +502,42 @@ void cMenuSetupSoft::Create(void)
 		Add(new cMenuEditBoolItem(tr(" Enable Audio Equalizer"), &AudioEq,
 			trVDR("no"), trVDR("yes")));
 		if (AudioEq) {
-			Add(new cMenuEditIntItem(tr("  65 Hz band gain"),
-				&AudioEqBand[0], -10, 10));
-			Add(new cMenuEditIntItem(tr("  92 Hz band gain"),
-				&AudioEqBand[1], -10, 10));
-			Add(new cMenuEditIntItem(tr("  131 Hz band gain"),
-				&AudioEqBand[2], -10, 10));
-			Add(new cMenuEditIntItem(tr("  185 Hz band gain"),
-				&AudioEqBand[3], -10, 10));
-			Add(new cMenuEditIntItem(tr("  262 Hz band gain"),
-				&AudioEqBand[4], -10, 10));
-			Add(new cMenuEditIntItem(tr("  370 Hz band gain"),
-				&AudioEqBand[5], -10, 10));
-			Add(new cMenuEditIntItem(tr("  523 Hz band gain"),
-				&AudioEqBand[6], -10, 10));
-			Add(new cMenuEditIntItem(tr("  740 Hz band gain"),
-				&AudioEqBand[7], -10, 10));
-			Add(new cMenuEditIntItem(tr("  1047 Hz band gain"),
-				&AudioEqBand[8], -10, 10));
-			Add(new cMenuEditIntItem(tr("  1480 Hz band gain"),
-				&AudioEqBand[9], -10, 10));
-			Add(new cMenuEditIntItem(tr("  2093 Hz band gain"),
-				&AudioEqBand[10], -10, 10));
-			Add(new cMenuEditIntItem(tr("  2960 Hz band gain"),
-				&AudioEqBand[11], -10, 10));
-			Add(new cMenuEditIntItem(tr("  4186 Hz band gain"),
-				&AudioEqBand[12], -10, 10));
-			Add(new cMenuEditIntItem(tr("  5920 Hz band gain"),
-				&AudioEqBand[13], -10, 10));
-			Add(new cMenuEditIntItem(tr("  8372 Hz band gain"),
-				&AudioEqBand[14], -10, 10));
-			Add(new cMenuEditIntItem(tr("  11840 Hz band gain"),
-				&AudioEqBand[15], -10, 10));
-			Add(new cMenuEditIntItem(tr("  16744 Hz band gain"),
-				&AudioEqBand[16], -10, 10));
-			Add(new cMenuEditIntItem(tr("  20000 Hz band gain"),
-				&AudioEqBand[17], -10, 10));
+			Add(new cMenuEditIntItem(tr("  60 Hz band gain"),
+				&AudioEqBand[0], -15, 1));
+			Add(new cMenuEditIntItem(tr("  72 Hz band gain"),
+				&AudioEqBand[1], -15, 1));
+			Add(new cMenuEditIntItem(tr("  107 Hz band gain"),
+				&AudioEqBand[2], -15, 1));
+			Add(new cMenuEditIntItem(tr("  150 Hz band gain"),
+				&AudioEqBand[3], -15, 1));
+			Add(new cMenuEditIntItem(tr("  220 Hz band gain"),
+				&AudioEqBand[4], -15, 1));
+			Add(new cMenuEditIntItem(tr("  310 Hz band gain"),
+				&AudioEqBand[5], -15, 1));
+			Add(new cMenuEditIntItem(tr("  430 Hz band gain"),
+				&AudioEqBand[6], -15, 1));
+			Add(new cMenuEditIntItem(tr("  620 Hz band gain"),
+				&AudioEqBand[7], -15, 1));
+			Add(new cMenuEditIntItem(tr("  860 Hz band gain"),
+				&AudioEqBand[8], -15, 1));
+			Add(new cMenuEditIntItem(tr("  1200 Hz band gain"),
+				&AudioEqBand[9], -15, 1));
+			Add(new cMenuEditIntItem(tr("  1700 Hz band gain"),
+				&AudioEqBand[10], -15, 1));
+			Add(new cMenuEditIntItem(tr("  2500 Hz band gain"),
+				&AudioEqBand[11], -15, 1));
+			Add(new cMenuEditIntItem(tr("  3500 Hz band gain"),
+				&AudioEqBand[12], -15, 1));
+			Add(new cMenuEditIntItem(tr("  4800 Hz band gain"),
+				&AudioEqBand[13], -15, 1));
+			Add(new cMenuEditIntItem(tr("  7000 Hz band gain"),
+				&AudioEqBand[14], -15, 1));
+			Add(new cMenuEditIntItem(tr("  9500 Hz band gain"),
+				&AudioEqBand[15], -15, 1));
+			Add(new cMenuEditIntItem(tr("  13500 Hz band gain"),
+				&AudioEqBand[16], -15, 1));
+			Add(new cMenuEditIntItem(tr("  17200 Hz band gain"),
+				&AudioEqBand[17], -15, 1));
 		}
 	}
 
@@ -756,7 +630,7 @@ void cMenuSetupSoft::Store(void)
 
 #ifndef MMAL
     SetupStore("SWDeinterlacer", ConfigSWDeinterlacer = SWDeinterlacer);
-	VideoSetSWDeinterlacer(ConfigSWDeinterlacer);
+	SetSWDeinterlacer(ConfigSWDeinterlacer);
 #endif
     SetupStore("AudioDelay", ConfigVideoAudioDelay = AudioDelay);
     VideoSetAudioDelay(ConfigVideoAudioDelay);
@@ -821,32 +695,6 @@ void cMenuSetupSoft::Store(void)
 //////////////////////////////////////////////////////////////////////////////
 //	cOsdMenu
 //////////////////////////////////////////////////////////////////////////////
-
-/**
-**	Hotkey parsing state machine.
-*/
-typedef enum
-{
-    HksInitial,				///< initial state
-    HksBlue,				///< blue button pressed
-    HksBlue1,				///< blue and 1 number pressed
-    HksRed,				///< red button pressed
-} HkState;
-
-/**
-**	Soft device plugin menu class.
-*/
-class cSoftHdMenu:public cOsdMenu
-{
-  private:
-    HkState HotkeyState;		///< current hot-key state
-    int HotkeyCode;			///< current hot-key code
-    void Create(void);			///< create plugin main menu
-  public:
-    cSoftHdMenu(const char *, int = 0, int = 0, int = 0, int = 0, int = 0);
-    virtual ~ cSoftHdMenu();
-    virtual eOSState ProcessKey(eKeys);
-};
 
 /**
 **	Create main menu.
@@ -1029,56 +877,6 @@ eOSState cSoftHdMenu::ProcessKey(eKeys key)
 //	cDevice
 //////////////////////////////////////////////////////////////////////////////
 
-class cSoftHdDevice:public cDevice
-{
-  public:
-    cSoftHdDevice(void);
-    virtual ~ cSoftHdDevice(void);
-
-    virtual bool HasDecoder(void) const;
-    virtual bool CanReplay(void) const;
-    virtual bool SetPlayMode(ePlayMode);
-    virtual void TrickSpeed(int, bool);
-    virtual void Clear(void);
-    virtual void Play(void);
-    virtual void Freeze(void);
-    virtual void Mute(void);
-    virtual void StillPicture(const uchar *, int);
-    virtual bool Poll(cPoller &, int = 0);
-    virtual bool Flush(int = 0);
-    virtual int64_t GetSTC(void);
-    virtual void SetVideoDisplayFormat(eVideoDisplayFormat);
-    virtual void SetVideoFormat(bool);
-    virtual void GetVideoSize(int &, int &, double &);
-    virtual void GetOsdSize(int &, int &, double &);
-    virtual int PlayVideo(const uchar *, int);
-    virtual int PlayAudio(const uchar *, int, uchar);
-#ifdef USE_TS_VIDEO
-    virtual int PlayTsVideo(const uchar *, int);
-#endif
-#if !defined(USE_AUDIO_THREAD) || !defined(NO_TS_AUDIO)
-    virtual int PlayTsAudio(const uchar *, int);
-#endif
-    virtual void SetAudioChannelDevice(int);
-    virtual int GetAudioChannelDevice(void);
-    virtual void SetDigitalAudioDevice(bool);
-    virtual void SetAudioTrackDevice(eTrackType);
-    virtual void SetVolumeDevice(int);
-
-// Image Grab facilities
-
-    virtual uchar *GrabImage(int &, bool, int, int, int);
-
-// SPU facilities
-  private:
-    cDvbSpuDecoder * spuDecoder;
-  public:
-    virtual cSpuDecoder * GetSpuDecoder(void);
-
-  protected:
-    virtual void MakePrimaryDevice(bool);
-};
-
 /**
 **	Constructor device.
 */
@@ -1180,8 +978,8 @@ bool cSoftHdDevice::SetPlayMode(ePlayMode play_mode)
 int64_t cSoftHdDevice::GetSTC(void)
 {
     //dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
-    return::GetSTC();
+    // AudioClock are master clock
+    return::AudioGetClock();
 }
 
 /**
@@ -1306,17 +1104,6 @@ void cSoftHdDevice:: SetVideoDisplayFormat(eVideoDisplayFormat
     dsyslog("[softhddev]%s: %d\n", __FUNCTION__, video_display_format);
 
     cDevice::SetVideoDisplayFormat(video_display_format);
-#if 0
-    static int last = -1;
-
-    // called on every channel switch, no need to kill osd...
-    if (last != video_display_format) {
-	last = video_display_format;
-
-	::VideoSetDisplayFormat(video_display_format);
-	cSoftOsd::Dirty = 1;
-    }
-#endif
 }
 
 /**
@@ -1422,41 +1209,6 @@ int cSoftHdDevice::PlayVideo(const uchar * data, int length)
     return::PlayVideo(data, length);
 }
 
-#ifdef USE_TS_VIDEO
-
-/**
-**	Play a TS video packet.
-**
-**	@param data		ts data buffer
-**	@param length	ts packet length (188)
-*/
-int cSoftHdDevice::PlayTsVideo(const uchar * data, int length)
-{
-}
-
-#endif
-
-#if !defined(USE_AUDIO_THREAD) || !defined(NO_TS_AUDIO)
-
-/**
-**	Play a TS audio packet.
-**
-**	@param data		ts data buffer
-**	@param length	ts packet length (188)
-*/
-int cSoftHdDevice::PlayTsAudio(const uchar * data, int length)
-{
-#ifndef NO_TS_AUDIO
-    return::PlayTsAudio(data, length);
-#else
-    AudioPoller();
-
-    return cDevice::PlayTsAudio(data, length);
-#endif
-}
-
-#endif
-
 /**
 **	Grabs the currently visible screen image.
 **
@@ -1492,29 +1244,6 @@ extern "C" uint8_t * CreateJpeg(uint8_t * image, int *size, int quality,
 //////////////////////////////////////////////////////////////////////////////
 //	cPlugin
 //////////////////////////////////////////////////////////////////////////////
-
-class cPluginSoftHdDevice:public cPlugin
-{
-  public:
-    cPluginSoftHdDevice(void);
-    virtual ~ cPluginSoftHdDevice(void);
-    virtual const char *Version(void);
-    virtual const char *Description(void);
-    virtual const char *CommandLineHelp(void);
-    virtual bool ProcessArgs(int, char *[]);
-    virtual bool Initialize(void);
-    virtual bool Start(void);
-    virtual void Stop(void);
-    virtual void Housekeeping(void);
-    virtual void MainThreadHook(void);
-    virtual const char *MainMenuEntry(void);
-    virtual cOsdObject *MainMenuAction(void);
-    virtual cMenuSetupPage *SetupMenu(void);
-    virtual bool SetupParse(const char *, const char *);
-    virtual bool Service(const char *, void * = NULL);
-    virtual const char **SVDRPHelpPages(void);
-    virtual cString SVDRPCommand(const char *, const char *, int &);
-};
 
 /**
 **	Initialize any member variables here.
@@ -1627,16 +1356,6 @@ void cPluginSoftHdDevice::Stop(void)
 }
 
 /**
-**	Perform any cleanup or other regular tasks.
-*/
-void cPluginSoftHdDevice::Housekeeping(void)
-{
-    //dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
-    ::Housekeeping();
-}
-
-/**
 **	Create main menu entry.
 */
 const char *cPluginSoftHdDevice::MainMenuEntry(void)
@@ -1654,24 +1373,6 @@ cOsdObject *cPluginSoftHdDevice::MainMenuAction(void)
     //dsyslog("[softhddev]%s:\n", __FUNCTION__);
 
     return new cSoftHdMenu("SoftHdDevice");
-}
-
-/**
-**	Called for every plugin once during every cycle of VDR's main program
-**	loop.
-*/
-void cPluginSoftHdDevice::MainThreadHook(void)
-{
-    //dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
-    if (DoMakePrimary) {
-	dsyslog("[softhddev]%s: switching primary device to %d\n",
-	    __FUNCTION__, DoMakePrimary);
-	cDevice::SetPrimaryDevice(DoMakePrimary);
-	DoMakePrimary = 0;
-    }
-
-    ::MainThreadHook();
 }
 
 /**
@@ -1707,7 +1408,7 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 
 #ifndef MMAL
     if (!strcasecmp(name, "SWDeinterlacer")) {
-	VideoSetSWDeinterlacer(ConfigSWDeinterlacer = atoi(value));
+	SetSWDeinterlacer(ConfigSWDeinterlacer = atoi(value));
 	return true;
     }
 #endif
