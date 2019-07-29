@@ -62,9 +62,6 @@ extern enum AVPixelFormat Video_get_format(VideoRender *, AVCodecContext *,
 extern void VideoRenderFrame(VideoRender *, const AVCodecContext *,
     AVFrame *);
 
-    /// Wakeup display handler.
-extern void VideoDisplayWakeup(VideoRender *);
-
     /// Set audio delay.
 extern void VideoSetAudioDelay(int);
 
@@ -103,17 +100,12 @@ extern void VideoGetScreenSize(VideoRender * render, int *, int *, double *);
     /// Set screen size
 extern void VideoSetScreenSize(char *);
 
+    /// Display handler.
+extern void VideoThreadWakeup(VideoRender *);
+extern void VideoThreadExit(void);
+
 extern void VideoInit(VideoRender *);	///< Setup video module.
 extern void VideoExit(VideoRender *);		///< Cleanup and exit video module.
-
-    /// Poll video input buffers.
-extern int VideoPollInput(VideoStream *);
-
-    /// Decode video input buffers.
-extern int VideoDecodeInput(VideoStream *);
-
-    /// Get number of input buffers.
-extern int VideoGetBuffers(const VideoStream *);
 
 extern const char * VideoGetDecoderName(const char *);
 

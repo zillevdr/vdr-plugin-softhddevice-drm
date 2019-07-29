@@ -33,6 +33,8 @@ extern void AudioPoller(void);		///< poll audio events/handling		not used!
 extern int AudioFreeBytes(void);	///< free bytes in audio output
 extern int AudioUsedBytes(void);	///< used bytes in audio output
 extern int64_t AudioGetClock();		///< get current audio clock
+extern void AudioVideoReady(int64_t);	///< tell audio video is ready
+
 extern void AudioSetVolume(int);	///< set volume
 extern int AudioSetup(int *, int *, int);	///< setup audio output
 

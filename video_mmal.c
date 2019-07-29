@@ -55,6 +55,7 @@
 #include "misc.h"
 #include "video.h"
 #include "audio.h"
+#include "softhddev.h"
 
 //----------------------------------------------------------------------------
 //	Defines
@@ -68,21 +69,18 @@
 signed char VideoHardwareDecoder = -1;	///< flag use hardware decoder	<= not used!
 
 int VideoAudioDelay;
-int SWDeinterlacer;
 int hdr;
 
-extern void AudioVideoReady(int64_t);	///< tell audio video is ready
-
 static pthread_t VideoThread;		///< video decode thread
-static pthread_cond_t VideoWakeupCond;	///< wakeup condition variable
 static pthread_mutex_t VideoDeintMutex;	///< video condition mutex
 static pthread_mutex_t VideoLockMutex;	///< video lock mutex
+
+static pthread_cond_t cond;
+static pthread_mutex_t cond_mutex;
 
 //----------------------------------------------------------------------------
 //	Common Functions
 //----------------------------------------------------------------------------
-
-static void VideoThreadExit(void);	///< exit/kill video thread
 
 
 //----------------------------------------------------------------------------
@@ -126,7 +124,6 @@ struct _Mmal_Render_
 	int32_t par_den;
 	int interlaced;
 	unsigned buffers_in_queue;
-//	unsigned buffers_deint_in;
 	unsigned buffers_deint_out;
 	unsigned buffers;
 };
@@ -331,7 +328,6 @@ static void MmalClose(VideoRender * render)
 
 	render->interlaced = 0;
 	render->buffers_in_queue = 0;
-//	render->buffers_deint_in = 0;
 	render->buffers_deint_out = 0;
 	render->buffers = 0;
 }
@@ -476,14 +472,9 @@ static void MmalChangeResolution(VideoRender * render,
 			status, mmal_status_to_string(status));
 	}
 
-	// start vc_dispmanx_vsync_callback
-//	if(vc_dispmanx_vsync_callback(render->display, vsync_callback, NULL))
-//		fprintf(stderr, "Error: cannot open dispmanx vsync callback\n");
-
 	render->width = video_ctx->width;
 	render->par_num = video_ctx->sample_aspect_ratio.num;
 	render->par_den = video_ctx->sample_aspect_ratio.den;
-//	set_latency_target(MMAL_TRUE);
 }
 
 ///
@@ -494,6 +485,12 @@ static void MmalDisplayFrame(VideoRender * render)
 	MMAL_BUFFER_HEADER_T *buffer, *rbuffer;
 	MMAL_STATUS_T status;
 	AVFrame *frame;
+
+	if(render->buffers < 7) {
+		pthread_mutex_lock(&cond_mutex);
+		pthread_cond_signal(&cond);
+		pthread_mutex_unlock(&cond_mutex);
+	}
 
 	if(render->buffers_in_queue == 0 ){
 		if(render->StartCounter > 0)
@@ -513,7 +510,7 @@ dequeue:
 	frame = (AVFrame *)buffer->user_data;
 	render->buffers_in_queue--;
 	render->buffers--;
-	if(render->Closing > -5){
+	if(render->Closing){
 		if(frame)
 			av_frame_free(&frame);
 		mmal_buffer_header_release(buffer);
@@ -548,7 +545,7 @@ dequeue:
 	//Debug
 //	uint32_t newtime = GetMsTicks();
 /*	fprintf(stderr, "vor Dec %3d buffers %2d queue %d deint_in %d deint_out %i Diff %5i Dup %i Drop %i Miss %i Closing %i TSpeed %i TCount %i\n",
-		VideoGetBuffers(render->Stream), render->buffers,
+		VideoGetPackets(render->Stream), render->buffers,
 		render->buffers_in_queue, render->buffers_deint_in, render->buffers_deint_out,
 		diff, render->FramesDuped, render->FramesDropped, render->FramesMissed,
 		render->Closing, render->TrickSpeed, render->TrickCounter);*/
@@ -569,31 +566,6 @@ dequeue:
 
 	render->StartCounter++;
 	render->FrameCounter++;
-}
-
-///
-///	Handle a MMAL display.
-///
-static void MmalDisplayHandlerThread(VideoRender * render)
-{
-	int err;
-
-    if (render->buffers < 7) {
-		err = VideoDecodeInput(render->Stream);
-    } else {
-		err = VideoPollInput(render->Stream);
-    }
-    if (err) {
-		// FIXME
-		usleep(10 * 1000);		// nothing buffered
-		if (err == -1 && render->Closing) {
-			render->Closing--;
-			if (!render->Closing) {
-				Debug(3, "video/mmal: closing eof\n");
-				render->Closing = -1;
-			}
-		}
-    }
 }
 
 //----------------------------------------------------------------------------
@@ -713,39 +685,40 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 ///
 ///	Video render thread.
 ///
-static void *VideoDisplayHandlerThread(void *arg)
+static void *DisplayHandlerThread(void *arg)
 {
 	VideoRender * render = (VideoRender *)arg;
+	int err;
 
 	Debug(3, "video: display thread started\n");
 
+	pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
+	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
+
 	for (;;) {
-		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 		pthread_testcancel();
-		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
-		MmalDisplayHandlerThread(render);
+
+		if (render->buffers < 7) {
+			err = VideoDecodeInput(render->Stream);
+		} else {
+			pthread_mutex_lock(&cond_mutex);
+			pthread_cond_wait(&cond, &cond_mutex);
+			pthread_mutex_unlock(&cond_mutex);
+
+			err = VideoDecodeInput(render->Stream);
+		}
+		if (err) {
+			usleep(20000);
+		}
 	}
 
 	return 0;
 }
 
 ///
-///	Initialize video threads.
-///
-static void VideoThreadInit(VideoRender * render)
-{
-//	fprintf(stderr, "[video.c]: VideoThreadInit\n");
-	pthread_mutex_init(&VideoDeintMutex, NULL);
-	pthread_mutex_init(&VideoLockMutex, NULL);
-	pthread_cond_init(&VideoWakeupCond, NULL);
-	pthread_create(&VideoThread, NULL, VideoDisplayHandlerThread, render);
-	pthread_setname_np(VideoThread, "softhddev video");
-}
-
-///
 ///	Exit and cleanup video threads.
 ///
-static void VideoThreadExit(void)
+void VideoThreadExit(void)
 {
     if (VideoThread) {
 		void *retval;
@@ -762,7 +735,8 @@ static void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		VideoThread = 0;
-		pthread_cond_destroy(&VideoWakeupCond);
+		pthread_cond_init(&cond,NULL);
+		pthread_mutex_destroy(&cond_mutex);
 		pthread_mutex_destroy(&VideoDeintMutex);
 		pthread_mutex_destroy(&VideoLockMutex);
     }
@@ -773,10 +747,16 @@ static void VideoThreadExit(void)
 ///
 ///	New video arrived, wakeup video thread.
 ///
-void VideoDisplayWakeup(VideoRender * render)
+void VideoThreadWakeup(VideoRender * render)
 {
+	render->Closing = 0;
+
 	if (!VideoThread) {
-		VideoThreadInit(render);
+		pthread_mutex_init(&cond_mutex, NULL);
+		pthread_mutex_init(&VideoDeintMutex, NULL);
+		pthread_mutex_init(&VideoLockMutex, NULL);
+		pthread_create(&VideoThread, NULL, DisplayHandlerThread, render);
+		pthread_setname_np(VideoThread, "softhddev video");
 	}
 }
 
@@ -800,7 +780,7 @@ VideoRender *VideoNewRender(VideoStream * stream)
 		return NULL;
 	}
 
-	render->Closing = -300 - 1;
+	render->Closing = 0;
 	render->Stream = stream;
 
 	return render;
@@ -852,7 +832,7 @@ void VideoRenderFrame(VideoRender * render,
 	MMAL_BUFFER_HEADER_T *buffer, *qbuffer;
 	MMAL_STATUS_T status;
 
-	if(render->Closing == 1){
+	if(render->Closing){
 		av_frame_free(&frame);
 		fprintf(stderr, "VideoRenderFrame: Closing %d\n", render->Closing);
 		return;

@@ -89,8 +89,6 @@ override CXXFLAGS += $(_CFLAGS) $(DEFINES) $(INCLUDES) \
     -g3 -ggdb -W -Wall -Wextra -Winit-self -Werror=overloaded-virtual
 override CFLAGS	  += $(_CFLAGS) $(DEFINES) $(INCLUDES) \
     -g3 -ggdb -W -Wall -Wextra -Winit-self
-    
-# -Wdeclaration-after-statement
 
 ### The object files (add further files here):
 

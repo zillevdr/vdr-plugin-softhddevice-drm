@@ -25,6 +25,15 @@ extern "C"
 {
 #endif
 
+//----------------------------------------------------------------------------
+//	Typedefs
+//----------------------------------------------------------------------------
+    /// Video output stream typedef
+    typedef struct __video_stream__ VideoStream; 		// in softhddev.h ?
+
+//----------------------------------------------------------------------------
+//	Prototypes
+//----------------------------------------------------------------------------
     /// C plugin close osd
     extern void OsdClose(void);
     /// C plugin draw osd pixmap
@@ -40,6 +49,10 @@ extern "C"
 
     /// C plugin play video packet
     extern int PlayVideo(const uint8_t *, int);
+    /// Decode video input buffers.
+    extern int VideoDecodeInput(VideoStream *);
+    /// Get number of input buffers.
+    extern int VideoGetPackets(const VideoStream *);
     /// C plugin grab an image
     extern uint8_t *GrabImage(int *, int, int, int, int);
 

@@ -174,26 +174,26 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 	decoder->VideoCtx->codec_id = codec_id;
 	decoder->VideoCtx->get_format = Codec_get_format;
 	decoder->VideoCtx->opaque = decoder;
+
 	decoder->VideoCtx->flags |= AV_CODEC_FLAG_BITEXACT;
-	decoder->VideoCtx->flags2 |= AV_CODEC_FLAG2_FAST;
-	if (codec->capabilities & AV_CODEC_CAP_DR1)
-		fprintf(stderr, "[CodecVideoOpen] AV_CODEC_CAP_DR1 => get_buffer()\n");
+//	decoder->VideoCtx->flags2 |= AV_CODEC_FLAG2_FAST;
+//	decoder->VideoCtx->flags |= AV_CODEC_FLAG_TRUNCATED;
+//	if (codec->capabilities & AV_CODEC_CAP_DR1)
+//		fprintf(stderr, "[CodecVideoOpen] AV_CODEC_CAP_DR1 => get_buffer()\n");
 	if (codec->capabilities & AV_CODEC_CAP_FRAME_THREADS ||
 		AV_CODEC_CAP_SLICE_THREADS) {
-		fprintf(stderr, "[CodecVideoOpen] codec use threads\n");
 		decoder->VideoCtx->thread_count = 4;
+//		fprintf(stderr, "[CodecVideoOpen] codec use threads\n");
+	}
+	if (codec->capabilities & AV_CODEC_CAP_SLICE_THREADS){
 		decoder->VideoCtx->thread_type = FF_THREAD_SLICE;
+//		fprintf(stderr, "[CodecVideoOpen] codec use THREAD_SLICE threads\n");
 	}
 
 	pthread_mutex_lock(&CodecLockMutex);
 	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0)
 		fprintf(stderr, "[CodecVideoOpen] Error opening the decoder: ");
 	pthread_mutex_unlock(&CodecLockMutex);
-
-	if (decoder->VideoCtx->active_thread_type != FF_THREAD_SLICE) {
-		fprintf(stderr, "[CodecVideoOpen] Couldn't activate slice threading: %d\n",
-			decoder->VideoCtx->active_thread_type);
-	}
 }
 
 /**
@@ -441,7 +441,7 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 		av_dict_free(&av_dict);
 	}
 	pthread_mutex_unlock(&CodecLockMutex);
-	Debug(3, "codec: audio '%s'\n", audio_decoder->AudioCodec->long_name);
+	Debug(3, "codec: audio '%s'\n", audio_decoder->AudioCtx->codec->long_name);
 
 	if (audio_decoder->AudioCtx->codec->capabilities & AV_CODEC_CAP_TRUNCATED) {
 		Debug(3, "codec: audio can use truncated packets\n");
