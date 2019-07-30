@@ -628,7 +628,7 @@ dequeue:
 	pthread_mutex_unlock(&cond_mutex);
 
 	render->Closing = 0;
-	fprintf(stderr, "CleanDisplayThread: DRM cleaned.\n");
+//	fprintf(stderr, "CleanDisplayThread: DRM cleaned.\n");
 }
 
 ///
@@ -856,8 +856,9 @@ static void *DisplayHandlerThread(void * arg)
 			if (drmHandleEvent(render->fd_drm, &render->ev) != 0)
 				fprintf(stderr, "DisplayHandlerThread: drmHandleEvent failed!\n");
 
-			if (render->lastframe)
+			if (render->lastframe) {
 				av_frame_free(&render->lastframe);
+			}
 			render->lastframe = render->act_buf->frame;
 
 		} else {
@@ -991,7 +992,7 @@ void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		DecodeThread = 0;
-		fprintf(stderr, "VideoThreadExit: DecodeThread cleaned.\n");
+//		fprintf(stderr, "VideoThreadExit: DecodeThread cleaned.\n");
 		pthread_mutex_destroy(&cond_mutex);
 		pthread_mutex_destroy(&VideoDeintMutex);
 		pthread_mutex_destroy(&VideoLockMutex);
@@ -1007,7 +1008,7 @@ void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		DisplayThread = 0;
-		fprintf(stderr, "VideoThreadExit: DisplayThread cleaned.\n");
+//		fprintf(stderr, "VideoThreadExit: DisplayThread cleaned.\n");
 	}
 }
 
@@ -1049,7 +1050,7 @@ void VideoThreadWakeup(VideoRender * render)
 VideoRender *VideoNewRender(VideoStream * stream)
 {
 	VideoRender *render;
-	fprintf(stderr, "VideoNewRender\n");
+//	fprintf(stderr, "VideoNewRender\n");
 	if (!(render = calloc(1, sizeof(*render)))) {
 		Error(_("video/DRM: out of memory\n"));
 		return NULL;
@@ -1069,7 +1070,7 @@ VideoRender *VideoNewRender(VideoStream * stream)
 ///
 void VideoDelRender(VideoRender * render)
 {
-	fprintf(stderr, "VideoDelRender\n");
+//	fprintf(stderr, "VideoDelRender\n");
     if (render) {
 #ifdef DEBUG
 		if (!pthread_equal(pthread_self(), DecodeThread)) {
@@ -1320,8 +1321,8 @@ void VideoSetClosing(VideoRender * render, int closing)
 		render->Closing = closing;
 	if (FilterThread)
 		render->Deint_Close = 1;
-	fprintf(stderr, "VideoSetClosing %i %i\n",
-		render->Closing, render->Deint_Close);
+//	fprintf(stderr, "VideoSetClosing %i %i\n",
+//		render->Closing, render->Deint_Close);
 }
 
 ///
@@ -1573,8 +1574,6 @@ void VideoInit(VideoRender * render)
 ///
 void VideoExit(VideoRender * render)
 {
-	fprintf(stderr, "VideoExit:\n");
-
 	VideoThreadExit();
 
 	if (render) {
