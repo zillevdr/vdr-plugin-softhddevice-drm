@@ -65,9 +65,6 @@
 //----------------------------------------------------------------------------
 //	Variables
 //----------------------------------------------------------------------------
-
-signed char VideoHardwareDecoder = -1;	///< flag use hardware decoder	<= not used!
-
 int VideoAudioDelay;
 int hdr;
 
@@ -99,6 +96,8 @@ struct _Mmal_Render_
     int FramesMissed;			///< number of frames missed
     int FramesDropped;			///< number of frames dropped
     int FrameCounter;			///< number of frames decoded
+
+	int64_t pts;
 
 	MMAL_COMPONENT_T *vout;
 	MMAL_POOL_T *vout_input_pool;
@@ -520,11 +519,21 @@ dequeue:
 	}
 
 	int64_t audio_clock = AudioGetClock();
-	int64_t video_clock = buffer->pts;
+	int64_t video_clock = render->pts = buffer->pts;
 	int diff = video_clock - audio_clock - VideoAudioDelay;
+
+	if (render->TrickCounter) {
+		render->TrickCounter--;
+		goto dupe;
+	}
+	if (render->TrickSpeed && !render->TrickCounter) {
+		render->TrickCounter = render->TrickSpeed;
+	}
+
 
 	if(diff > 55 * 90 && render->FrameCounter % 2 == 0 && !render->TrickSpeed){
 		render->FramesDuped++;
+dupe:
 		rbuffer = mmal_queue_get(render->vout_input_pool->queue);
 		memcpy(rbuffer->data, buffer->data, buffer->length);
 		rbuffer->length = buffer->length;
@@ -708,7 +717,7 @@ static void *DisplayHandlerThread(void *arg)
 			err = VideoDecodeInput(render->Stream);
 		}
 		if (err) {
-			usleep(20000);
+			usleep(10000);
 		}
 	}
 
@@ -892,13 +901,26 @@ void VideoRenderFrame(VideoRender * render,
 }
 
 ///
+///	Get video clock.
+///
+///	@param hw_decoder	video hardware decoder
+///
+///	@note this isn't monoton, decoding reorders frames, setter keeps it
+///	monotonic
+///
+int64_t VideoGetClock(const VideoRender * render)
+{
+	return render->pts;
+}
+
+///
 ///	Set closing stream flag.
 ///
 ///	@param hw_render	video hardware render
 ///
-void VideoSetClosing(VideoRender * render, int closing)
+void VideoSetClosing(VideoRender * render)
 {
-	render->Closing = closing;
+	render->Closing = 1;
 }
 
 ///

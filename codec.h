@@ -65,7 +65,10 @@ extern void CodecVideoOpen(VideoDecoder *, int);
 extern void CodecVideoClose(VideoDecoder *);
 
     /// Decode a video packet.
-extern int CodecVideoDecode(VideoDecoder *, const AVPacket *);
+extern int CodecVideoSendPacket(VideoDecoder *, const AVPacket *);
+
+extern void CodecVideoReceiveFrame(VideoDecoder *);
+
 
     /// Flush video buffers.
 extern void CodecVideoFlushBuffers(VideoDecoder *);

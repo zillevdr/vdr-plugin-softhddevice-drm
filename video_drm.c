@@ -47,7 +47,7 @@
 #include <drm_fourcc.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext_drm.h>
-#include <libavutil/time.h>
+//#include <libavutil/time.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
@@ -68,8 +68,6 @@
 //----------------------------------------------------------------------------
 //	Variables
 //----------------------------------------------------------------------------
-signed char VideoHardwareDecoder = -1;	///< Not used!!!
-
 int VideoAudioDelay;
 int SWDeinterlacer;
 int hdr;
@@ -115,13 +113,14 @@ struct _Drm_Render_
 
 	VideoStream *Stream;		///< video stream
 	int TrickSpeed;			///< current trick speed
-	int TrickCounter;			///< current trick speed counter
+//	int TrickCounter;			///< current trick speed counter
 	int Closing;			///< flag about closing current stream
 	int Deint_Close;
 
 	int StartCounter;			///< counter for video start
 	int FramesDuped;			///< number of frames duplicated
 	int FramesDropped;			///< number of frames dropped
+	int64_t pts;
 
 	AVFilterGraph *filter_graph;
 	AVFilterContext *buffersrc_ctx, *buffersink_ctx;
@@ -137,7 +136,7 @@ struct _Drm_Render_
 	int use_zpos;
 	uint64_t zpos_overlay;
 	uint64_t zpos_primary;
-	uint32_t connector_id, crtc_id, video_plane, osd_plane, front_buf, act_fb_id;
+	uint32_t connector_id, crtc_id, video_plane, osd_plane, front_buf;
 	int second_field;
 	AVFrame *lastframe;
 	int prime_buffers;
@@ -698,7 +697,6 @@ dequeue:
 				fprintf(stderr, "Frame2Display: SetupFB FB %i x %i failed\n", buf->width, buf->height);
 			if (render->prime_buffers == 0) {
 				SetBuf(render, buf, render->video_plane);
-				render->act_fb_id = buf->fb_id;
 			}
 			render->prime_buffers++;
 		}
@@ -715,7 +713,6 @@ dequeue:
 				fprintf(stderr, "Frame2Display: SetupFB FB %i x %i failed\n", buf->width, buf->height);
 			if (render->prime_buffers == 0) {
 				SetBuf(render, buf, render->video_plane);
-				render->act_fb_id = buf->fb_id;
 			}
 			render->prime_buffers++;
 		}
@@ -752,9 +749,9 @@ dequeue:
 	}
 
 	if(!render->StartCounter && !render->Closing) {
-//		fprintf(stderr, "Frame2Display: AudioVideoReady\n");
 		AudioVideoReady(frame->pts);
 	}
+	render->pts = frame->pts;
 
 audioclock:
 	audio_clock = AudioGetClock();
@@ -768,26 +765,12 @@ audioclock:
 	}
 	int diff = frame->pts - audio_clock - VideoAudioDelay;
 
-	if(diff > 55 * 90 && !render->TrickSpeed) {
-		render->FramesDuped++;
-
-//		fprintf(stderr, "Frame2Display: FramesDuped Timstamp %s audio %s video %s diff %d %d\n",
-//			Timestamp2String(av_gettime()), Timestamp2String(audio_clock),
-//			Timestamp2String(frame->pts), diff, diff /90);
-
-		if (render->Closing)
-			goto closing;
-
-		usleep(20000);
-		goto audioclock;
-	}
-
-	if (diff < -25 * 90 && !render->TrickSpeed) {
+	if ((diff < -25 * 90 || diff > 1500 * 90) && !render->TrickSpeed) {
 		render->FramesDropped++;
 
 //		fprintf(stderr, "Frame2Display: FramesDropped Timstamp %s audio %s video %s diff %d %d\n",
-//			Timestamp2String(av_gettime()), Timestamp2String(audio_clock),
-//			Timestamp2String(frame->pts), diff, diff /90);
+//			Timestamp2String(GetMsTicks()), PtsTimestamp2String(audio_clock),
+//			PtsTimestamp2String(frame->pts), diff, diff /90);
 
 		if (render->Closing)
 			goto closing;
@@ -803,19 +786,38 @@ audioclock:
 		goto dequeue;
 	}
 
+	if(diff > 55 * 90 && !render->TrickSpeed) {
+		render->FramesDuped++;
+
+//		fprintf(stderr, "Frame2Display: FramesDuped Timstamp %s audio %s video %s diff %d %d\n",
+//			Timestamp2String(GetMsTicks()), PtsTimestamp2String(audio_clock),
+//			PtsTimestamp2String(frame->pts), diff, diff /90);
+
+		if (render->Closing)
+			goto closing;
+
+		usleep(20000);
+		goto audioclock;
+	}
+
+	if (!render->TrickSpeed) {
+		render->StartCounter++;
+	}
+
 	if (frame->interlaced_frame == 0 || render->second_field == 0) {
+		if (render->TrickSpeed) {
+			usleep(20000 * render->TrickSpeed);
+		}
 		buf->frame = frame;
 		pthread_mutex_lock(&VideoLockMutex);
 		render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
 		atomic_dec(&render->FramesFilled);
 		pthread_mutex_unlock(&VideoLockMutex);
-	} else
+	} else {
 		buf->frame = NULL;
-
-	render->StartCounter++;
+	}
 
 page_flip:
-	render->act_fb_id = buf->fb_id;
 	render->act_buf = buf;
 
 	drmModeAtomicReqPtr ModeReq;
@@ -865,7 +867,7 @@ static void *DisplayHandlerThread(void * arg)
 			usleep(20000);
 		}
 
-		if (render->buf_black.fb_id == render->act_fb_id &&
+		if (render->buf_black.fb_id == render->act_buf->fb_id &&
 			render->Closing) {
 
 			CleanDisplayThread(render, NULL);
@@ -967,7 +969,7 @@ static void *DecodeHandlerThread(void *arg)
 			ret = VideoDecodeInput(render->Stream);
 		}
 		if (ret) {
-			usleep(20000);
+			usleep(10000);
 		}
 	}
 	pthread_exit((void *)pthread_self());
@@ -1164,7 +1166,7 @@ getinframe:
 
 		if (av_buffersrc_add_frame_flags(render->buffersrc_ctx,
 			frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-			fprintf(stderr, "FilterHandlerThread: can't send_packet.\n");
+			fprintf(stderr, "FilterHandlerThread: can't add_frame.\n");
 		} else {
 			av_frame_free(&frame);
 		}
@@ -1309,16 +1311,29 @@ void VideoRenderFrame(VideoRender * render,
 }
 
 ///
+///	Get video clock.
+///
+///	@param hw_decoder	video hardware decoder
+///
+///	@note this isn't monoton, decoding reorders frames, setter keeps it
+///	monotonic
+///
+int64_t VideoGetClock(const VideoRender * render)
+{
+	return render->pts;
+}
+
+///
 ///	Set closing stream flag.
 ///
 ///	@param hw_render	video hardware render
 ///
-void VideoSetClosing(VideoRender * render, int closing)
+void VideoSetClosing(VideoRender * render)
 {
 	Debug(3, "video: set closing\n");
 
 	if (DisplayThread)
-		render->Closing = closing;
+		render->Closing = 1;
 	if (FilterThread)
 		render->Deint_Close = 1;
 //	fprintf(stderr, "VideoSetClosing %i %i\n",
@@ -1348,12 +1363,10 @@ void VideoResetStart(VideoRender * render)
 void VideoSetTrickSpeed(VideoRender * render, int speed)
 {
 	Debug(3, "video: set trick-speed %d\n", speed);
-//	fprintf(stderr, "video: set trick-speed %d\n", speed);
 	render->TrickSpeed = speed;
-	render->TrickCounter = speed;
 	if (speed) {
 		render->Closing = 0;
-    }
+	}
 }
 
 ///

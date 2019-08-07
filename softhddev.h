@@ -74,6 +74,8 @@ extern "C"
     extern int Poll(int);
     /// C plugin flush output buffers
     extern int Flush(int);
+    /// C plugin get current system time counter
+    extern int64_t GetSTC(void);
     /// C plugin get video stream size and aspect
     extern void GetScreenSize(int *, int *, double *);
     /// C plugin set sw deinterlacer

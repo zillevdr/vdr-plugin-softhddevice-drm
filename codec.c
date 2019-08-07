@@ -67,7 +67,7 @@
       ///	new ffmpeg dislikes simultanous open/close
       ///	this breaks our code, until this is fixed use lock.
       ///
-static pthread_mutex_t CodecLockMutex;
+//static pthread_mutex_t CodecLockMutex;		ffmpeg should be threadsafe.
 
 //----------------------------------------------------------------------------
 //	Video
@@ -80,7 +80,6 @@ struct _video_decoder_
 {
     VideoRender *Render;		///< video hardware decoder
 
-    int GetFormatDone;			///< flag get format called!
     AVCodecContext *VideoCtx;		///< video codec context
     AVFrame *Frame;			///< decoded video frame
 };
@@ -98,18 +97,12 @@ struct _video_decoder_
 **				valid format, the formats are ordered by quality.
 */
 static enum AVPixelFormat Codec_get_format(AVCodecContext * video_ctx,
-    const enum AVPixelFormat *fmt)
+		const enum AVPixelFormat *fmt)
 {
-    VideoDecoder *decoder;
-    decoder = video_ctx->opaque;
+	VideoDecoder *decoder;
+	decoder = video_ctx->opaque;
 
-    // bug in ffmpeg 1.1.1, called with zero width or height
-    if (!video_ctx->width || !video_ctx->height) {
-	Error("codec/video: ffmpeg buggy: width or height zero\n");
-    }
-
-    decoder->GetFormatDone = 1;
-    return Video_get_format(decoder->Render, video_ctx, fmt);
+	return Video_get_format(decoder->Render, video_ctx, fmt);
 }
 
 //----------------------------------------------------------------------------
@@ -128,7 +121,7 @@ VideoDecoder *CodecVideoNewDecoder(VideoRender * render)
     VideoDecoder *decoder;
 
     if (!(decoder = calloc(1, sizeof(*decoder)))) {
-	Fatal(_("codec: can't allocate vodeo decoder\n"));
+		Fatal(_("codec: can't allocate vodeo decoder\n"));
     }
     decoder->Render = render;
 
@@ -190,10 +183,10 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 //		fprintf(stderr, "[CodecVideoOpen] codec use THREAD_SLICE threads\n");
 	}
 
-	pthread_mutex_lock(&CodecLockMutex);
+//	pthread_mutex_lock(&CodecLockMutex);
 	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0)
 		fprintf(stderr, "[CodecVideoOpen] Error opening the decoder: ");
-	pthread_mutex_unlock(&CodecLockMutex);
+//	pthread_mutex_unlock(&CodecLockMutex);
 }
 
 /**
@@ -209,16 +202,19 @@ void CodecVideoClose(VideoDecoder * decoder)
 		av_init_packet(&avpkt);
 		avpkt.data = NULL;
 		avpkt.size = 0;
-		CodecVideoDecode(decoder, &avpkt);
+		CodecVideoSendPacket(decoder, &avpkt);
+		CodecVideoReceiveFrame(decoder);	// Test EOF!
 		av_packet_unref(&avpkt);
-	}
+	} else
+		fprintf(stderr, "[CodecVideoClose] codec don't use AV_CODEC_CAP_DELAY\n");
+
 
 	if (decoder->VideoCtx) {
-		pthread_mutex_lock(&CodecLockMutex);
+//		pthread_mutex_lock(&CodecLockMutex);
 		avcodec_close(decoder->VideoCtx);
 		avcodec_free_context(&decoder->VideoCtx);
 		av_freep(&decoder->VideoCtx);
-		pthread_mutex_unlock(&CodecLockMutex);
+//		pthread_mutex_unlock(&CodecLockMutex);
 	}
 }
 
@@ -228,23 +224,12 @@ void CodecVideoClose(VideoDecoder * decoder)
 **	@param decoder	video decoder data
 **	@param avpkt	video packet
 */
-int CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
+int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 {
-	AVCodecContext *video_ctx;
-	AVFrame *frame;
-	int ret_in, ret_out;
-	int got_frame;
-	int cap_delay = 0;
-
-	if (!(decoder->Frame = av_frame_alloc())) {
-		Fatal(_("codec: can't allocate decoder frame\n"));
-	}
-	decoder->Frame->format = AV_PIX_FMT_NONE;
-
-	video_ctx = decoder->VideoCtx;
+	int ret;
 
 #if 0
-	if (!video_ctx->extradata_size) {
+	if (!decoder->VideoCtx->extradata_size) {
 		AVBSFContext *bsf_ctx;
 		const AVBitStreamFilter *f;
 		int extradata_size;
@@ -257,7 +242,7 @@ int CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 		if (av_bsf_alloc(f, &bsf_ctx) < 0)
 			fprintf(stderr, "extradata av_bsf_alloc failed!\n");
 
-		bsf_ctx->par_in->codec_id = video_ctx->codec_id;
+		bsf_ctx->par_in->codec_id = decoder->VideoCtx->codec_id;
 
 		if (av_bsf_init(bsf_ctx) < 0)
 			fprintf(stderr, "extradata av_bsf_init failed!\n");
@@ -271,54 +256,46 @@ int CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 		extradata = av_packet_get_side_data(avpkt, AV_PKT_DATA_NEW_EXTRADATA,
 			&extradata_size);
 
-		video_ctx->extradata = av_mallocz(extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
-		memcpy(video_ctx->extradata, extradata, extradata_size);
-		video_ctx->extradata_size = extradata_size;
+		decoder->VideoCtx->extradata = av_mallocz(extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
+		memcpy(decoder->VideoCtx->extradata, extradata, extradata_size);
+		decoder->VideoCtx->extradata_size = extradata_size;
 
 		av_bsf_free(&bsf_ctx);
 
-		fprintf(stderr, "extradata %p %d\n", video_ctx->extradata, video_ctx->extradata_size);
+		fprintf(stderr, "extradata %p %d\n", decoder->VideoCtx->extradata, decoder->VideoCtx->extradata_size);
 	}
 #endif
 
-	frame = decoder->Frame;
-	if (avpkt->data == NULL)
-		cap_delay = 1;
+	ret = avcodec_send_packet(decoder->VideoCtx, avpkt);
 
-	ret_in = avcodec_send_packet(video_ctx, avpkt);
-//	if (ret_in == AVERROR(EAGAIN))
-//		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(EAGAIN)\n");
-	if (ret_in == AVERROR(ENOMEM))
-		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(ENOMEM)\n");
-	if (ret_in == AVERROR(EINVAL))
-		fprintf(stderr, "CodecVideoDecode: Error sending a packet for decoding AVERROR(EINVAL)\n");
+	if (ret == AVERROR(ENOMEM))
+		fprintf(stderr, "CodecVideoSendPacket: Error sending a packet for decoding AVERROR(ENOMEM)\n");
+	if (ret == AVERROR(EINVAL))
+		fprintf(stderr, "CodecVideoSendPacket: Error sending a packet for decoding AVERROR(EINVAL)\n");
 
-	ret_out = avcodec_receive_frame(video_ctx, frame);
-	if (ret_out == 0) {
-		got_frame = 1;
+	if (ret == AVERROR(EAGAIN))
+		return 1;
+	return 0;
+}
+
+void CodecVideoReceiveFrame(VideoDecoder * decoder)
+{
+	int ret;
+
+	if (!(decoder->Frame = av_frame_alloc())) {
+		Fatal(_("codec: can't allocate decoder frame\n"));
 	}
-//	if (ret_out == AVERROR(EAGAIN))
-//		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR(EAGAIN)\n");
-//	if (ret_out == AVERROR_EOF)
-//		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR_EOF\n");
-	if (ret_out == AVERROR(EINVAL))
-		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR(EINVAL)\n");
 
-//		fprintf(stderr, "CodecVideoDecode cap_delay %i frame %i x %i ctx %i x %i frame %p\n",
-//			cap_delay, frame->width, frame->height,
-//			video_ctx->width, video_ctx->height, frame);
+	ret = avcodec_receive_frame(decoder->VideoCtx, decoder->Frame);
 
-    if (got_frame && frame->width != 0 && !cap_delay && frame->width == video_ctx->width) {
-		VideoRenderFrame(decoder->Render, video_ctx, frame);
+	if (!ret) {
+		VideoRenderFrame(decoder->Render, decoder->VideoCtx, decoder->Frame);
 	} else {
-//		fprintf(stderr, "CodecVideoDecode cap_delay %i frame %i x %i ctx %i x %i frame %p\n",
-//			cap_delay, frame->width, frame->height,
-//			video_ctx->width, video_ctx->height, frame);
-		av_frame_free(&frame);
-    }
-	if (ret_in == AVERROR(EAGAIN))
-		return 0;
-	return 1;
+		av_frame_free(&decoder->Frame);
+	}
+
+	if (ret == AVERROR(EINVAL))
+		fprintf(stderr, "CodecVideoReceiveFrame: Error receive frame AVERROR(EINVAL)\n");
 }
 
 /**
@@ -328,9 +305,9 @@ int CodecVideoDecode(VideoDecoder * decoder, const AVPacket * avpkt)
 */
 void CodecVideoFlushBuffers(VideoDecoder * decoder)
 {
-    if (decoder->VideoCtx) {
-	avcodec_flush_buffers(decoder->VideoCtx);
-    }
+	if (decoder->VideoCtx) {
+		avcodec_flush_buffers(decoder->VideoCtx);
+	}
 }
 
 //----------------------------------------------------------------------------
@@ -424,7 +401,7 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 		audio_decoder->AudioCtx->request_channel_layout =
 			AV_CH_LAYOUT_STEREO_DOWNMIX;
 	}
-	pthread_mutex_lock(&CodecLockMutex);
+//	pthread_mutex_lock(&CodecLockMutex);
 	// open codec
 	if (1) {
 		AVDictionary *av_dict;
@@ -435,12 +412,12 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 		//av_dict_set(&av_dict, "ltrt_cmixlev", "1.414", 0);
 		//av_dict_set(&av_dict, "loro_cmixlev", "1.414", 0);
 		if (avcodec_open2(audio_decoder->AudioCtx, audio_decoder->AudioCtx->codec, &av_dict) < 0) {
-			pthread_mutex_unlock(&CodecLockMutex);
+//			pthread_mutex_unlock(&CodecLockMutex);
 			Fatal(_("codec: can't open audio codec\n"));
 		}
 		av_dict_free(&av_dict);
 	}
-	pthread_mutex_unlock(&CodecLockMutex);
+//	pthread_mutex_unlock(&CodecLockMutex);
 	Debug(3, "codec: audio '%s'\n", audio_decoder->AudioCtx->codec->long_name);
 
 	if (audio_decoder->AudioCtx->codec->capabilities & AV_CODEC_CAP_TRUNCATED) {
@@ -463,10 +440,10 @@ void CodecAudioClose(AudioDecoder * audio_decoder)
 
 	// FIXME: output any buffered data
 	if (audio_decoder->AudioCtx) {
-		pthread_mutex_lock(&CodecLockMutex);
+//		pthread_mutex_lock(&CodecLockMutex);
 		avcodec_close(audio_decoder->AudioCtx);
 		av_freep(&audio_decoder->AudioCtx);
-		pthread_mutex_unlock(&CodecLockMutex);
+//		pthread_mutex_unlock(&CodecLockMutex);
     }
 }
 
@@ -583,7 +560,7 @@ static void CodecNoopCallback( __attribute__ ((unused))
 */
 void CodecInit(void)
 {
-    pthread_mutex_init(&CodecLockMutex, NULL);
+//    pthread_mutex_init(&CodecLockMutex, NULL);
 #ifndef DEBUG
     // disable display ffmpeg error messages
     av_log_set_callback(CodecNoopCallback);
@@ -603,5 +580,5 @@ void CodecInit(void)
 */
 void CodecExit(void)
 {
-    pthread_mutex_destroy(&CodecLockMutex);
+//    pthread_mutex_destroy(&CodecLockMutex);
 }

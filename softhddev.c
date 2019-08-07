@@ -47,19 +47,11 @@
 #include "video.h"
 #include "codec.h"
 
-#ifdef DEBUG
-static int DumpH264(const uint8_t * data, int size);
-static void DumpMpeg(const uint8_t * data, int size);
-#endif
-
 //////////////////////////////////////////////////////////////////////////////
 //	Variables
 //////////////////////////////////////////////////////////////////////////////
 
 extern int ConfigAudioBufferTime;	///< config size ms of audio buffer
-static char ConfigStillDecoder;		///< hw/sw decoder for still picture
-
-static pthread_mutex_t SuspendLockMutex;	///< suspend lock mutex
 
 static volatile char StreamFreezed;	///< stream freezed
 
@@ -731,24 +723,15 @@ struct __video_stream__
 {
     VideoRender *Render;		///< video hardware decoder
     VideoDecoder *Decoder;		///< video decoder
-    pthread_mutex_t DecoderLockMutex;	///< video decoder lock mutex
 
     enum AVCodecID CodecID;		///< current codec id
-    enum AVCodecID LastCodecID;		///< last codec id
 
     volatile char NewStream;		///< flag new video stream
     volatile char ClosingStream;	///< flag closing video stream
-    volatile char SkipStream;		///< skip video stream
     volatile char Freezed;		///< stream freezed
-
     volatile char TrickSpeed;		///< current trick speed
-    volatile char ClearBuffers;		///< command clear video buffers
 
-    int InvalidPesCounter;		///< counter of invalid PES packets
-
-    enum AVCodecID CodecIDRb[VIDEO_PACKET_MAX];	///< codec ids in ring buffer
     AVPacket PacketRb[VIDEO_PACKET_MAX];	///< PES packet ring buffer
-
     int PacketWrite;			///< ring buffer write pointer
     int PacketRead;			///< ring buffer read pointer
     atomic_t PacketsFilled;		///< how many of the ring buffer is used
@@ -756,10 +739,6 @@ struct __video_stream__
 
 static VideoStream MyVideoStream[1];	///< normal video stream
 
-//#ifdef DEBUG
-uint32_t VideoSwitch;			///< debug video switch ticks
-//static int VideoMaxPacketSize;		///< biggest used packet buffer
-//#endif
 //#define STILL_DEBUG 2
 #ifdef STILL_DEBUG
 static char InStillPicture;		///< flag still picture
@@ -785,23 +764,19 @@ void PrintStreamData(const uint8_t *data, int size)
 */
 static void VideoPacketInit(VideoStream * stream)
 {
-    int i;
-
-    for (i = 0; i < VIDEO_PACKET_MAX; ++i) {
-	AVPacket *avpkt;
+	for (int i = 0; i < VIDEO_PACKET_MAX; ++i) {
+		AVPacket *avpkt;
 
 		avpkt = &stream->PacketRb[i];
-		// build a clean ffmpeg av packet
 		if (av_new_packet(avpkt, VIDEO_BUFFER_SIZE)) {
 			Fatal(_("[softhddev] out of memory\n"));
 		}
 		avpkt->size = 0;
-    }
+	}
 
-//	fprintf(stderr, "VideoPacketInit: %i Packete erstellt.\n",
-//		VIDEO_PACKET_MAX);
-    atomic_set(&stream->PacketsFilled, 0);
-    stream->PacketRead = stream->PacketWrite = 0;
+	atomic_set(&stream->PacketsFilled, 0);
+	stream->PacketRead = 0;
+	stream->PacketWrite = -1;
 }
 
 /**
@@ -811,15 +786,11 @@ static void VideoPacketInit(VideoStream * stream)
 */
 static void VideoPacketExit(VideoStream * stream)
 {
-    int i;
+	atomic_set(&stream->PacketsFilled, 0);
 
-    atomic_set(&stream->PacketsFilled, 0);
-
-    for (i = 0; i < VIDEO_PACKET_MAX; ++i) {
+	for (int i = 0; i < VIDEO_PACKET_MAX; ++i) {
 		av_packet_unref(&stream->PacketRb[i]);
-    }
-//	fprintf(stderr, "VideoPacketExit: %i Packete zerstört.\n",
-//		VIDEO_PACKET_MAX);
+	}
 }
 
 /**
@@ -831,7 +802,7 @@ static void VideoPacketExit(VideoStream * stream)
 **	@param size	size of pes packet
 */
 static void VideoEnqueue(VideoStream * stream, int64_t pts, const void *data,
-		int size, int codec_id)
+		int size)
 {
 	AVPacket *avpkt;
 
@@ -844,7 +815,6 @@ static void VideoEnqueue(VideoStream * stream, int64_t pts, const void *data,
 		avpkt = &stream->PacketRb[stream->PacketWrite];
 		avpkt->size = 0;
 		avpkt->pts = pts;
-		stream->CodecIDRb[stream->PacketWrite] = codec_id;
 	} else {
 		avpkt = &stream->PacketRb[stream->PacketWrite];
 	}
@@ -872,28 +842,26 @@ static void VideoStreamClose(VideoStream * stream)
 {
 //	fprintf(stderr, "VideoStreamClose:\n");
 
-    stream->SkipStream = 1;
-    if (stream->Decoder) {
-		VideoDecoder *decoder;
-
-		decoder = stream->Decoder;
-		// FIXME: remove this lock for main stream close
-
-		pthread_mutex_lock(&stream->DecoderLockMutex);
-		CodecVideoClose(decoder);
-		stream->Decoder = NULL;		// lock read thread
-		pthread_mutex_unlock(&stream->DecoderLockMutex);
-
-		CodecVideoDelDecoder(decoder);
-    }
-    if (stream->Render) {
+	if (stream->Decoder) {
+		CodecVideoDelDecoder(stream->Decoder);
+		stream->Decoder = NULL;
+	}
+	if (stream->Render) {
 		VideoDelRender(stream->Render);
 		stream->Render = NULL;
 	}
-    VideoPacketExit(stream);
+	VideoPacketExit(stream);
+}
 
-    stream->NewStream = 1;
-    stream->InvalidPesCounter = 0;
+/**
+**	Clears all video data from the device.
+*/
+void ClearVideo(VideoStream * stream)
+{
+	atomic_set(&stream->PacketsFilled, 0);
+	stream->PacketRead = stream->PacketWrite - 1;
+
+	CodecVideoFlushBuffers(stream->Decoder);
 }
 
 /**
@@ -907,100 +875,45 @@ static void VideoStreamClose(VideoStream * stream)
 */
 int VideoDecodeInput(VideoStream * stream)
 {
-    int filled;
-    AVPacket *avpkt;
-    int ret = 0;
+	AVPacket *avpkt;
 
-    if (!stream->Decoder) {		// closing
-		fprintf(stderr, "VideoDecodeInput: no decoder!!!\n");
-	return -1;
-    }
-
-    if (stream->ClearBuffers) {		// clear buffer request
-//		fprintf(stderr, "VideoDecodeInput: ClearBuffers stream request\n");
-		atomic_set(&stream->PacketsFilled, 0);
-		stream->PacketRead = stream->PacketWrite;
-		// FIXME: ->Decoder already checked
-		if (stream->Decoder) {
-			CodecVideoFlushBuffers(stream->Decoder);
-			VideoResetStart(stream->Render);
-		}
-		stream->ClearBuffers = 0;
-		return 1;
-    }
-    if (stream->Freezed) {		// stream freezed
+	if (stream->Freezed) {		// stream freezed
+//		fprintf(stderr, "VideoDecodeInput: stream->Freezed\n");
 		// clear is called during freezed
 		return 1;
-    }
-
-    filled = atomic_read(&stream->PacketsFilled);
-    if (!filled) {
-//		fprintf(stderr, "VideoDecodeInput: Nix im Speicher zum decodieren\n");
-		return -1;
-    }
-
-    //
-    //	handle queued commands
-    //
-    avpkt = &stream->PacketRb[stream->PacketRead];
-    switch (stream->CodecIDRb[stream->PacketRead]) {
-	case AV_CODEC_ID_NONE:
-	    stream->ClosingStream = 0;
-	    ret = 1;
-	    if (stream->LastCodecID != AV_CODEC_ID_NONE) {
-//			VideoSetClosing(stream->Render, 0);
-			stream->LastCodecID = AV_CODEC_ID_NONE;
-			CodecVideoClose(stream->Decoder);
-//			fprintf(stderr, "VideoDecodeInput: AV_CODEC_ID_NONE\n");
-			goto skip;
-	    }
-	    // FIXME: look if more close are in the queue
-	    // size can be zero
-	    goto skip;
-	case AV_CODEC_ID_MPEG2VIDEO:
-	    if (stream->LastCodecID != AV_CODEC_ID_MPEG2VIDEO) {
-			stream->LastCodecID = AV_CODEC_ID_MPEG2VIDEO;
-			CodecVideoOpen(stream->Decoder, AV_CODEC_ID_MPEG2VIDEO);
-//			fprintf(stderr, "VideoDecodeInput: AV_CODEC_ID_MPEG2VIDEO\n");
-	    }
-	    break;
-	case AV_CODEC_ID_H264:
-	    if (stream->LastCodecID != AV_CODEC_ID_H264) {
-			stream->LastCodecID = AV_CODEC_ID_H264;
-			CodecVideoOpen(stream->Decoder, AV_CODEC_ID_H264);
-//			fprintf(stderr, "VideoDecodeInput: AV_CODEC_ID_H264\n");
-	    }
-	    break;
-	case AV_CODEC_ID_HEVC:
-	    if (stream->LastCodecID != AV_CODEC_ID_HEVC) {
-			stream->LastCodecID = AV_CODEC_ID_HEVC;
-			CodecVideoOpen(stream->Decoder, AV_CODEC_ID_HEVC);
-//			fprintf(stderr, "VideoDecodeInput: AV_CODEC_ID_HEVC\n");
-	    }
-	    break;
-	default:
-	    break;
-    }
-
-    //DumpMpeg(avpkt->data, avpkt->size);
-#ifdef STILL_DEBUG
-    if (InStillPicture) {
-		DumpMpeg(avpkt->data, avpkt->size);
-    }
-#endif
-    // lock decoder against close
-    pthread_mutex_lock(&stream->DecoderLockMutex);
-	ret = CodecVideoDecode(stream->Decoder, avpkt);
-    pthread_mutex_unlock(&stream->DecoderLockMutex);
-
-  skip:
-    // advance packet read
-    if (ret) {
-        stream->PacketRead = (stream->PacketRead + 1) % VIDEO_PACKET_MAX;
-        atomic_dec(&stream->PacketsFilled);
 	}
 
-    return 0;
+	if (stream->ClosingStream && stream->CodecID != AV_CODEC_ID_NONE) {
+		ClearVideo(stream);
+		CodecVideoClose(stream->Decoder);
+		stream->CodecID = AV_CODEC_ID_NONE;
+		stream->ClosingStream = 0;
+		return -1;
+	}
+
+	if (stream->NewStream && stream->CodecID != AV_CODEC_ID_NONE) {
+		CodecVideoOpen(stream->Decoder, stream->CodecID);
+		stream->NewStream = 0;
+	}
+
+	if (!atomic_read(&stream->PacketsFilled)) {
+//		fprintf(stderr, "VideoDecodeInput: Nix im Speicher zum decodieren\n");
+		return -1;
+	}
+
+	if (stream->CodecID != AV_CODEC_ID_NONE) {
+		avpkt = &stream->PacketRb[stream->PacketRead];
+		if (!CodecVideoSendPacket(stream->Decoder, avpkt)) {
+			stream->PacketRead = (stream->PacketRead + 1) % VIDEO_PACKET_MAX;
+			atomic_dec(&stream->PacketsFilled);
+		}
+/*	if (CodecReceiveVideoFrame(stream->Decoder))
+		return 1;*/
+		CodecVideoReceiveFrame(stream->Decoder);
+	}
+
+
+	return 0;
 }
 
 /**
@@ -1012,93 +925,6 @@ int VideoGetPackets(const VideoStream * stream)
 {
     return atomic_read(&stream->PacketsFilled);
 }
-
-
-#ifdef DEBUG
-
-/**
-**	Dump mpeg video packet.
-**
-**	Function to dump a mpeg packet, not needed.
-*/
-static void DumpMpeg(const uint8_t * data, int size)
-{
-    fprintf(stderr, "%8d: ", size);
-
-    // b3 b4 b8 00 b5 ... 00 b5 ...
-
-    while (size > 3) {
-	if (!data[0] && !data[1] && data[2] == 0x01) {
-	    fprintf(stderr, " %02x", data[3]);
-	    size -= 4;
-	    data += 4;
-	    continue;
-	}
-	--size;
-	++data;
-    }
-    fprintf(stderr, "\n");
-}
-
-/**
-**	Dump h264 video packet.
-**
-**	Function to Dump a h264 packet, not needed.
-*/
-static int DumpH264(const uint8_t * data, int size)
-{
-    printf("H264:");
-    do {
-	if (size < 4) {
-	    printf("\n");
-	    return -1;
-	}
-	if (!data[0] && !data[1] && data[2] == 0x01) {
-	    printf("%02x ", data[3]);
-	}
-	++data;
-	--size;
-    } while (size);
-    printf("\n");
-
-    return 0;
-}
-
-/**
-**	Validate mpeg video packet.
-**
-**	Function to validate a mpeg packet, not needed.
-*/
-static int ValidateMpeg(const uint8_t * data, int size)
-{
-    int pes_l;
-
-    do {
-	if (size < 9) {
-	    return -1;
-	}
-	if (data[0] || data[1] || data[2] != 0x01) {
-	    printf("%02x: %02x %02x %02x %02x %02x\n", data[-1], data[0],
-		data[1], data[2], data[3], data[4]);
-	    return -1;
-	}
-
-	pes_l = (data[4] << 8) | data[5];
-	if (!pes_l) {			// contains unknown length
-	    return 1;
-	}
-
-	if (6 + pes_l > size) {
-	    return -1;
-	}
-
-	data += 6 + pes_l;
-	size -= 6 + pes_l;
-    } while (size);
-
-    return 0;
-}
-#endif
 
 /**
 **	Play video packet.
@@ -1113,159 +939,91 @@ static int ValidateMpeg(const uint8_t * data, int size)
 **	We buffer here until we receive an complete PES Packet, which
 **	is no problem, the audio is always far behind us.
 **	cTsToPes::GetPes splits the packets.
-**
-**	@todo FIXME: combine the 5 ifs at start of the function
 */
 int PlayVideo(const uint8_t * data, int size)
 {
 	VideoStream * stream = MyVideoStream;
-    const uint8_t *check;
-    int64_t pts = AV_NOPTS_VALUE;
-    int n;
-    int z;
-    int l;
+	int64_t pts = AV_NOPTS_VALUE;
+	int i, n;
 
-	if (!stream->Decoder || stream->SkipStream) {
-		return size;
-	}
 	if (stream->Freezed) {		// stream freezed
 		return 0;
 	}
-	if (stream->NewStream) {		// channel switched
-		Debug(3, "video: new stream %dms\n", GetMsTicks() - VideoSwitch);
-		stream->CodecID = AV_CODEC_ID_NONE;
-		stream->ClosingStream = 1;
-		stream->NewStream = 0;
+	if (stream->ClosingStream)
+		fprintf(stderr, "[PlayVideo] ClosingStream und PlayVideo!!!\n");
+
+	// must be a PES start code
+	if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01) {
+		return size;
 	}
-    // must be a PES start code
-    // FIXME: Valgrind-3.8.1 has a problem with this code
-    if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01) {
-		if (!stream->InvalidPesCounter++) {
-			Error(_("[softhddev] invalid PES video packet\n"));
-			fprintf(stderr, "PlayVideo: invalid PES video packet %d  %02x %02x %02x\n",
-				size, data[0], data[1], data[2]);
-		}
-		return size;
-    }
-    if (stream->InvalidPesCounter) {
-		if (stream->InvalidPesCounter > 1) {
-			Error(_("[softhddev] %d invalid PES video packet(s)\n"),
-				stream->InvalidPesCounter);
-		}
-		stream->InvalidPesCounter = 0;
-    }
-    // 0xBE, filler, padding stream
-    if (data[3] == PES_PADDING_STREAM) {	// from DVD plugin
-		return size;
-    }
 
-    n = data[8];			// header size
-    if (size <= 9 + n) {		// wrong size
-		if (size == 9 + n) {
-			Warning(_("[softhddev] empty video packet\n"));
-		} else {
-			Error(_("[softhddev] invalid video packet %d/%d bytes\n"),
-				9 + n, size);
-		}
+	// 0xBE, filler, padding stream
+	if (data[3] == 0xBE) {
 		return size;
-    }
+	}
 
-    // hard limit buffer full: needed for replay
-    if (atomic_read(&stream->PacketsFilled) >= VIDEO_PACKET_MAX - 10) {
+	// hard limit buffer full: needed for replay
+	if (atomic_read(&stream->PacketsFilled) >= VIDEO_PACKET_MAX - 10) {
 //		fprintf(stderr, "PlayVideo: buffer full\n");
 		return 0;
-    }
-    // get pts/dts
-    if (data[7] & 0x80) {
+	}
+
+	// get pts
+	if (data[7] & 0x80) {
 		pts = (int64_t) (data[9] & 0x0E) << 29 | data[10] << 22 | (data[11] &
 			0xFE) << 14 | data[12] << 7 | (data[13] & 0xFE) >> 1;
-    }
-
-    check = data + 9 + n;
-    l = size - 9 - n;
-    z = 0;
-    while (!*check) {			// count leading zeros
-		if (l < 3) {
-			Warning(_("[softhddev] empty video packet %d bytes\n"), size);
-			z = 0;
-			break;
-		}
-		--l;
-		++check;
-		++z;
-    }
-
-    // H264 NAL AUD Access Unit Delimiter (0x00) 0x00 0x00 0x01 0x09
-    // and next start code
-    if ((data[6] & 0xC0) == 0x80 && z >= 2 && check[0] == 0x01
-		&& check[1] == 0x09 && !check[3] && !check[4]) {
-		// old PES HDTV recording z == 2 -> stronger check!
-		if (stream->CodecID == AV_CODEC_ID_H264) {
-			// this should improve ffwd+frew, but produce crash in ffmpeg
-			// with some streams
-			if (stream->TrickSpeed && pts != (int64_t) AV_NOPTS_VALUE) {
-				// H264 NAL End of Sequence
-				static uint8_t seq_end_h264[] =
-				{ 0x00, 0x00, 0x00, 0x01, 0x0A };
-
-				// 1-5=SLICE 6=SEI 7=SPS 8=PPS
-				// NAL SPS sequence parameter set
-				if ((check[7] & 0x1F) == 0x07) {
-					VideoEnqueue(stream, AV_NOPTS_VALUE, seq_end_h264,
-					sizeof(seq_end_h264), AV_CODEC_ID_H264);
-				}
-			}
-		} else {
-			if (check[2] == 0x10) {
-//				fprintf(stderr, "video: h264 detected\n");
-				Debug(3, "video: h264 detected\n");
-				stream->CodecID = AV_CODEC_ID_H264;
-			} else {
-				return size;
-			}
-		}
-
-		// SKIP PES header (ffmpeg supports short start code)
-		VideoEnqueue(stream, pts, check - 2, l + 2, AV_CODEC_ID_H264);
-		return size;
-    }
-
-    // HEVC Codec
-    if ((data[6] & 0xC0) == 0x80 && z >= 2 && check[0] == 0x01 && check[1] == 0x46) {
-		// old PES HDTV recording z == 2 -> stronger check!
-
-		if (stream->CodecID == AV_CODEC_ID_HEVC) {
-		} else {
-//            fprintf(stderr, "video: hevc detected\n");
-            Debug(3, "video: hevc detected\n");
-            stream->CodecID = AV_CODEC_ID_HEVC;
-		}
-		// SKIP PES header (ffmpeg supports short start code)
-		VideoEnqueue(stream, pts, check - 2, l + 2, AV_CODEC_ID_HEVC);
-		return size;
-    }
-
-    // PES start code 0x00 0x00 0x01 0x00|0xb3
-    if (z > 1 && check[0] == 0x01 && (!check[1] || check[1] == 0xb3)) {
-		if (stream->CodecID == AV_CODEC_ID_MPEG2VIDEO) {
-		} else {
-			if (check[1] == 0xb3) {
-//				fprintf(stderr, "video: mpeg2 detected ID %02x\n", check[3]);
-				Debug(3, "video: mpeg2 detected ID %02x\n", check[3]);
-				stream->CodecID = AV_CODEC_ID_MPEG2VIDEO;
-			} else {
-				return size;
-			}
-		}
-#ifdef noDEBUG				// pip pes packet has no lenght
-		if (ValidateMpeg(data, size)) {
-			Debug(3, "softhddev/video: invalid mpeg2 video packet\n");
-		}
-#endif
-		// SKIP PES header, begin of start code
-		VideoEnqueue(stream, pts, check - 2, l + 2, AV_CODEC_ID_MPEG2VIDEO);
-		return size;
 	}
+
+	n = 9 + data[8];	// PES header size
+	for (i = 0; (i < 2) && (i + 4 < size); i++) {
+		// ES start code 0x00 0x00 0x01
+		if (!data[i + n] && !data[i + n + 1] && data[i + n + 2] == 0x01) {
+			// AV_CODEC_ID_MPEG2VIDEO 0x00 0x00 0x01 0x00 || 0xb3
+			if (data[i + n + 3] == 0xb3 || !data[i + n + 3]) {
+				if (stream->CodecID == AV_CODEC_ID_MPEG2VIDEO) {
+					VideoEnqueue(stream, pts, data + i + n, size - i - n);
+				} else {
+					if (data[i + n + 3] == 0xb3) {
+						Debug(3, "video: mpeg2 detected\n");
+						stream->CodecID = AV_CODEC_ID_MPEG2VIDEO;
+						stream->NewStream = 1;
+						VideoEnqueue(stream, pts, data + i + n, size - i - n);
+					}
+				}
+				return size;
+			}
+			// AV_CODEC_ID_H264 (0x00) 0x00 0x00 0x01 0x09
+			if (data[i + n + 3] == 0x09) {
+				if (stream->CodecID == AV_CODEC_ID_H264) {
+					VideoEnqueue(stream, pts, data + i + n, size - i - n);
+				} else {
+					if (data[i + n + 4] == 0x10) {
+						Debug(3, "video: H264 detected\n");
+						stream->CodecID = AV_CODEC_ID_H264;
+						stream->NewStream = 1;
+						VideoEnqueue(stream, pts, data + i + n, size - i - n);
+					}
+				}
+				return size;
+			}
+			// AV_CODEC_ID_HEVC (0x00) 0x00 0x00 0x01 0x46
+			if (data[i + n + 3] == 0x46) {
+//				PrintStreamData(data + i + n, size - i - n);
+				if (stream->CodecID == AV_CODEC_ID_HEVC) {
+					VideoEnqueue(stream, pts, data + i + n, size - i - n);
+				} else {
+					if (data[i + n + 5] == 0x10) {
+						Debug(3, "video: hevc detected\n");
+						stream->CodecID = AV_CODEC_ID_HEVC;
+						stream->NewStream = 1;
+						VideoEnqueue(stream, pts, data + i + n, size - i - n);
+					}
+				}
+				return size;
+			}
+		}
+	}
+
 	// this happens when vdr sends incomplete packets
 	if (stream->CodecID == AV_CODEC_ID_NONE) {
 		Debug(3, "video: not detected\n");
@@ -1273,7 +1031,7 @@ int PlayVideo(const uint8_t * data, int size)
 	}
 
 	// SKIP PES header
-	VideoEnqueue(stream, pts, data + 9 + n, size - 9 - n, stream->CodecID);
+	VideoEnqueue(stream, pts, data + n, size - n);
 
 	return size;
 }
@@ -1293,13 +1051,9 @@ void StillPicture(const uint8_t * data, int size)
     // H265 NAL End of Sequence
     //0x48 = end of seq   0x4a = end of stream
     static uint8_t seq_end_h265[] = { 0x00, 0x00, 0x00, 0x01, 0x48, 0x01 };
-    int old_video_hardware_decoder;
+//    int old_video_hardware_decoder;
     int i;
 
-    // might be called in Suspended Mode
-    if (!MyVideoStream->Decoder || MyVideoStream->SkipStream) {
-	return;
-    }
     // must be a PES start code
     if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01) {
 	Error(_("[softhddev] invalid still video packet\n"));
@@ -1310,7 +1064,7 @@ void StillPicture(const uint8_t * data, int size)
 #endif
     VideoSetTrickSpeed(MyVideoStream->Render, 1);
 //    VideoResetPacket(MyVideoStream);
-    old_video_hardware_decoder = VideoHardwareDecoder;
+//    old_video_hardware_decoder = VideoHardwareDecoder;
 
     // enable/disable hardware decoder for still picture
 //    if (VideoHardwareDecoder != ConfigStillDecoder) {
@@ -1379,17 +1133,17 @@ void StillPicture(const uint8_t * data, int size)
 //		VideoNextPacket(MyVideoStream, AV_CODEC_ID_NONE);	// close last stream
 		MyVideoStream->CodecID = AV_CODEC_ID_MPEG2VIDEO;
 	    }
-	    VideoEnqueue(MyVideoStream, AV_NOPTS_VALUE, data, size, AV_CODEC_ID_MPEG2VIDEO);
+	    VideoEnqueue(MyVideoStream, AV_NOPTS_VALUE, data, size);
 	}
 	if (MyVideoStream->CodecID == AV_CODEC_ID_H264) {
 	    VideoEnqueue(MyVideoStream, AV_NOPTS_VALUE, seq_end_h264,
-		sizeof(seq_end_h264), AV_CODEC_ID_H264);
+		sizeof(seq_end_h264));
 	} else if (MyVideoStream->CodecID == AV_CODEC_ID_HEVC) {
 	    VideoEnqueue(MyVideoStream, AV_NOPTS_VALUE, seq_end_h265,
-		sizeof(seq_end_h265), AV_CODEC_ID_HEVC);
+		sizeof(seq_end_h265));
 	} else {
 	    VideoEnqueue(MyVideoStream, AV_NOPTS_VALUE, seq_end_mpeg,
-		sizeof(seq_end_mpeg), AV_CODEC_ID_MPEG2VIDEO);
+		sizeof(seq_end_mpeg));
 	}
 //	VideoNextPacket(MyVideoStream, MyVideoStream->CodecID);	// terminate last packet
     }
@@ -1403,10 +1157,10 @@ void StillPicture(const uint8_t * data, int size)
 #ifdef STILL_DEBUG
     InStillPicture = 0;
 #endif
-    if (VideoHardwareDecoder != old_video_hardware_decoder) {
-	VideoHardwareDecoder = old_video_hardware_decoder;
+//    if (VideoHardwareDecoder != old_video_hardware_decoder) {
+//	VideoHardwareDecoder = old_video_hardware_decoder;
 //	VideoNextPacket(MyVideoStream, AV_CODEC_ID_NONE);	// close last stream
-    }
+//    }
     VideoSetTrickSpeed(MyVideoStream->Render, 0);
 }
 
@@ -1510,15 +1264,11 @@ uint8_t *GrabImage(int *size, int jpeg, int quality, int width, int height)
 */
 void TrickSpeed(int speed)
 {
-	fprintf(stderr, "TrickSpeed: speed %d\n", speed);
+//	fprintf(stderr, "TrickSpeed: speed %d\n", speed);
 
 	MyVideoStream->TrickSpeed = speed;
-	if (MyVideoStream->Render) {
-		VideoSetTrickSpeed(MyVideoStream->Render, speed);
-	} else {
-		// can happen, during startup
-		Debug(3, "softhddev: %s called without hw decoder\n", __FUNCTION__);
-	}
+	VideoSetTrickSpeed(MyVideoStream->Render, speed);
+
 	StreamFreezed = 0;
 	MyVideoStream->Freezed = 0;
 }
@@ -1528,25 +1278,13 @@ void TrickSpeed(int speed)
 */
 void Clear(void)
 {
-	int i;
-
 //	fprintf(stderr, "Clear(void)\n");
-
-//	VideoResetPacket(MyVideoStream);	// terminate work
-	MyVideoStream->ClearBuffers = 1;
 	if (!SkipAudio) {
 		AudioFlushBuffers();
 		//NewAudioStream = 1;
 	}
-	// FIXME: audio avcodec_flush_buffers, video is done by VideoClearBuffers
 
-	// wait for empty buffers
-	// FIXME: without softstart sync VideoDecode isn't called.
-	for (i = 0; MyVideoStream->ClearBuffers && i < 20; ++i) {
-		usleep(1 * 1000);
-	}
-	Debug(3, "[softhddev]%s: %dms buffers %d\n", __FUNCTION__, i,
-	VideoGetPackets(MyVideoStream));
+	ClearVideo(MyVideoStream);
 }
 
 /**
@@ -1554,7 +1292,7 @@ void Clear(void)
 */
 void Play(void)
 {
-	fprintf(stderr, "Play(void)\n");
+//	fprintf(stderr, "Play(void)\n");
 
 	TrickSpeed(0);			// normal play
 	SkipAudio = 0;
@@ -1566,7 +1304,7 @@ void Play(void)
 */
 void Freeze(void)
 {
-	fprintf(stderr, "Freeze(void)\n");
+//	fprintf(stderr, "Freeze(void)\n");
 
 	StreamFreezed = 1;
 	MyVideoStream->Freezed = 1;
@@ -1578,7 +1316,7 @@ void Freeze(void)
 */
 void Mute(void)
 {
-	fprintf(stderr, "Mute(void)\n");
+//	fprintf(stderr, "Mute(void)\n");
 
 	SkipAudio = 1;
 	AudioFlushBuffers();
@@ -1667,31 +1405,20 @@ void GetScreenSize(int *width, int *height, double *pixel_aspect)
 */
 int SetPlayMode(int play_mode)
 {
-//	fprintf(stderr, "SetPlayMode: %d\n", play_mode);
-
 	switch (play_mode) {
 	case 0:			// audio/video from decoder
-	    // tell video parser we get new stream
-	    if (MyVideoStream->Decoder && !MyVideoStream->SkipStream) {
-			// clear buffers on close configured always or replay only
-		    Clear();		// flush all buffers
-		}
+		Clear();		// flush all AUDIO buffers
 		if (MyVideoStream->CodecID != AV_CODEC_ID_NONE) {
-			MyVideoStream->NewStream = 1;
-			MyVideoStream->InvalidPesCounter = 0;
+			MyVideoStream->ClosingStream = 1;
 			// tell render we are closing stream
-			VideoSetClosing(MyVideoStream->Render, 1);
+			VideoSetClosing(MyVideoStream->Render);
 			VideoResetStart(MyVideoStream->Render);
-#ifdef DEBUG
-			VideoSwitch = GetMsTicks();
-			Debug(3, "video: new stream start\n");
-#endif
-	    }
+		}
 
 	    if (MyAudioDecoder) {	// tell audio parser we have new stream
-		if (AudioCodecID != AV_CODEC_ID_NONE) {
-		    NewAudioStream = 1;
-		}
+			if (AudioCodecID != AV_CODEC_ID_NONE) {
+				NewAudioStream = 1;
+			}
 	    }
 	    break;
 	case 1:			// audio/video from player
@@ -1728,9 +1455,9 @@ void SoftHdDeviceExit(void)
 
     AudioExit();
     if (MyAudioDecoder) {
-	CodecAudioClose(MyAudioDecoder);
-	CodecAudioDelDecoder(MyAudioDecoder);
-	MyAudioDecoder = NULL;
+		CodecAudioClose(MyAudioDecoder);
+		CodecAudioDelDecoder(MyAudioDecoder);
+		MyAudioDecoder = NULL;
     }
     NewAudioStream = 0;
     av_packet_unref(AudioAvPkt);
@@ -1739,9 +1466,6 @@ void SoftHdDeviceExit(void)
     VideoStreamClose(MyVideoStream);
 
     CodecExit();
-
-    pthread_mutex_destroy(&SuspendLockMutex);
-    pthread_mutex_destroy(&MyVideoStream->DecoderLockMutex);
 }
 
 
@@ -1756,9 +1480,6 @@ int Start(void)
 {
 //	fprintf(stderr, "Start(void):\n");
 
-	pthread_mutex_init(&MyVideoStream->DecoderLockMutex, NULL);
-	pthread_mutex_init(&SuspendLockMutex, NULL);
-
 	AudioInit();
 	av_new_packet(AudioAvPkt, AUDIO_BUFFER_SIZE);
 	MyAudioDecoder = CodecAudioNewDecoder();
@@ -1767,16 +1488,13 @@ int Start(void)
 
 	CodecInit();
 	if (!MyVideoStream->Decoder) {
-		MyVideoStream->SkipStream = 1;
 		MyVideoStream->CodecID = AV_CODEC_ID_NONE;
-		MyVideoStream->LastCodecID = AV_CODEC_ID_NONE;
 	}
 
 	if ((MyVideoStream->Render = VideoNewRender(MyVideoStream))) {
 		VideoInit(MyVideoStream->Render);
 		MyVideoStream->Decoder = CodecVideoNewDecoder(MyVideoStream->Render);
 		VideoPacketInit(MyVideoStream);
-		MyVideoStream->SkipStream = 0;
 	}
 
 	return 0;
@@ -1791,6 +1509,21 @@ int Start(void)
 void Stop(void)
 {
 //	fprintf(stderr, "Stop(void): nothing to do.\n");
+}
+
+
+/**
+**	Gets the current System Time Counter, which can be used to
+**	synchronize audio, video and subtitles.
+*/
+int64_t GetSTC(void)
+{
+	if (MyVideoStream->Render) {
+		return VideoGetClock(MyVideoStream->Render);
+	}
+    // could happen during dettached
+    Warning(_("softhddev: %s called without hw decoder\n"), __FUNCTION__);
+    return AV_NOPTS_VALUE;
 }
 
 
@@ -1891,25 +1624,12 @@ int ProcessArgs(int argc, char *const argv[])
 		VideoSetScreenSize(optarg);
 		continue;
 	    case 'w':			// workarounds
-		if (!strcasecmp("no-hw-decoder", optarg)) {
-		    VideoHardwareDecoder = 0;
-		} else if (!strcasecmp("no-mpeg-hw-decoder", optarg)) {
-		    VideoHardwareDecoder = 1;
-		    if (ConfigStillDecoder) {
-			ConfigStillDecoder = 1;
-		    }
-		} else if (!strcasecmp("still-hw-decoder", optarg)) {
-		    ConfigStillDecoder = -1;
-		} else if (!strcasecmp("still-h264-hw-decoder", optarg)) {
-		    ConfigStillDecoder = 1;
-		} else if (!strcasecmp("alsa-driver-broken", optarg)) {
+		if (!strcasecmp("alsa-driver-broken", optarg)) {
 		    AudioAlsaDriverBroken = 1;
 		} else if (!strcasecmp("alsa-no-close-open", optarg)) {
 		    AudioAlsaNoCloseOpen = 1;
 		} else if (!strcasecmp("alsa-close-open-delay", optarg)) {
 		    AudioAlsaCloseOpenDelay = 1;
-//		} else if (!strcasecmp("use-possible-defect-frames", optarg)) {
-//		    CodecUsePossibleDefectFrames = 1;
 		} else {
 		    fprintf(stderr, _("Workaround '%s' unsupported\n"),
 			optarg);
@@ -1932,7 +1652,7 @@ int ProcessArgs(int argc, char *const argv[])
 	break;
     }
     while (optind < argc) {
-	fprintf(stderr, _("Unhandled argument '%s'\n"), argv[optind++]);
+		fprintf(stderr, _("Unhandled argument '%s'\n"), argv[optind++]);
     }
 
     return 1;

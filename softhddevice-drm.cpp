@@ -978,8 +978,8 @@ bool cSoftHdDevice::SetPlayMode(ePlayMode play_mode)
 int64_t cSoftHdDevice::GetSTC(void)
 {
     //dsyslog("[softhddev]%s:\n", __FUNCTION__);
-    // AudioClock are master clock
-    return::AudioGetClock();
+
+    return::GetSTC();
 }
 
 /**
@@ -1026,7 +1026,6 @@ void cSoftHdDevice::Play(void)
 void cSoftHdDevice::Freeze(void)
 {
     dsyslog("[softhddev]%s:\n", __FUNCTION__);
-	fprintf(stderr, "[softhddev] Freeze\n");
 
     cDevice::Freeze();
     ::Freeze();

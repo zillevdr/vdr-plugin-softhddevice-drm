@@ -2136,7 +2136,9 @@ int64_t AudioGetClock(void)
 	if (!AudioRunning || !AudioRing[AudioRingRead].HwSampleRate ||
 		!AlsaPCMHandle || atomic_read(&AudioRingFilled) ||
 		AudioRing[AudioRingRead].PTS == AV_NOPTS_VALUE) {
-//		printf("AudioGetClock: AV_NOPTS_VALUE!\n");
+//		printf("AudioGetClock: AV_NOPTS_VALUE! AudioRingFilled %d AudioRunning %s AV_NOPTS %s\n",
+//			atomic_read(&AudioRingFilled), AudioRunning ? "y" : "n",
+//			(AudioRing[AudioRingRead].PTS == AV_NOPTS_VALUE) ? "y" : "n");
 		return AV_NOPTS_VALUE;
 	}
 	snd_pcm_sframes_t delay;
@@ -2227,6 +2229,7 @@ void AudioPlay(void)
 {
     if (!AudioPaused) {
 	Debug(3, "audio: not paused, check the code\n");
+	fprintf(stderr, "audio: not paused, check the code\n");
 	return;
     }
     Debug(3, "audio: resumed\n");

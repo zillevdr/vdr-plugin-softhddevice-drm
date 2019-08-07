@@ -41,7 +41,6 @@ typedef struct __video_stream__ VideoStream; 		// in softhddev.h ?
 //	Variables
 //----------------------------------------------------------------------------
 
-extern signed char VideoHardwareDecoder;	///< flag use hardware decoder
 extern int VideoAudioDelay;		///< audio/video delay
 
 //----------------------------------------------------------------------------
@@ -77,7 +76,7 @@ extern void VideoOsdDrawARGB(VideoRender *, int, int, int,
 		int, int, const uint8_t *, int, int);
 
     /// Set closing flag.
-extern void VideoSetClosing(VideoRender *, int);
+extern void VideoSetClosing(VideoRender *);
 
     /// Reset start of frame counter
 extern void VideoResetStart(VideoRender *);
@@ -95,7 +94,10 @@ extern uint8_t *VideoGrabService(int *, int *, int *);
 extern void VideoGetStats(VideoRender *, int *, int *, int *, int *);
 
     /// Get screen size
-extern void VideoGetScreenSize(VideoRender * render, int *, int *, double *);
+extern void VideoGetScreenSize(VideoRender *, int *, int *, double *);
+
+    /// Get video clock.
+extern int64_t VideoGetClock(const VideoRender *);
 
     /// Set screen size
 extern void VideoSetScreenSize(char *);

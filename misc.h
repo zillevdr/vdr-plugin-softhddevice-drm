@@ -116,7 +116,7 @@ static inline void Syslog(const int level, const char *format, ...)
 **
 **	@param ts	dvb time stamp
 */
-static inline const char *Timestamp2String(int64_t ts)
+static inline const char *PtsTimestamp2String(int64_t ts)
 {
     static char buf[4][16];
     static int idx;
@@ -130,6 +130,22 @@ static inline const char *Timestamp2String(int64_t ts)
 	(int)((ts / (90 * 1000)) % 60), (int)((ts / 90) % 1000));
 
     return buf[idx];
+}
+
+static inline const char *Timestamp2String(int64_t ts)
+{
+	static char buf[4][16];
+	static int idx;
+
+	if (ts == (int64_t) AV_NOPTS_VALUE) {
+		return "--:--:--.---";
+	}
+	idx = (idx + 1) % 3;
+	snprintf(buf[idx], sizeof(buf[idx]), "%2d:%02d:%02d.%03d",
+		(int)(ts / (3600000)), (int)((ts / (60000)) % 60),
+		(int)((ts / (1000)) % 60), (int)(ts % 1000));
+
+	return buf[idx];
 }
 
 /**
