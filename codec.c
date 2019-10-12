@@ -30,10 +30,6 @@
 
     /// compile with pass-through support (stable, AC-3, E-AC-3 only)
 #define USE_PASSTHROUGH
-    /// compile audio drift correction support (very experimental)
-//#define USE_AUDIO_DRIFT_CORRECTION
-    /// compile AC-3 audio drift correction support (very experimental)
-//#define USE_AC3_DRIFT_CORRECTION
 
 #include <unistd.h>
 #include <libintl.h>
@@ -41,11 +37,6 @@
 #define _N(str) str			///< gettext_noop shortcut
 
 #include <libavcodec/avcodec.h>
-
-#ifndef __USE_GNU
-#define __USE_GNU
-#endif
-#include <pthread.h>
 
 #ifdef MAIN_H
 #include MAIN_H
@@ -60,14 +51,6 @@
 //----------------------------------------------------------------------------
 //	Global
 //----------------------------------------------------------------------------
-
-      ///
-      ///	ffmpeg lock mutex
-      ///
-      ///	new ffmpeg dislikes simultanous open/close
-      ///	this breaks our code, until this is fixed use lock.
-      ///
-//static pthread_mutex_t CodecLockMutex;		ffmpeg should be threadsafe.
 
 //----------------------------------------------------------------------------
 //	Video
@@ -196,25 +179,14 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 */
 void CodecVideoClose(VideoDecoder * decoder)
 {
-	if (decoder->VideoCtx->codec->capabilities & AV_CODEC_CAP_DELAY) {
-		AVPacket avpkt;
-
-		av_init_packet(&avpkt);
-		avpkt.data = NULL;
-		avpkt.size = 0;
-		CodecVideoSendPacket(decoder, &avpkt);
-		CodecVideoReceiveFrame(decoder);	// Test EOF!
-		av_packet_unref(&avpkt);
-	} else
-		fprintf(stderr, "[CodecVideoClose] codec don't use AV_CODEC_CAP_DELAY\n");
-
-
+#ifdef DEBUG
+		fprintf(stderr, "[CodecVideoClose]\n");
+#endif
 	if (decoder->VideoCtx) {
-//		pthread_mutex_lock(&CodecLockMutex);
 		avcodec_close(decoder->VideoCtx);
 		avcodec_free_context(&decoder->VideoCtx);
 		av_freep(&decoder->VideoCtx);
-//		pthread_mutex_unlock(&CodecLockMutex);
+		decoder->VideoCtx = NULL;
 	}
 }
 
@@ -266,6 +238,14 @@ int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 	}
 #endif
 
+	if (!avpkt->size) {
+#ifdef DEBUG
+		fprintf(stderr, "CodecVideoSendPacket: !avpkt->size pts %s\n",
+			PtsTimestamp2String(avpkt->pts));
+#endif
+		return 0;
+	}
+
 	ret = avcodec_send_packet(decoder->VideoCtx, avpkt);
 
 	if (ret == AVERROR(ENOMEM))
@@ -305,6 +285,9 @@ void CodecVideoReceiveFrame(VideoDecoder * decoder)
 */
 void CodecVideoFlushBuffers(VideoDecoder * decoder)
 {
+#ifdef DEBUG
+	fprintf(stderr, "CodecVideoFlushBuffers: \n");
+#endif
 	if (decoder->VideoCtx) {
 		avcodec_flush_buffers(decoder->VideoCtx);
 	}
@@ -355,11 +338,12 @@ AudioDecoder *CodecAudioNewDecoder(void)
     AudioDecoder *audio_decoder;
 
     if (!(audio_decoder = calloc(1, sizeof(*audio_decoder)))) {
-	Fatal(_("codec: can't allocate audio decoder\n"));
+		Fatal(_("codec: can't allocate audio decoder\n"));
     }
     if (!(audio_decoder->Frame = av_frame_alloc())) {
-	Fatal(_("codec: can't allocate audio decoder frame buffer\n"));
+		Fatal(_("codec: can't allocate audio decoder frame buffer\n"));
     }
+	audio_decoder->AudioCtx = NULL;
 
     return audio_decoder;
 }
@@ -385,43 +369,41 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 {
 	AVCodec *codec;
 
-	Debug(3, "codec: using audio codec ID %#06x (%s)\n", codec_id,
-		avcodec_get_name(codec_id));
-
-	if (!(codec = avcodec_find_decoder(codec_id))) {
-		Fatal(_("codec: codec ID %#06x not found\n"), codec_id);
-		// FIXME: errors aren't fatal
+	if (codec_id == AV_CODEC_ID_AC3) {
+		if (!(codec = avcodec_find_decoder_by_name("ac3_fixed"))) {
+			Fatal(_("codec: codec ac3_fixed ID %#06x not found\n"), codec_id);
+		}
+	} else {
+		if (!(codec = avcodec_find_decoder(codec_id))) {
+			Fatal(_("codec: codec %s ID %#06x not found\n"),
+				avcodec_get_name(codec_id), codec_id);
+			// FIXME: errors aren't fatal
+		}
 	}
 
 	if (!(audio_decoder->AudioCtx = avcodec_alloc_context3(codec))) {
 		Fatal(_("codec: can't allocate audio codec context\n"));
 	}
 
-	if (CodecDownmix) {
+//	if (CodecDownmix) {
+#ifdef DEBUG
+		fprintf(stderr, "CodecAudioOpen: CodecDownmix to AV_CH_LAYOUT_STEREO\n");
+#endif
 		audio_decoder->AudioCtx->request_channel_layout =
-			AV_CH_LAYOUT_STEREO_DOWNMIX;
-	}
-//	pthread_mutex_lock(&CodecLockMutex);
+			AV_CH_LAYOUT_STEREO;
+//	}
+
 	// open codec
-	if (1) {
-		AVDictionary *av_dict;
-
-		av_dict = NULL;
-		// FIXME: import settings
-		//av_dict_set(&av_dict, "dmix_mode", "0", 0);
-		//av_dict_set(&av_dict, "ltrt_cmixlev", "1.414", 0);
-		//av_dict_set(&av_dict, "loro_cmixlev", "1.414", 0);
-		if (avcodec_open2(audio_decoder->AudioCtx, audio_decoder->AudioCtx->codec, &av_dict) < 0) {
-//			pthread_mutex_unlock(&CodecLockMutex);
-			Fatal(_("codec: can't open audio codec\n"));
-		}
-		av_dict_free(&av_dict);
+	if (avcodec_open2(audio_decoder->AudioCtx, audio_decoder->AudioCtx->codec, NULL) < 0) {
+		Fatal(_("codec: can't open audio codec\n"));
 	}
-//	pthread_mutex_unlock(&CodecLockMutex);
+#ifdef DEBUG
 	Debug(3, "codec: audio '%s'\n", audio_decoder->AudioCtx->codec->long_name);
-
+	fprintf(stderr,"CodecAudioOpen: audio '%s'\n", audio_decoder->AudioCtx->codec->long_name);
+#endif
 	if (audio_decoder->AudioCtx->codec->capabilities & AV_CODEC_CAP_TRUNCATED) {
 		Debug(3, "codec: audio can use truncated packets\n");
+		fprintf(stderr, "CodecAudioOpen: audio can use truncated packets\n");
 		// we send only complete frames
 		// audio_decoder->AudioCtx->flags |= CODEC_FLAG_TRUNCATED;
     }
@@ -434,17 +416,13 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 */
 void CodecAudioClose(AudioDecoder * audio_decoder)
 {
-//		Das muss später getestet werden > momentan wird CodecAudioClose aufgerufen OHNE audio_decoder!!!
-//	if (audio_decoder->AudioCtx->codec->capabilities & AV_CODEC_CAP_DELAY)
-//		fprintf(stderr, "[CodecAudioClose] codec use AV_CODEC_CAP_DELAY\n");
-
-	// FIXME: output any buffered data
+#ifdef DEBUG
+		fprintf(stderr, "[CodecAudioClose]\n");
+#endif
 	if (audio_decoder->AudioCtx) {
-//		pthread_mutex_lock(&CodecLockMutex);
 		avcodec_close(audio_decoder->AudioCtx);
 		av_freep(&audio_decoder->AudioCtx);
-//		pthread_mutex_unlock(&CodecLockMutex);
-    }
+	}
 }
 
 /**
@@ -497,6 +475,8 @@ void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
     frame = audio_decoder->Frame;
     av_frame_unref(frame);
 
+//	fprintf(stderr, "CodecAudioDecode: \n");
+
     got_frame = 0;
     n = avcodec_decode_audio4(audio_ctx, frame, &got_frame,
 	(AVPacket *) avpkt);
@@ -517,16 +497,30 @@ void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 		return;
 	}
 
-    // update audio clock
-    if (frame->pts != (int64_t) AV_NOPTS_VALUE) {
+#ifdef AV_SYNC_DEBUG
+	// Control PTS is possible
+	if (audio_decoder->last_pts == (int64_t) AV_NOPTS_VALUE &&
+		frame->pts == (int64_t) AV_NOPTS_VALUE) {
+		fprintf(stderr, "CodecAudioDecode: NO VALID PTS\n");
+	}
+	if (frame->pts != (int64_t) AV_NOPTS_VALUE &&
+		frame->pts != audio_decoder->last_pts + 
+			(int64_t)(frame->nb_samples * 1000 * 90 / frame->sample_rate)) {
+		fprintf(stderr, "CodecAudioDecode: frame->pts %s last_pts + samples %s\n",
+			PtsTimestamp2String(frame->pts), PtsTimestamp2String(audio_decoder->last_pts + 
+			(int64_t)(frame->nb_samples * 1000 * 90 / frame->sample_rate)));
+	}
+#endif
+	// update audio clock
+	if (frame->pts != (int64_t) AV_NOPTS_VALUE) {
 		audio_decoder->last_pts = frame->pts;
-    } else {
+	} else if (audio_decoder->last_pts != (int64_t) AV_NOPTS_VALUE) {
 		frame->pts = audio_decoder->last_pts + 
 			(int64_t)(frame->nb_samples * 1000 * 90 / frame->sample_rate);
 		audio_decoder->last_pts = frame->pts;
 	}
 
-	AudioEnqueue(NULL, 0, frame);
+	AudioFilter(frame);
 	return;
 }
 
@@ -538,7 +532,13 @@ void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 */
 void CodecAudioFlushBuffers(AudioDecoder * decoder)
 {
-    avcodec_flush_buffers(decoder->AudioCtx);
+#ifdef DEBUG
+	fprintf(stderr, "CodecAudioFlushBuffers: \n");
+#endif
+	if (decoder->AudioCtx) {
+		avcodec_flush_buffers(decoder->AudioCtx);
+	}
+	decoder->last_pts = AV_NOPTS_VALUE;
 }
 
 //----------------------------------------------------------------------------
@@ -560,7 +560,6 @@ static void CodecNoopCallback( __attribute__ ((unused))
 */
 void CodecInit(void)
 {
-//    pthread_mutex_init(&CodecLockMutex, NULL);
 #ifndef DEBUG
     // disable display ffmpeg error messages
     av_log_set_callback(CodecNoopCallback);
@@ -580,5 +579,4 @@ void CodecInit(void)
 */
 void CodecExit(void)
 {
-//    pthread_mutex_destroy(&CodecLockMutex);
 }

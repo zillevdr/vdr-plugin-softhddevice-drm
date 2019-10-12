@@ -69,9 +69,9 @@ extern int CodecVideoSendPacket(VideoDecoder *, const AVPacket *);
 
 extern void CodecVideoReceiveFrame(VideoDecoder *);
 
-
     /// Flush video buffers.
 extern void CodecVideoFlushBuffers(VideoDecoder *);
+
 
     /// Allocate a new audio decoder context.
 extern AudioDecoder *CodecAudioNewDecoder(void);

@@ -215,7 +215,7 @@ static void deint_output_port_cb(MMAL_PORT_T *port,
 	VideoRender *render;
 	render = (VideoRender *)port->userdata;
 
-	if (buffer->cmd == 0) {
+	if (buffer->cmd == 0 && !render->Closing) {
 		if (buffer->length > 0) {
 			buffer->user_data = NULL;
 			// Correct PTS MMAL use microseconds
@@ -329,6 +329,7 @@ static void MmalClose(VideoRender * render)
 	render->buffers_in_queue = 0;
 	render->buffers_deint_out = 0;
 	render->buffers = 0;
+	render->width = 0;
 }
 
 static void MmalChangeResolution(VideoRender * render,
@@ -513,8 +514,12 @@ dequeue:
 		if(frame)
 			av_frame_free(&frame);
 		mmal_buffer_header_release(buffer);
-		if(render->buffers_in_queue > 0)
+		if(render->buffers_in_queue > 0) {
 			goto dequeue;
+		} else {
+			MmalClose(render);
+		}
+
 		return;
 	}
 

@@ -27,16 +27,16 @@
 //	Prototypes
 //----------------------------------------------------------------------------
 
-extern void AudioEnqueue(const void *, int, AVFrame *);	///< buffer audio samples
+extern void AudioFilter(AVFrame *);	///< buffer audio samples
 extern void AudioFlushBuffers(void);	///< flush audio buffers
 extern void AudioPoller(void);		///< poll audio events/handling		not used!
 extern int AudioFreeBytes(void);	///< free bytes in audio output
 extern int AudioUsedBytes(void);	///< used bytes in audio output
 extern int64_t AudioGetClock();		///< get current audio clock
-extern void AudioVideoReady(int64_t);	///< tell audio video is ready
+extern int AudioVideoReady(int64_t);	///< tell audio video is ready
 
 extern void AudioSetVolume(int);	///< set volume
-extern int AudioSetup(int *, int *, int);	///< setup audio output
+//extern int AudioSetup(int *, int *, int);	///< setup audio output
 
 extern void AudioPlay(void);		///< play audio
 extern void AudioPause(void);		///< pause audio
@@ -49,20 +49,15 @@ extern void AudioSetStereoDescent(int);	///< set stereo loudness descent
 extern void AudioSetEq(int[17], int);  /// Set audio equalizer.
 
 extern void AudioSetDevice(const char *);	///< set PCM audio device
-
-    /// set pass-through device
-extern void AudioSetPassthroughDevice(const char *);
+extern void AudioSetPassthroughDevice(const char *);	/// set pass-through device
 extern void AudioSetChannel(const char *);	///< set mixer channel
 extern void AudioSetAutoAES(int);	///< set automatic AES flag handling
+
 extern void AudioInit(void);		///< setup audio module
 extern void AudioExit(void);		///< cleanup and exit audio module
 
 //----------------------------------------------------------------------------
 //	Variables
 //----------------------------------------------------------------------------
-
-extern char AudioAlsaDriverBroken;	///< disable broken driver message
-extern char AudioAlsaNoCloseOpen;	///< disable alsa close/open fix
-extern char AudioAlsaCloseOpenDelay;	///< enable alsa close/open delay fix
 
 /// @}

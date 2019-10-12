@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2019-08-04 13:28+0200\n"
+"POT-Creation-Date: 2019-10-12 15:55+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -17,33 +17,15 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #, c-format
-msgid "audio: %dHz sample-rate unsupported\n"
+msgid "audio: snd_pcm_drop(): %s\n"
 msgstr ""
 
 #, c-format
-msgid "audio: %d channels unsupported\n"
-msgstr ""
-
-msgid "audio: out of ring buffers\n"
-msgstr ""
-
-#, c-format
-msgid "audio/alsa: avail underrun error? '%s'\n"
+msgid "audio: snd_pcm_prepare(): %s\n"
 msgstr ""
 
 #, c-format
 msgid "audio/alsa: snd_pcm_avail_update(): %s\n"
-msgstr ""
-
-#, c-format
-msgid "audio/alsa: broken driver %d state '%s'\n"
-msgstr ""
-
-#, c-format
-msgid "audio/alsa: snd_pcm_start(): %s\n"
-msgstr ""
-
-msgid "audio/alsa: bytes lost -> out of sync\n"
 msgstr ""
 
 #, c-format
@@ -55,22 +37,6 @@ msgid "audio/alsa: snd_pcm_writei failed: %s\n"
 msgstr ""
 
 msgid "audio/alsa: not all frames written\n"
-msgstr ""
-
-#, c-format
-msgid "audio: snd_pcm_drop(): %s\n"
-msgstr ""
-
-#, c-format
-msgid "audio: snd_pcm_prepare(): %s\n"
-msgstr ""
-
-#, c-format
-msgid "audio/alsa: wait underrun error? '%s'\n"
-msgstr ""
-
-#, c-format
-msgid "audio/alsa: snd_pcm_wait(): %s\n"
 msgstr ""
 
 #, c-format
@@ -102,27 +68,7 @@ msgid "audio/alsa: set params error: %s\n"
 msgstr ""
 
 #, c-format
-msgid "audio: snd_pcm_sw_params_current failed: %s\n"
-msgstr ""
-
-#, c-format
-msgid "audio: snd_pcm_sw_params_get_boundary failed: %s\n"
-msgstr ""
-
-#, c-format
-msgid "audio: snd_pcm_sw_params_set_silence_size failed: %s\n"
-msgstr ""
-
-#, c-format
-msgid "audio: snd_pcm_sw_params failed: %s\n"
-msgstr ""
-
-#, c-format
 msgid "audio/alsa: start delay %ums\n"
-msgstr ""
-
-#, c-format
-msgid "audio: can't set channels %d sample-rate %dHz\n"
 msgstr ""
 
 msgid "audio: can't cancel play thread\n"
@@ -130,9 +76,6 @@ msgstr ""
 
 #, c-format
 msgid "audio: can't place %d samples in ring buffer\n"
-msgstr ""
-
-msgid "audio: flush out of ring buffers\n"
 msgstr ""
 
 #, c-format
@@ -152,7 +95,11 @@ msgid "codec: can't allocate audio decoder frame buffer\n"
 msgstr ""
 
 #, c-format
-msgid "codec: codec ID %#06x not found\n"
+msgid "codec: codec ac3_fixed ID %#06x not found\n"
+msgstr ""
+
+#, c-format
+msgid "codec: codec %s ID %#06x not found\n"
 msgstr ""
 
 msgid "codec: can't allocate audio codec context\n"
@@ -190,18 +137,6 @@ msgstr ""
 msgid "[softhddev] invalid LPCM audio packet %d bytes\n"
 msgstr ""
 
-#, c-format
-msgid "[softhddev] LPCM %d bits per sample aren't supported\n"
-msgstr ""
-
-#, c-format
-msgid "[softhddev] LPCM %d sample-rate is unsupported\n"
-msgstr ""
-
-#, c-format
-msgid "[softhddev] LPCM %d channels are unsupported\n"
-msgstr ""
-
 msgid "[softhddev] out of memory\n"
 msgstr ""
 
@@ -217,10 +152,6 @@ msgstr ""
 
 #, c-format
 msgid "softhddev: %s called without hw decoder\n"
-msgstr ""
-
-#, c-format
-msgid "Workaround '%s' unsupported\n"
 msgstr ""
 
 #, c-format
@@ -269,21 +200,6 @@ msgstr "Audio"
 msgid "Audio/Video delay (ms)"
 msgstr "Audio/Video Verzögerung (ms)"
 
-msgid "Pass-through default"
-msgstr "Pass-Through-Standard"
-
-msgid "  PCM pass-through"
-msgstr ""
-
-msgid "  AC-3 pass-through"
-msgstr ""
-
-msgid "  E-AC-3 pass-through"
-msgstr ""
-
-msgid "Enable (E-)AC-3 (decoder) downmix"
-msgstr "Aktiviere (E-)AC-3 (decoder) downmix"
-
 msgid "Volume control"
 msgstr "Lautstärkesteuerung"
 
@@ -292,6 +208,9 @@ msgstr "Hardware"
 
 msgid "Software"
 msgstr "Software"
+
+msgid "Audio buffer size (ms)"
+msgstr "Audio Puffergröße (ms)"
 
 msgid "Enable normalize volume"
 msgstr "Aktiviere Lautstärkenormalisierung"
@@ -308,8 +227,20 @@ msgstr "  Max. Kompressionsfaktor (/1000)"
 msgid "Reduce stereo volume (/1000)"
 msgstr "Reduziere Steropegel (/1000)"
 
-msgid "Audio buffer size (ms)"
-msgstr "Audio Puffergröße (ms)"
+msgid "Enable (E-)AC-3 (decoder) downmix"
+msgstr "Aktiviere (E-)AC-3 (decoder) downmix"
+
+msgid "Pass-through default"
+msgstr "Pass-Through-Standard"
+
+msgid "  PCM pass-through"
+msgstr ""
+
+msgid "  AC-3 pass-through"
+msgstr ""
+
+msgid "  E-AC-3 pass-through"
+msgstr ""
 
 msgid "Enable automatic AES"
 msgstr "Aktiviere automatiche AES"
@@ -398,28 +329,13 @@ msgstr ""
 msgid "[softhddev]: hot key %d is not supported\n"
 msgstr ""
 
-#, c-format
-msgid "[FindDevice] DRM have %i connectors, %i crtcs, %i encoders\n"
-msgstr ""
-
-#, c-format
-msgid "[FindDevice] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"
-msgstr ""
-
-#, c-format
-msgid "[FindDevice] DRM setup CRTC: %i video_plane: %i osd_plane %i\n"
-msgstr ""
-
 msgid "video: can't queue cancel video display thread\n"
 msgstr ""
 
 msgid "video: can't cancel video display thread\n"
 msgstr ""
 
-msgid "video: can't cancel DisplayHandlerThread thread\n"
-msgstr ""
-
-msgid "video/DRM: out of memory\n"
+msgid "video/MMAL: out of memory\n"
 msgstr ""
 
 msgid "softhddev: grab unsupported\n"

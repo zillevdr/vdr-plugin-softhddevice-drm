@@ -470,32 +470,36 @@ void cMenuSetupSoft::Create(void)
     if (Audio) {
 	Add(new cMenuEditIntItem(tr("Audio/Video delay (ms)"), &AudioDelay,
 		-1000, 1000));
-	Add(new cMenuEditBoolItem(tr("Pass-through default"),
-		&AudioPassthroughDefault, trVDR("off"), trVDR("on")));
-	Add(new cMenuEditBoolItem(tr("\040\040PCM pass-through"),
-		&AudioPassthroughPCM, trVDR("no"), trVDR("yes")));
-	Add(new cMenuEditBoolItem(tr("\040\040AC-3 pass-through"),
-		&AudioPassthroughAC3, trVDR("no"), trVDR("yes")));
-	Add(new cMenuEditBoolItem(tr("\040\040E-AC-3 pass-through"),
-		&AudioPassthroughEAC3, trVDR("no"), trVDR("yes")));
-	Add(new cMenuEditBoolItem(tr("Enable (E-)AC-3 (decoder) downmix"),
-		&AudioDownmix, trVDR("no"), trVDR("yes")));
 	Add(new cMenuEditBoolItem(tr("Volume control"), &AudioSoftvol,
 		tr("Hardware"), tr("Software")));
-	Add(new cMenuEditBoolItem(tr("Enable normalize volume"),
-		&AudioNormalize, trVDR("no"), trVDR("yes")));
-	Add(new cMenuEditIntItem(tr("  Max normalize factor (/1000)"),
-		&AudioMaxNormalize, 0, 10000));
-	Add(new cMenuEditBoolItem(tr("Enable volume compression"),
-		&AudioCompression, trVDR("no"), trVDR("yes")));
-	Add(new cMenuEditIntItem(tr("  Max compression factor (/1000)"),
-		&AudioMaxCompression, 0, 10000));
-	Add(new cMenuEditIntItem(tr("Reduce stereo volume (/1000)"),
-		&AudioStereoDescent, 0, 1000));
 	Add(new cMenuEditIntItem(tr("Audio buffer size (ms)"),
 		&AudioBufferTime, 0, 1000));
-	Add(new cMenuEditBoolItem(tr("Enable automatic AES"), &AudioAutoAES,
-		trVDR("no"), trVDR("yes")));
+	Add(new cMenuEditBoolItem(tr("Enable normalize volume"),
+		&AudioNormalize, trVDR("no"), trVDR("yes")));
+	if (AudioNormalize)
+		Add(new cMenuEditIntItem(tr("  Max normalize factor (/1000)"),
+			&AudioMaxNormalize, 0, 10000));
+	Add(new cMenuEditBoolItem(tr("Enable volume compression"),
+		&AudioCompression, trVDR("no"), trVDR("yes")));
+	if (AudioCompression)
+		Add(new cMenuEditIntItem(tr("  Max compression factor (/1000)"),
+			&AudioMaxCompression, 0, 10000));
+	Add(new cMenuEditIntItem(tr("Reduce stereo volume (/1000)"),
+		&AudioStereoDescent, 0, 1000));
+	Add(new cMenuEditBoolItem(tr("Enable (E-)AC-3 (decoder) downmix"),
+		&AudioDownmix, trVDR("no"), trVDR("yes")));
+	Add(new cMenuEditBoolItem(tr("Pass-through default"),
+		&AudioPassthroughDefault, trVDR("off"), trVDR("on")));
+	if (AudioPassthroughDefault) {
+		Add(new cMenuEditBoolItem(tr("\040\040PCM pass-through"),
+			&AudioPassthroughPCM, trVDR("no"), trVDR("yes")));
+		Add(new cMenuEditBoolItem(tr("\040\040AC-3 pass-through"),
+			&AudioPassthroughAC3, trVDR("no"), trVDR("yes")));
+		Add(new cMenuEditBoolItem(tr("\040\040E-AC-3 pass-through"),
+			&AudioPassthroughEAC3, trVDR("no"), trVDR("yes")));
+		Add(new cMenuEditBoolItem(tr("Enable automatic AES"), &AudioAutoAES,
+			trVDR("no"), trVDR("yes")));
+	}
     }
     Add(CollapsedItem(tr("Audio Filter"), AudioFilter));
     if (AudioFilter) {
@@ -550,19 +554,24 @@ void cMenuSetupSoft::Create(void)
 */
 eOSState cMenuSetupSoft::ProcessKey(eKeys key)
 {
-    int old_general = General;
-    int old_video = Video;
-    int old_audio = Audio;
-    int old_audiofilter = AudioFilter;
-    int old_audioeq = AudioEq;
+    int old_General = General;
+    int old_Video = Video;
+    int old_Audio = Audio;
+    int old_AudioFilter = AudioFilter;
+    int old_AudioEq = AudioEq;
+    int old_AudioNormalize = AudioNormalize;
+    int old_AudioCompression = AudioCompression;
+    int old_AudioPassthroughDefault = AudioPassthroughDefault;
     eOSState state = cMenuSetupPage::ProcessKey(key);
 
     if (key != kNone) {
 		// update menu only, if something on the structure has changed
 		// this is needed because VDR menus are evil slow
-		if (old_general != General || old_video != Video ||
-			old_audio != Audio || old_audiofilter != AudioFilter ||
-			old_audioeq != AudioEq) {
+		if (old_General != General || old_Video != Video ||
+			old_Audio != Audio || old_AudioFilter != AudioFilter ||
+			old_AudioEq != AudioEq || old_AudioNormalize != AudioNormalize ||
+			old_AudioCompression != AudioCompression ||
+			old_AudioPassthroughDefault != AudioPassthroughDefault) {
 			Create();			// update menu
 		}
     }

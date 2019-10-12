@@ -63,7 +63,7 @@
 //	Defines
 //----------------------------------------------------------------------------
 
-#define VIDEO_SURFACES_MAX	4	///< video output surfaces for queue
+#define VIDEO_SURFACES_MAX	5	///< video output surfaces for queue
 
 //----------------------------------------------------------------------------
 //	Variables
@@ -641,11 +641,16 @@ static void Frame2Display(VideoRender * render)
 	int64_t audio_clock;
 	int i, j;
 
-/*	fprintf(stderr, "Frame2Display: Buffers Pkts %d Deint %d Video %d\n",
-		VideoGetPackets(render->Stream),
-		atomic_read(&render->FramesDeintFilled),
-		atomic_read(&render->FramesFilled));*/
+#ifdef AV_SYNC_DEBUG
+	static uint32_t last_tick;
+	uint32_t tick;
 
+	tick = GetMsTicks();
+	if (tick - last_tick > 21) {
+		fprintf(stderr, "Frame2Display: Bild braucht zu lang %dms\n", tick - last_tick);
+	}
+	last_tick = tick;
+#endif
 	if (render->Closing) {
 closing:
 		// set a black FB
@@ -656,7 +661,9 @@ closing:
 
 dequeue:
 	while ((atomic_read(&render->FramesFilled)) == 0 ) {
+#ifdef DEBUG
 		fprintf(stderr, "Frame2Display: Kein Frame in der Queue!!!\n");
+#endif
 		usleep(20000);
 	}
 
@@ -749,7 +756,11 @@ dequeue:
 	}
 
 	if(!render->StartCounter && !render->Closing) {
-		AudioVideoReady(frame->pts);
+avready:
+		if (AudioVideoReady(frame->pts)) {
+			usleep(20000);
+			goto avready;
+		}
 	}
 	render->pts = frame->pts;
 
@@ -767,11 +778,12 @@ audioclock:
 
 	if ((diff < -25 * 90 || diff > 1500 * 90) && !render->TrickSpeed) {
 		render->FramesDropped++;
-
-//		fprintf(stderr, "Frame2Display: FramesDropped Timstamp %s audio %s video %s diff %d %d\n",
-//			Timestamp2String(GetMsTicks()), PtsTimestamp2String(audio_clock),
-//			PtsTimestamp2String(frame->pts), diff, diff /90);
-
+#ifdef AV_SYNC_DEBUG
+		fprintf(stderr, "FrameDropped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
+			VideoGetPackets(render->Stream), atomic_read(&render->FramesDeintFilled),
+			atomic_read(&render->FramesFilled), AudioUsedBytes(), PtsTimestamp2String(audio_clock),
+			PtsTimestamp2String(frame->pts), VideoAudioDelay / 90, diff / 90);
+#endif
 		if (render->Closing)
 			goto closing;
 
@@ -780,7 +792,7 @@ audioclock:
 		render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
 		atomic_dec(&render->FramesFilled);
 		pthread_mutex_unlock(&VideoLockMutex);
-		if (render->Closing == 0) {
+		if (!render->Closing) {
 			render->StartCounter++;
 		}
 		goto dequeue;
@@ -788,17 +800,21 @@ audioclock:
 
 	if(diff > 55 * 90 && !render->TrickSpeed) {
 		render->FramesDuped++;
-
-//		fprintf(stderr, "Frame2Display: FramesDuped Timstamp %s audio %s video %s diff %d %d\n",
-//			Timestamp2String(GetMsTicks()), PtsTimestamp2String(audio_clock),
-//			PtsTimestamp2String(frame->pts), diff, diff /90);
-
+#ifdef AV_SYNC_DEBUG
+		fprintf(stderr, "FrameDuped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
+			VideoGetPackets(render->Stream), atomic_read(&render->FramesDeintFilled),
+			atomic_read(&render->FramesFilled), AudioUsedBytes(), PtsTimestamp2String(audio_clock),
+			PtsTimestamp2String(frame->pts), VideoAudioDelay / 90, diff / 90);
+#endif
 		if (render->Closing)
 			goto closing;
 
 		usleep(20000);
 		goto audioclock;
 	}
+
+	if (render->Closing)
+		goto closing;
 
 	if (!render->TrickSpeed) {
 		render->StartCounter++;
@@ -830,6 +846,17 @@ page_flip:
 	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0)
 		fprintf(stderr, "Frame2Display: cannot page flip to FB %i (%d): %m\n",
 			buf->fb_id, errno);
+
+#ifdef AV_SYNC_DEBUG
+	static uint32_t last_tick;
+	uint32_t tick;
+
+	tick = GetMsTicks();
+	if (tick - last_tick > 21) {
+		Debug(3, "Frame2Display: StartCounter %4d %dms\n", render->StartCounter, tick - last_tick);
+	}
+	last_tick = tick;
+#endif
 
 	drmModeAtomicFree(ModeReq);
 	render->front_buf ^= 1;
@@ -959,7 +986,10 @@ static void *DecodeHandlerThread(void *arg)
 		// manage fill frame output ring buffer
 		if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX &&
 			atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
-
+#ifdef DEBUG
+			if (render->Closing)
+				fprintf(stderr, "DecodeHandlerThread: render->Closing\n");
+#endif
 			ret = VideoDecodeInput(render->Stream);
 		} else {
 			pthread_mutex_lock(&cond_mutex);
@@ -1131,7 +1161,7 @@ static void *FilterHandlerThread(void * arg)
 	int thread_close = 0;
 
 	while (1) {
-		while ((atomic_read(&render->FramesDeintFilled)) == 0 && !render->Deint_Close) {
+		while (!atomic_read(&render->FramesDeintFilled) && !render->Deint_Close) {
 			usleep(10000);
 		}
 
@@ -1152,6 +1182,10 @@ getinframe:
 			}
 		} else {
 			frame = NULL;
+#ifdef DEBUG
+			fprintf(stderr, "FilterHandlerThread: Deint queue %d frame = NULL\n",
+				atomic_read(&render->FramesDeintFilled));
+#endif
 		}
 
 		if (render->Deint_Close) {
@@ -1351,7 +1385,7 @@ void VideoResetStart(VideoRender * render)
     render->StartCounter = 0;
     render->FramesDuped = 0;
     render->FramesDropped = 0;
-//	fprintf(stderr, "DrmResetStart: StartCounter %i\n", render->StartCounter);
+//	fprintf(stderr, "VideoResetStart: StartCounter %i\n", render->StartCounter);
 }
 
 ///
