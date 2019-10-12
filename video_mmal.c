@@ -69,7 +69,6 @@ int VideoAudioDelay;
 int hdr;
 
 static pthread_t VideoThread;		///< video decode thread
-static pthread_mutex_t VideoDeintMutex;	///< video condition mutex
 static pthread_mutex_t VideoLockMutex;	///< video lock mutex
 
 static pthread_cond_t cond;
@@ -749,9 +748,8 @@ void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		VideoThread = 0;
-		pthread_cond_init(&cond,NULL);
+		pthread_cond_destroy(&cond);
 		pthread_mutex_destroy(&cond_mutex);
-		pthread_mutex_destroy(&VideoDeintMutex);
 		pthread_mutex_destroy(&VideoLockMutex);
     }
 }
@@ -766,8 +764,8 @@ void VideoThreadWakeup(VideoRender * render)
 	render->Closing = 0;
 
 	if (!VideoThread) {
+		pthread_cond_init(&cond,NULL);
 		pthread_mutex_init(&cond_mutex, NULL);
-		pthread_mutex_init(&VideoDeintMutex, NULL);
 		pthread_mutex_init(&VideoLockMutex, NULL);
 		pthread_create(&VideoThread, NULL, DisplayHandlerThread, render);
 		pthread_setname_np(VideoThread, "softhddev video");

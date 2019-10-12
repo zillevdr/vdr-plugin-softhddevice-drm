@@ -1025,6 +1025,7 @@ void VideoThreadExit(void)
 		}
 		DecodeThread = 0;
 //		fprintf(stderr, "VideoThreadExit: DecodeThread cleaned.\n");
+		pthread_cond_destroy(&cond);
 		pthread_mutex_destroy(&cond_mutex);
 		pthread_mutex_destroy(&VideoDeintMutex);
 		pthread_mutex_destroy(&VideoLockMutex);
