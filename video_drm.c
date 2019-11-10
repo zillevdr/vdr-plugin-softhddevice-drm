@@ -137,14 +137,21 @@ struct _Drm_Render_
 	uint64_t zpos_overlay;
 	uint64_t zpos_primary;
 	uint32_t connector_id, crtc_id, video_plane, osd_plane, front_buf;
-	int second_field;
 	AVFrame *lastframe;
-	int prime_buffers;
+	int buffers;
+	int enqueue_buffer;
 };
 
 //----------------------------------------------------------------------------
 //	Helper functions
 //----------------------------------------------------------------------------
+
+static void ReleaseFrame( __attribute__ ((unused)) void *opaque, uint8_t *data)
+{
+	AVDRMFrameDescriptor *primedata = (AVDRMFrameDescriptor *)data;
+
+	av_free(primedata);
+}
 
 static void ThreadExitHandler(void * arg)
 {
@@ -285,8 +292,8 @@ void SetBuf(VideoRender * render, struct drm_buf *buf, uint32_t plane_id)
 	drmModeAtomicReqPtr ModeReq;
 	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
 
-//	fprintf(stderr, "Set atomic buf prime_buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
-//		render->prime_buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
+//	fprintf(stderr, "Set atomic buf buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
+//		render->buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
 
 	if (!(ModeReq = drmModeAtomicAlloc()))
 		fprintf(stderr, "SetBuf: cannot allocate atomic request (%d): %m\n", errno);
@@ -297,7 +304,7 @@ void SetBuf(VideoRender * render, struct drm_buf *buf, uint32_t plane_id)
 
 	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0)
 		fprintf(stderr, "SetBuf: cannot set atomic buf %i width %i height %i fb_id %i (%d): %m\n",
-			render->prime_buffers, buf->width, buf->height, buf->fb_id, errno);
+			render->buffers, buf->width, buf->height, buf->fb_id, errno);
 
 	drmModeAtomicFree(ModeReq);
 }
@@ -471,7 +478,7 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 		buf->pix_fmt = primedata->layers[0].format;
 
 		if (drmPrimeFDToHandle(render->fd_drm, primedata->objects[0].fd, &prime_handle))
-			fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %i (%d): %m\n",
+			fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %li (%d): %m\n",
 				primedata->objects[0].fd, primedata->objects[0].size, errno);
 
 		buf->handle[0] = buf->handle[1] = prime_handle;
@@ -526,8 +533,8 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 		return -errno;
 	}
 
-//	fprintf(stderr, "SetupFB prime_buffers %i Handle %"PRIu32" fb_id %i %i x %i\n",
-//		render->prime_buffers, buf->handle[0], buf->fb_id, buf->width, buf->height);
+//	fprintf(stderr, "SetupFB buffers %i Handle %"PRIu32" fb_id %i %i x %i\n",
+//		render->buffers, buf->handle[0], buf->fb_id, buf->width, buf->height);
 
 	if (primedata)
 		return 0;
@@ -614,11 +621,12 @@ dequeue:
 	}
 
 	// Destroy FBs
-	if (render->prime_buffers) {
-		for (i = 0; i < render->prime_buffers; ++i) {
+	if (render->buffers) {
+		for (i = 0; i < render->buffers; ++i) {
 			DestroyFB(render->fd_drm, &render->bufs[i]);
 		}
-		render->prime_buffers = 0;
+		render->buffers = 0;
+		render->enqueue_buffer = 0;
 		render->front_buf = 0;
 	}
 
@@ -639,18 +647,8 @@ static void Frame2Display(VideoRender * render)
 	AVFrame *frame;
 	AVDRMFrameDescriptor *primedata = NULL;
 	int64_t audio_clock;
-	int i, j;
+	int i;
 
-#ifdef AV_SYNC_DEBUG
-	static uint32_t last_tick;
-	uint32_t tick;
-
-	tick = GetMsTicks();
-	if (tick - last_tick > 21) {
-		fprintf(stderr, "Frame2Display: Bild braucht zu lang %dms\n", tick - last_tick);
-	}
-	last_tick = tick;
-#endif
 	if (render->Closing) {
 closing:
 		// set a black FB
@@ -684,75 +682,26 @@ dequeue:
 		fprintf(stderr, "Frame2Display: frame = NULL Kein Frame in der Queue!!!\n");
 	}
 
-	if (frame->format == AV_PIX_FMT_DRM_PRIME) {
-		// frame in prime fd
-		primedata = (AVDRMFrameDescriptor *)frame->data[0];
-		// search or made fd / FB combination
-		for (i = 0; i < render->prime_buffers; i++) {
-			if (render->bufs[i].fd_prime == primedata->objects[0].fd) {
-				buf = &render->bufs[i];
-				break;
-			}
+	primedata = (AVDRMFrameDescriptor *)frame->data[0];
+	// search or made fd / FB combination
+	for (i = 0; i < render->buffers; i++) {
+		if (render->bufs[i].fd_prime == primedata->objects[0].fd) {
+			buf = &render->bufs[i];
+			break;
 		}
-		if (buf == 0) {
-			buf = &render->bufs[render->prime_buffers];
-			buf->width = (uint32_t)frame->width;
-			buf->height = (uint32_t)frame->height;
-			buf->fd_prime = primedata->objects[0].fd;
+	}
+	if (buf == 0) {
+		buf = &render->bufs[render->buffers];
+		buf->width = (uint32_t)frame->width;
+		buf->height = (uint32_t)frame->height;
+		buf->fd_prime = primedata->objects[0].fd;
 
-			if (SetupFB(render, buf, primedata))
-				fprintf(stderr, "Frame2Display: SetupFB FB %i x %i failed\n", buf->width, buf->height);
-			if (render->prime_buffers == 0) {
-				SetBuf(render, buf, render->video_plane);
-			}
-			render->prime_buffers++;
+		if (SetupFB(render, buf, primedata))
+			fprintf(stderr, "Frame2Display: SetupFB FB %i x %i failed\n", buf->width, buf->height);
+		if (render->buffers == 0) {
+			SetBuf(render, buf, render->video_plane);
 		}
-	} else {
-		// frame in frame data
-		buf = &render->bufs[render->front_buf];
-		if (buf->fb_id == 0) {
-			buf->width = (uint32_t)frame->width;
-			if (frame->interlaced_frame == 1)
-				buf->height = (uint32_t)frame->height / 2;
-			else buf->height = (uint32_t)frame->height;
-
-			if (SetupFB(render, buf, NULL))
-				fprintf(stderr, "Frame2Display: SetupFB FB %i x %i failed\n", buf->width, buf->height);
-			if (render->prime_buffers == 0) {
-				SetBuf(render, buf, render->video_plane);
-			}
-			render->prime_buffers++;
-		}
-
-		// Copy YUV420 to NV12 and deinterlace at once
-		for (i = 0; i < frame->height; ++i)
-			if (((i + frame->top_field_first) % 2 == 0 && render->second_field == 1) ||
-				((i + frame->top_field_first + 1) % 2 == 0 && render->second_field == 0) ||
-				frame->interlaced_frame == 0)
-					memcpy(buf->plane[0] + i / (frame->interlaced_frame + 1) * frame->width,
-						frame->data[0] + i * frame->linesize[0], frame->width);
-
-		for (i = 0; i < frame->height / 2; ++i) {
-			if (((i + frame->top_field_first) % 2 == 0 && render->second_field == 1) ||
-				((i + frame->top_field_first + 1) % 2 == 0 && render->second_field == 0) ||
-				frame->interlaced_frame == 0)
-				for (j = 0; j < frame->width; ++j) {
-					if (j % 2 == 0)
-						memcpy(buf->plane[1] + i / (frame->interlaced_frame + 1) * frame->width + j,
-							frame->data[1] + i * frame->linesize[2] + j / 2, 1 );
-					else memcpy(buf->plane[1] + i / (frame->interlaced_frame + 1) * frame->width + j,
-							frame->data[2] + i * frame->linesize[1] + (j +1) / 2, 1 );
-				}
-		}
-
-		if (frame->interlaced_frame == 1) {
-			if (render->second_field == 0) {
-				render->second_field = 1;
-			} else {
-				render->second_field = 0;
-				frame->pts += 1800;
-			}
-		}
+		render->buffers++;
 	}
 
 	if(!render->StartCounter && !render->Closing) {
@@ -820,18 +769,14 @@ audioclock:
 		render->StartCounter++;
 	}
 
-	if (frame->interlaced_frame == 0 || render->second_field == 0) {
-		if (render->TrickSpeed) {
-			usleep(20000 * render->TrickSpeed);
-		}
-		buf->frame = frame;
-		pthread_mutex_lock(&VideoLockMutex);
-		render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
-		atomic_dec(&render->FramesFilled);
-		pthread_mutex_unlock(&VideoLockMutex);
-	} else {
-		buf->frame = NULL;
+	if (render->TrickSpeed) {
+		usleep(20000 * render->TrickSpeed);
 	}
+	buf->frame = frame;
+	pthread_mutex_lock(&VideoLockMutex);
+	render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
+	atomic_dec(&render->FramesFilled);
+	pthread_mutex_unlock(&VideoLockMutex);
 
 page_flip:
 	render->act_buf = buf;
@@ -1024,7 +969,6 @@ void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		DecodeThread = 0;
-//		fprintf(stderr, "VideoThreadExit: DecodeThread cleaned.\n");
 		pthread_cond_destroy(&cond);
 		pthread_mutex_destroy(&cond_mutex);
 		pthread_mutex_destroy(&VideoDeintMutex);
@@ -1041,7 +985,6 @@ void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		DisplayThread = 0;
-//		fprintf(stderr, "VideoThreadExit: DisplayThread cleaned.\n");
 	}
 }
 
@@ -1053,8 +996,6 @@ void VideoThreadExit(void)
 void VideoThreadWakeup(VideoRender * render)
 {
 	if (!DecodeThread) {
-//		fprintf(stderr, "VideoThreadWakeup: (!DecodeThread)\n");
-
 		pthread_cond_init(&cond,NULL);
 		pthread_mutex_init(&cond_mutex, NULL);
 		pthread_mutex_init(&VideoDeintMutex, NULL);
@@ -1065,7 +1006,6 @@ void VideoThreadWakeup(VideoRender * render)
 
 	if (!DisplayThread) {
 		pthread_create(&DisplayThread, NULL, DisplayHandlerThread, render);
-//		fprintf(stderr, "VideoThreadWakeup: DisplayThread started\n");
 	}
 }
 
@@ -1083,7 +1023,7 @@ void VideoThreadWakeup(VideoRender * render)
 VideoRender *VideoNewRender(VideoStream * stream)
 {
 	VideoRender *render;
-//	fprintf(stderr, "VideoNewRender\n");
+
 	if (!(render = calloc(1, sizeof(*render)))) {
 		Error(_("video/DRM: out of memory\n"));
 		return NULL;
@@ -1092,6 +1032,7 @@ VideoRender *VideoNewRender(VideoStream * stream)
 	atomic_set(&render->FramesDeintFilled, 0);
 	render->Stream = stream;
 	render->Closing = 0;
+	render->enqueue_buffer = 0;
 
 	return render;
 }
@@ -1103,7 +1044,6 @@ VideoRender *VideoNewRender(VideoStream * stream)
 ///
 void VideoDelRender(VideoRender * render)
 {
-//	fprintf(stderr, "VideoDelRender\n");
     if (render) {
 #ifdef DEBUG
 		if (!pthread_equal(pthread_self(), DecodeThread)) {
@@ -1149,6 +1089,70 @@ enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render
 	fprintf(stderr, "Video_get_format: No pixel format found!\n");
 
 	return avcodec_default_get_format(video_ctx, fmt);
+}
+
+void EnqueueFB(VideoRender * render, AVFrame *inframe)
+{
+	struct drm_buf *buf = 0;
+	AVDRMFrameDescriptor * primedata;
+	AVFrame *frame;
+	int i, j;
+
+	if (!render->buffers) {
+		for (int i = 0; i < VIDEO_SURFACES_MAX + 2; i++) {
+			buf = &render->bufs[i];
+			buf->width = (uint32_t)inframe->width;
+			buf->height = (uint32_t)inframe->height;
+			buf->pix_fmt = DRM_FORMAT_NV12;
+
+			if (SetupFB(render, buf, NULL))
+				fprintf(stderr, "EnqueueFB: SetupFB FB %i x %i failed\n", buf->width, buf->height);
+			render->buffers++;
+
+			if (drmPrimeHandleToFD(render->fd_drm, buf->handle[0], 0, &buf->fd_prime))
+				fprintf(stderr, "EnqueueFB: Failed to retrieve the Prime FD (%d): %m\n",
+					errno);
+		}
+	}
+
+	buf = &render->bufs[render->enqueue_buffer];
+
+	// Copy YUV420 to NV12
+	for (i = 0; i < inframe->height; ++i) {
+		memcpy(buf->plane[0] + i * inframe->width,
+			inframe->data[0] + i * inframe->linesize[0], inframe->width);
+	}
+	for (i = 0; i < inframe->height / 2; ++i) {
+		for (j = 0; j < inframe->width; ++j) {
+			if (j % 2 == 0)
+				memcpy(buf->plane[1] + i * inframe->width + j,
+					inframe->data[1] + i * inframe->linesize[2] + j / 2, 1 );
+			else memcpy(buf->plane[1] + i * inframe->width + j,
+					inframe->data[2] + i * inframe->linesize[1] + (j +1) / 2, 1 );
+		}
+	}
+
+	frame = av_frame_alloc();
+	frame->pts = inframe->pts;
+	primedata = av_mallocz(sizeof(AVDRMFrameDescriptor));
+
+	frame->format = AV_PIX_FMT_DRM_PRIME;
+	primedata->objects[0].fd = buf->fd_prime;
+	frame->data[0] = (uint8_t *)primedata;
+	frame->buf[0] = av_buffer_create((uint8_t *)primedata, sizeof(*primedata),
+				ReleaseFrame, NULL, AV_BUFFER_FLAG_READONLY);
+
+	av_frame_free(&inframe);
+
+	pthread_mutex_lock(&VideoLockMutex);
+	render->FramesRb[render->FramesWrite] = frame;
+	render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
+	atomic_inc(&render->FramesFilled);
+	pthread_mutex_unlock(&VideoLockMutex);
+
+	if (render->enqueue_buffer == VIDEO_SURFACES_MAX + 1)
+		render->enqueue_buffer = 0;
+	else render->enqueue_buffer++;
 }
 
 /**
@@ -1229,11 +1233,7 @@ fillframe:
 				break;
 			}
 			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
-				pthread_mutex_lock(&VideoLockMutex);
-				render->FramesRb[render->FramesWrite] = filt_frame;
-				render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
-				atomic_inc(&render->FramesFilled);
-				pthread_mutex_unlock(&VideoLockMutex);
+				EnqueueFB(render, filt_frame);
 			} else {
 				usleep(10000);
 				goto fillframe;
@@ -1337,11 +1337,15 @@ void VideoRenderFrame(VideoRender * render,
 		atomic_inc(&render->FramesDeintFilled);
 		pthread_mutex_unlock(&VideoDeintMutex);
 	} else {
-		pthread_mutex_lock(&VideoLockMutex);
-		render->FramesRb[render->FramesWrite] = frame;
-		render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
-		atomic_inc(&render->FramesFilled);
-		pthread_mutex_unlock(&VideoLockMutex);
+		if (frame->format == AV_PIX_FMT_DRM_PRIME) {
+			pthread_mutex_lock(&VideoLockMutex);
+			render->FramesRb[render->FramesWrite] = frame;
+			render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
+			atomic_inc(&render->FramesFilled);
+			pthread_mutex_unlock(&VideoLockMutex);
+		} else {
+			EnqueueFB(render, frame);
+		}
 	}
 }
 
@@ -1371,8 +1375,6 @@ void VideoSetClosing(VideoRender * render)
 		render->Closing = 1;
 	if (FilterThread)
 		render->Deint_Close = 1;
-//	fprintf(stderr, "VideoSetClosing %i %i\n",
-//		render->Closing, render->Deint_Close);
 }
 
 ///
@@ -1386,7 +1388,6 @@ void VideoResetStart(VideoRender * render)
     render->StartCounter = 0;
     render->FramesDuped = 0;
     render->FramesDropped = 0;
-//	fprintf(stderr, "VideoResetStart: StartCounter %i\n", render->StartCounter);
 }
 
 ///
@@ -1496,8 +1497,7 @@ void VideoSetScreenSize(char *size)
 ///
 void VideoSetAudioDelay(int ms)
 {
-//	fprintf(stderr, "VideoSetAudioDelay %i\n", ms);
-    VideoAudioDelay = ms * 90;
+	VideoAudioDelay = ms * 90;
 }
 
 ///
@@ -1505,8 +1505,6 @@ void VideoSetAudioDelay(int ms)
 ///
 void VideoSetSWDeinterlacer(VideoRender * render, int deint)
 {
-//	fprintf(stderr, "VideoSetSWDeinterlacer: deint %d\n", deint);
-
 	if (SWDeinterlacer != deint && render) {
 		SWDeinterlacer = deint;
 		render->Closing = 1;
@@ -1533,13 +1531,12 @@ void VideoInit(VideoRender * render)
 	render->buf_osd.pix_fmt = DRM_FORMAT_ARGB8888;
 
 	// osd FB
-    render->buf_osd.x = 0;
-    render->buf_osd.width = render->mode.hdisplay;
-    render->buf_osd.height = render->mode.vdisplay;
-    if (SetupFB(render, &render->buf_osd, NULL)){
-	    fprintf(stderr, "VideoOsdInit: SetupFB FB OSD failed\n");
-    }
-//    VideoOsdClear();
+	render->buf_osd.x = 0;
+	render->buf_osd.width = render->mode.hdisplay;
+	render->buf_osd.height = render->mode.vdisplay;
+	if (SetupFB(render, &render->buf_osd, NULL)){
+		fprintf(stderr, "VideoOsdInit: SetupFB FB OSD failed\n");
+	}
 
 	// black fb
 	render->buf_black.pix_fmt = DRM_FORMAT_NV12;

@@ -1009,6 +1009,16 @@ static void AlsaInitPCM(void)
     Info(_("audio/alsa: supports pause: %s\n"), AlsaCanPause ? "yes" : "no");
 
     AlsaPCMHandle = handle;
+#ifdef SOUND_DEBUG
+	static snd_output_t *output = NULL;
+	err = snd_output_stdio_attach(&output, stdout, 0);
+	if (err < 0) {
+		printf("Output failed: %s\n", snd_strerror(err));
+	} else {
+		printf("snd_pcm_dump_setup VOR Setup\n");
+		snd_pcm_dump_setup(AlsaPCMHandle, output);
+	}
+#endif
 }
 
 //----------------------------------------------------------------------------
@@ -1498,7 +1508,7 @@ found:
 			// restart play-back
 			// no lock needed, can wakeup next time
 #ifdef AV_SYNC_DEBUG
-			fprintf(stderr, "AudioEnqueue: start play-back Threshold %ums RingBuffer %ums AudioVideoIsReady %d\n",
+			fprintf(stderr, "AudioEnqueue: start play-back Threshold %ums RingBuffer %lums AudioVideoIsReady %d\n",
 				(AudioStartThreshold * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
 				(n * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
 				AudioVideoIsReady);
@@ -1613,11 +1623,11 @@ int AudioVideoReady(int64_t pts)
 		PtsTimestamp2String(pts), PtsTimestamp2String(audio_pts),
 		(int)(pts - audio_pts) / 90, AudioRunning ? "running" : "ready");
 
-	fprintf(stderr, "AudioVideoReady: Ringbuffer %llims V %s A %s Diff %dms %s\n",
+	fprintf(stderr, "AudioVideoReady: Ringbuffer %lims V %s A %s Diff %dms %s\n",
 		(used * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
 		PtsTimestamp2String(pts), PtsTimestamp2String(audio_pts),
 		skip / 90, AudioRunning ? "running" : "ready");
-	fprintf(stderr, "AudioVideoReady: Ringbuffer used %lld PTS %llims %s\n",
+	fprintf(stderr, "AudioVideoReady: Ringbuffer used %ld PTS %lims %s\n",
 		used, PTS, PtsTimestamp2String(PTS));
 #endif
 	// guard against old PTS
@@ -1633,7 +1643,7 @@ int AudioVideoReady(int64_t pts)
 			(skip * 1000) / (HwSampleRate * HwChannels *
 			AudioBytesProSample), skip, used);
 #ifdef AV_SYNC_DEBUG
-		fprintf(stderr, "AudioVideoReady: sync advance skip %dms %d available %lli\n",
+		fprintf(stderr, "AudioVideoReady: sync advance skip %dms %d available %li\n",
 			(skip * 1000) / (HwSampleRate * HwChannels *
 			AudioBytesProSample), skip, used);
 #endif
@@ -1645,7 +1655,9 @@ int AudioVideoReady(int64_t pts)
 	// enough video + audio buffered
 	if (AudioStartThreshold < used) {
 		AudioRunning = 1;
+#ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "AudioVideoReady: start play-back\n");
+#endif
 		pthread_cond_signal(&AudioStartCond);
 	}
 	AudioVideoIsReady = 1;
@@ -1930,6 +1942,22 @@ void AudioInit(void)
     AudioDoingInit = 1;
     AudioRingInit();
     AlsaInit();
+#ifdef SOUND_DEBUG
+	snd_pcm_chmap_query_t **chmaps = snd_pcm_query_chmaps(AlsaPCMHandle);
+
+	if (!chmaps) {
+		fprintf(stderr, "AudioInit: No chmaps found!!!\n");
+	} else {
+		for (int i = 0; chmaps[i] != NULL; i++) {
+			char aname[128];
+			if (snd_pcm_chmap_print(&chmaps[i]->map, sizeof(aname), aname) <= 0)
+				aname[0] = '\0';
+			fprintf(stderr, "AudioInit: chmap %s %d %s found\n",
+				aname, chmaps[i]->map.channels, snd_pcm_chmap_type_name(chmaps[i]->type));
+		}
+	}
+	snd_pcm_free_chmaps(chmaps);
+#endif
     //
     //	Check which channels/rates/formats are supported
     //	FIXME: we force 44.1Khz and 48Khz must be supported equal
