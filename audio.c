@@ -1508,7 +1508,7 @@ found:
 			// restart play-back
 			// no lock needed, can wakeup next time
 #ifdef AV_SYNC_DEBUG
-			fprintf(stderr, "AudioEnqueue: start play-back Threshold %ums RingBuffer %lums AudioVideoIsReady %d\n",
+			fprintf(stderr, "AudioEnqueue: start play-back Threshold %ums RingBuffer %zums AudioVideoIsReady %d\n",
 				(AudioStartThreshold * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
 				(n * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
 				AudioVideoIsReady);
@@ -1608,7 +1608,7 @@ int AudioVideoReady(int64_t pts)
 	// no valid audio known
 	if (!HwSampleRate || !HwChannels || PTS == AV_NOPTS_VALUE) {
 		Debug(3, "audio: a/v start, no valid audio\n");
-		fprintf(stderr, "AudioVideoReady: a/v start, HwSampleRate %d HwChannels %d PTS %s\n",
+		fprintf(stderr, "AudioVideoReady: can't a/v start, HwSampleRate %d HwChannels %d PTS %s\n",
 			HwSampleRate, HwChannels, PTS == AV_NOPTS_VALUE ? "n" : "y");
 		return -1;
 	}
@@ -1623,12 +1623,10 @@ int AudioVideoReady(int64_t pts)
 		PtsTimestamp2String(pts), PtsTimestamp2String(audio_pts),
 		(int)(pts - audio_pts) / 90, AudioRunning ? "running" : "ready");
 
-	fprintf(stderr, "AudioVideoReady: Ringbuffer %lims V %s A %s Diff %dms %s\n",
+	fprintf(stderr, "AudioVideoReady: Ringbuffer %" PRId64 "ms V %s A %s Diff %dms %s\n",
 		(used * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
 		PtsTimestamp2String(pts), PtsTimestamp2String(audio_pts),
 		skip / 90, AudioRunning ? "running" : "ready");
-	fprintf(stderr, "AudioVideoReady: Ringbuffer used %ld PTS %lims %s\n",
-		used, PTS, PtsTimestamp2String(PTS));
 #endif
 	// guard against old PTS
 //	if (skip > 0 && skip < 2000 * 90) {
@@ -1643,7 +1641,7 @@ int AudioVideoReady(int64_t pts)
 			(skip * 1000) / (HwSampleRate * HwChannels *
 			AudioBytesProSample), skip, used);
 #ifdef AV_SYNC_DEBUG
-		fprintf(stderr, "AudioVideoReady: sync advance skip %dms %d available %li\n",
+		fprintf(stderr, "AudioVideoReady: sync advance skip %dms %d available %" PRId64 "\n",
 			(skip * 1000) / (HwSampleRate * HwChannels *
 			AudioBytesProSample), skip, used);
 #endif
@@ -1673,6 +1671,8 @@ void AudioFlushBuffers(void)
 
 	if (AudioRunning)
 		AlsaPlayerStop = 1;
+	else if (PTS != AV_NOPTS_VALUE)
+		AlsaFlushBuffers();
 
 	if (FilterInit)
 		Filterchanged = 1;

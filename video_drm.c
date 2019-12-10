@@ -478,7 +478,7 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 		buf->pix_fmt = primedata->layers[0].format;
 
 		if (drmPrimeFDToHandle(render->fd_drm, primedata->objects[0].fd, &prime_handle))
-			fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %li (%d): %m\n",
+			fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %zu (%d): %m\n",
 				primedata->objects[0].fd, primedata->objects[0].size, errno);
 
 		buf->handle[0] = buf->handle[1] = prime_handle;
@@ -708,6 +708,8 @@ dequeue:
 avready:
 		if (AudioVideoReady(frame->pts)) {
 			usleep(20000);
+			if (render->Closing)
+				goto closing;
 			goto avready;
 		}
 	}

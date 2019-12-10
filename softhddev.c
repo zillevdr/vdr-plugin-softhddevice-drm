@@ -587,13 +587,6 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 		//Debug(3, "audio: pts %#012" PRIx64 "\n", AudioAvPkt->pts);
     }
 
-//	if (MyVideoStream->CodecID == AV_CODEC_ID_NONE ||
-//		(AudioCodecID == AV_CODEC_ID_NONE && AudioAvPkt->pts == AV_NOPTS_VALUE)) {
-
-//		fprintf(stderr, "[PlayAudio] entsorge PTS %s\n", PtsTimestamp2String(AudioAvPkt->pts));
-//		return size;
-//	}
-
     p = data + 9 + n;
     n = size - 9 - n;			// skip pes header
     if (n + AudioAvPkt->stream_index > AudioAvPkt->size) {
@@ -1022,9 +1015,6 @@ int PlayVideo(const uint8_t * data, int size)
 		pts = (int64_t) (data[9] & 0x0E) << 29 | data[10] << 22 | (data[11] &
 			0xFE) << 14 | data[12] << 7 | (data[13] & 0xFE) >> 1;
 	}
-
-//	if (MyVideoStream->CodecID == AV_CODEC_ID_NONE)
-//		fprintf(stderr, "[PlayVideo] PTS %s\n", PtsTimestamp2String(pts));
 
 	n = 9 + data[8];	// PES header size
 	for (i = 0; (i < 2) && (i + 4 < size); i++) {
@@ -1458,6 +1448,7 @@ int SetPlayMode(int play_mode)
 #ifdef DEBUG
 	fprintf(stderr, "SetPlayMode: play_mode %d\n", play_mode);
 #endif
+
 	switch (play_mode) {
 	case 0:			// audio/video from decoder
 		if (MyVideoStream->CodecID != AV_CODEC_ID_NONE) {
