@@ -839,6 +839,7 @@ static void VideoEnqueue(VideoStream * stream, int64_t pts, const void *data,
 
 		avpkt->size = 0;
 		avpkt->pts = pts;
+		avpkt->dts = AV_NOPTS_VALUE;
 	}
 
 	if (avpkt->size + size >= avpkt->buf->size) {

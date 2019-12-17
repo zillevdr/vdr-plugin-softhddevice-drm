@@ -41,7 +41,9 @@
 #include <pthread.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <string.h>
 #include <sys/mman.h>
+//#include <sys/utsname.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
@@ -121,6 +123,8 @@ struct _Drm_Render_
 	int FramesDuped;			///< number of frames duplicated
 	int FramesDropped;			///< number of frames dropped
 	int64_t pts;
+
+	int CodecMode;			/// 0: find codec by id, 1: set rkmpp
 
 	AVFilterGraph *filter_graph;
 	AVFilterContext *buffersrc_ctx, *buffersink_ctx;
@@ -309,6 +313,47 @@ void SetBuf(VideoRender * render, struct drm_buf *buf, uint32_t plane_id)
 	drmModeAtomicFree(ModeReq);
 }
 
+size_t ReadLineFromFile(char *buf, size_t size, char * file)
+{
+	FILE *fd = NULL;
+	size_t character;
+
+	fd = fopen(file, "r");
+	if (fd == NULL) {
+		fprintf(stderr, "Can't open %s\n", file);
+		return 0;
+	}
+
+	character = getline(&buf, &size, fd);
+
+	fclose(fd);
+
+	return character;
+}
+
+void ReadHWPlatform(VideoRender * render)
+{
+	char *buf;
+	size_t bufsize = 128;
+	buf = (char *) calloc(bufsize, sizeof(char));
+
+	if (ReadLineFromFile(buf, bufsize, "/sys/firmware/devicetree/base/compatible")) {
+
+//		if (strstr((char *)&buf[(strlen(buf) + 1)], "sun8i-h3"))	This we need later
+//			printf("main: sun8i-h3 in buf gefunden!\n");
+
+		if (strstr((char *)&buf[(strlen(buf) + 1)], "rockchip")) {
+			if (ReadLineFromFile(buf, bufsize, "/proc/version")) {
+				if (strstr(buf, "4.4."))
+					render->CodecMode = 1;
+			}
+		}
+
+	}
+	free(buf);
+
+}
+
 static int FindDevice(VideoRender * render)
 {
 //	drmVersion *version;
@@ -471,11 +516,14 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 			AVDRMFrameDescriptor *primedata)
 {
 	struct drm_mode_create_dumb creq;
+	uint64_t modifiers[4] = { 0, 0, 0, 0 };
+	uint32_t mod_flags = 0;
 
 	if (primedata) {
 		uint32_t prime_handle;
 
 		buf->pix_fmt = primedata->layers[0].format;
+		modifiers[0] = modifiers[1] = primedata->objects[0].format_modifier;
 
 		if (drmPrimeFDToHandle(render->fd_drm, primedata->objects[0].fd, &prime_handle))
 			fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %zu (%d): %m\n",
@@ -527,14 +575,12 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 		}
 	}
 
-	if (drmModeAddFB2(render->fd_drm, buf->width, buf->height,
-		buf->pix_fmt, buf->handle, buf->pitch, buf->offset, &buf->fb_id, 0)) {
-		fprintf(stderr, "SetupFB: cannot create framebuffer (%d): %m\n", errno);
+	if (drmModeAddFB2WithModifiers(render->fd_drm, buf->width, buf->height, buf->pix_fmt,
+			buf->handle, buf->pitch, buf->offset, modifiers, &buf->fb_id, mod_flags)) {
+
+		fprintf(stderr, "cannot create modifiers framebuffer (%d): %m\n", errno);
 		return -errno;
 	}
-
-//	fprintf(stderr, "SetupFB buffers %i Handle %"PRIu32" fb_id %i %i x %i\n",
-//		render->buffers, buf->handle[0], buf->fb_id, buf->width, buf->height);
 
 	if (primedata)
 		return 0;
@@ -1070,6 +1116,9 @@ void VideoDelRender(VideoRender * render)
 enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render,
     AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
+	if (!render->CodecMode)
+		return AV_PIX_FMT_DRM_PRIME;
+
 	while (*fmt != AV_PIX_FMT_NONE) {
 		if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
 //			fprintf(stderr, "Video_get_format: AV_PIX_FMT_YUV420P Codecname: %s\n",
@@ -1527,6 +1576,9 @@ void VideoInit(VideoRender * render)
 	if (FindDevice(render)){
 		fprintf(stderr, "VideoInit: FindDevice() failed\n");
 	}
+
+	ReadHWPlatform(render);
+
 	render->bufs[0].width = render->bufs[1].width = 0;
 	render->bufs[0].height = render->bufs[1].height = 0;
 	render->bufs[0].pix_fmt = render->bufs[1].pix_fmt = DRM_FORMAT_NV12;
@@ -1648,4 +1700,9 @@ const char *VideoGetDecoderName(const char *codec_name)
 		return "hevc_rkmpp";
 
 	return codec_name;
+}
+
+int VideoCodecMode(VideoRender * render)
+{
+	return render->CodecMode;
 }

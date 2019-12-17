@@ -1089,3 +1089,8 @@ const char *VideoGetDecoderName(const char *codec_name)
 
 	return codec_name;
 }
+
+int VideoCodecMode(VideoRender * render)
+{
+	return 1;
+}

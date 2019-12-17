@@ -109,6 +109,8 @@ extern void VideoThreadExit(void);
 extern void VideoInit(VideoRender *);	///< Setup video module.
 extern void VideoExit(VideoRender *);		///< Cleanup and exit video module.
 
+extern int VideoCodecMode(VideoRender *);
+
 extern const char * VideoGetDecoderName(const char *);
 
 /// @}
