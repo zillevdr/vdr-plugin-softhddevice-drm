@@ -159,7 +159,10 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 			}
 		}
 	}
-
+#ifdef DEBUG
+	fprintf(stderr, "[CodecVideoOpen]: Codec %s found\n",
+		codec->long_name);
+#endif
 	decoder->VideoCtx = avcodec_alloc_context3(codec);
 	if (!decoder->VideoCtx) {
 		fprintf(stderr, "[CodecVideoOpen]: can't open video codec!\n");
@@ -169,7 +172,7 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 	decoder->VideoCtx->get_format = Codec_get_format;
 	decoder->VideoCtx->opaque = decoder;
 
-	decoder->VideoCtx->flags |= AV_CODEC_FLAG_BITEXACT;
+//	decoder->VideoCtx->flags |= AV_CODEC_FLAG_BITEXACT;
 //	decoder->VideoCtx->flags2 |= AV_CODEC_FLAG2_FAST;
 //	decoder->VideoCtx->flags |= AV_CODEC_FLAG_TRUNCATED;
 //	if (codec->capabilities & AV_CODEC_CAP_DR1)

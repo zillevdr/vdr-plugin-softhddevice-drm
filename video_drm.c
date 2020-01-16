@@ -1134,8 +1134,8 @@ enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render
 //			fprintf(stderr, "Video_get_format: AV_PIX_FMT_NV12 Codecname: %s\n",
 //				video_ctx->codec->name);
 			return AV_PIX_FMT_NV12;
-		fmt++;
 		}
+		fmt++;
 	}
 	fprintf(stderr, "Video_get_format: No pixel format found!\n");
 
