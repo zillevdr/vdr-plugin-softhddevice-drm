@@ -19,6 +19,7 @@ CONFIG := #-DDEBUG 				# enable debug output+functions
 #CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
 #CONFIG += -DOSD_DEBUG			# enable debug messages OSD
 #CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
+#CONFIG += -DCODEC_DEBUG		# enable debug messages in video codec configuration
 #CONFIG += -DSTILL_DEBUG=2		# still picture debug verbose level
 
 ### The version number of this plugin (taken from the main source file):

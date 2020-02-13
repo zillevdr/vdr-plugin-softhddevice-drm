@@ -354,9 +354,33 @@ void ReadHWPlatform(VideoRender * render)
 
 }
 
+static int TestCaps(int fd)
+{
+	uint64_t test;
+
+	if (drmGetCap(fd, DRM_CAP_DUMB_BUFFER, &test) < 0 || test == 0)
+		return 1;
+
+	if (drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0)
+		return 1;
+
+	if (drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0)
+		return 1;
+
+	if (drmGetCap(fd, DRM_CAP_PRIME, &test) < 0)
+		return 1;
+
+	if (drmGetCap(fd, DRM_PRIME_CAP_EXPORT, &test) < 0)
+		return 1;
+
+	if (drmGetCap(fd, DRM_PRIME_CAP_IMPORT, &test) < 0)
+		return 1;
+
+	return 0;
+}
+
 static int FindDevice(VideoRender * render)
 {
-//	drmVersion *version;
 	drmModeRes *resources;
 	drmModeConnector *connector;
 	drmModeEncoder *encoder = 0;
@@ -364,8 +388,6 @@ static int FindDevice(VideoRender * render)
 	drmModePlane *plane;
 	drmModePlaneRes *plane_res;
 	uint32_t j, k;
-	uint64_t has_dumb;
-	uint64_t has_prime;
 	int i;
 
 	render->fd_drm = open("/dev/dri/card0", O_RDWR);
@@ -374,27 +396,20 @@ static int FindDevice(VideoRender * render)
 		return -errno;
 	}
 
-//	version = drmGetVersion(render->fd_drm);
-//	fprintf(stderr, "FindDevice: open /dev/dri/card0: %i %s\n", version->name_len, version->name);
+	if (TestCaps(render->fd_drm)) {
+		close(render->fd_drm);
 
-	// check capability
-	if (drmGetCap(render->fd_drm, DRM_CAP_DUMB_BUFFER, &has_dumb) < 0 || has_dumb == 0)
-		fprintf(stderr, "FindDevice: drmGetCap DRM_CAP_DUMB_BUFFER failed or doesn't have dumb buffer\n");
+		render->fd_drm = open("/dev/dri/card1", O_RDWR);
+		if (render->fd_drm < 0) {
+			fprintf(stderr, "FindDevice: cannot open /dev/dri/card1: %m\n");
+			return -errno;
+		}
 
-	if (drmSetClientCap(render->fd_drm, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0)
-		fprintf(stderr, "FindDevice: DRM_CLIENT_CAP_UNIVERSAL_PLANES not available.\n");
-
-	if (drmSetClientCap(render->fd_drm, DRM_CLIENT_CAP_ATOMIC, 1) != 0)
-		fprintf(stderr, "FindDevice: DRM_CLIENT_CAP_ATOMIC not available.\n");
-
-	if (drmGetCap(render->fd_drm, DRM_CAP_PRIME, &has_prime) < 0)
-		fprintf(stderr, "FindDevice: DRM_CAP_PRIME not available.\n");
-
-	if (drmGetCap(render->fd_drm, DRM_PRIME_CAP_EXPORT, &has_prime) < 0)
-		fprintf(stderr, "FindDevice: DRM_PRIME_CAP_EXPORT not available.\n");
-
-	if (drmGetCap(render->fd_drm, DRM_PRIME_CAP_IMPORT, &has_prime) < 0)
-		fprintf(stderr, "FindDevice: DRM_PRIME_CAP_IMPORT not available.\n");
+		if (TestCaps(render->fd_drm)) {
+			return -1;
+			fprintf(stderr, "FindDevice: No DRM device available!\n");
+		}
+	}
 
 	if ((resources = drmModeGetResources(render->fd_drm)) == NULL){
 		fprintf(stderr, "FindDevice: cannot retrieve DRM resources (%d): %m\n",	errno);
@@ -1116,8 +1131,11 @@ void VideoDelRender(VideoRender * render)
 enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render,
     AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
-	if (!render->CodecMode)
+	if (!render->CodecMode && video_ctx->codec_id != AV_CODEC_ID_MPEG2VIDEO) {
+//		fprintf(stderr, "Video_get_format: return AV_PIX_FMT_DRM_PRIME Codecname: %s\n",
+//			video_ctx->codec->name);
 		return AV_PIX_FMT_DRM_PRIME;
+	}
 
 	while (*fmt != AV_PIX_FMT_NONE) {
 		if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
@@ -1158,7 +1176,7 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 
 			if (SetupFB(render, buf, NULL))
 				fprintf(stderr, "EnqueueFB: SetupFB FB %i x %i failed\n", buf->width, buf->height);
-			render->buffers++;
+			else render->buffers++;
 
 			if (drmPrimeHandleToFD(render->fd_drm, buf->handle[0], 0, &buf->fd_prime))
 				fprintf(stderr, "EnqueueFB: Failed to retrieve the Prime FD (%d): %m\n",
@@ -1303,7 +1321,7 @@ closing:
 /**
 **	Filter init.
 */
-void InitFilter(VideoRender * render, const AVCodecContext * video_ctx,
+void VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 		AVFrame * frame)
 {
 	char args[512];
@@ -1315,28 +1333,37 @@ void InitFilter(VideoRender * render, const AVCodecContext * video_ctx,
 
 //	const char *filter_descr = "yadif=1:-1:0";
 	const char *filter_descr = "bwdif=1:-1:0";
+//	const char *filter_descr = "deinterlace_v4l2m2m";
 
 #if LIBAVFILTER_VERSION_INT < AV_VERSION_INT(7,16,100)
 	avfilter_register_all();
 #endif
 
 	snprintf(args, sizeof(args),
+//		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:sws_param=flags=2",
 		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
 		video_ctx->width, video_ctx->height, frame->format,
 		video_ctx->time_base.num, video_ctx->time_base.den,
 		video_ctx->sample_aspect_ratio.num, video_ctx->sample_aspect_ratio.den);
 
-	if (avfilter_graph_create_filter(&render->buffersrc_ctx, buffersrc, "in",
+	if (avfilter_graph_create_filter(&render->buffersrc_ctx, buffersrc, "src",
 		args, NULL, render->filter_graph) < 0)
-			fprintf(stderr, "InitFilter: Cannot create buffer source\n");
+			fprintf(stderr, "VideoFilterInit: Cannot create buffer source\n");
+
+	AVBufferSrcParameters *par = av_buffersrc_parameters_alloc();
+	par->format = AV_PIX_FMT_NONE;
+	par->hw_frames_ctx = frame->hw_frames_ctx;
+	if (av_buffersrc_parameters_set(render->buffersrc_ctx, par) < 0)
+		fprintf(stderr, "VideoFilterInit: Cannot av_buffersrc_parameters_set\n");
+	av_free(par);
 
 	AVBufferSinkParams *params = av_buffersink_params_alloc();
-	enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_NV12, AV_PIX_FMT_NONE };
+	enum AVPixelFormat pix_fmts[] = { frame->format, AV_PIX_FMT_NONE };
 	params->pixel_fmts = pix_fmts;
 
 	if (avfilter_graph_create_filter(&render->buffersink_ctx, buffersink, "out",
 		NULL, params, render->filter_graph) < 0)
-			fprintf(stderr, "InitFilter: Cannot create buffer sink\n");
+			fprintf(stderr, "VideoFilterInit: Cannot create buffer sink\n");
 	av_free(params);
 
 	outputs->name       = av_strdup("in");
@@ -1351,10 +1378,10 @@ void InitFilter(VideoRender * render, const AVCodecContext * video_ctx,
 
 	if ((avfilter_graph_parse_ptr(render->filter_graph, filter_descr,
 		&inputs, &outputs, NULL)) < 0)
-			fprintf(stderr, "InitFilter: avfilter_graph_parse_ptr failed\n");
+			fprintf(stderr, "VideoFilterInit: avfilter_graph_parse_ptr failed\n");
 
 	if ((avfilter_graph_config(render->filter_graph, NULL)) < 0)
-			fprintf(stderr, "InitFilter: avfilter_graph_config failed\n");
+			fprintf(stderr, "VideoFilterInit: avfilter_graph_config failed\n");
 
 	avfilter_inout_free(&inputs);
 	avfilter_inout_free(&outputs);
@@ -1375,9 +1402,10 @@ void VideoRenderFrame(VideoRender * render,
 		return;
 	}
 
-	if (frame->interlaced_frame && SWDeinterlacer) {
+	if (frame->interlaced_frame && SWDeinterlacer &&
+		frame->format == AV_PIX_FMT_YUV420P) {
 		if (!FilterThread) {
-			InitFilter(render, video_ctx, frame);
+			VideoFilterInit(render, video_ctx, frame);
 			pthread_create(&FilterThread, NULL, FilterHandlerThread, render);
 			pthread_setname_np(FilterThread, "softhddev deint");
 		}
@@ -1685,6 +1713,7 @@ void VideoExit(VideoRender * render)
 
 		DestroyFB(render->fd_drm, &render->buf_black);
 		DestroyFB(render->fd_drm, &render->buf_osd);
+		close(render->fd_drm);
 	}
 }
 

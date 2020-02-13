@@ -133,16 +133,16 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 	enum AVHWDeviceType type = 0;
 	static AVBufferRef *hw_device_ctx = NULL;
 
-	if (VideoCodecMode(decoder->Render)) {
+	if (VideoCodecMode(decoder->Render) || codec_id == AV_CODEC_ID_MPEG2VIDEO) {
 		if (!(codec = avcodec_find_decoder_by_name(VideoGetDecoderName(
 			avcodec_get_name(codec_id)))))
 
-			fprintf(stderr, "[CodecVideoOpen] The video codec %s is not present in libavcodec\n",
+			fprintf(stderr, "CodecVideoOpen: The video codec %s is not present in libavcodec\n",
 				VideoGetDecoderName(avcodec_get_name(codec_id)));
 	} else {
 
 		if (!(codec = avcodec_find_decoder(codec_id)))
-			fprintf(stderr, "[CodecVideoOpen] The video codec %s is not present in libavcodec\n",
+			fprintf(stderr, "CodecVideoOpen: The video codec %s is not present in libavcodec\n",
 				avcodec_get_name(codec_id));
 
 		for (int n = 0; ; n++) {
@@ -152,20 +152,21 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 			if (cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
 				cfg->device_type == AV_HWDEVICE_TYPE_DRM) {
 
-//				fprintf(stderr, "HW codec %s gefunden\n",
-//					av_hwdevice_get_type_name(cfg->device_type));
+#ifdef CODEC_DEBUG
+				fprintf(stderr, "CodecVideoOpen: HW codec %s gefunden\n",
+					av_hwdevice_get_type_name(cfg->device_type));
+#endif
 				type = cfg->device_type;
 				break;
 			}
 		}
 	}
-#ifdef DEBUG
-	fprintf(stderr, "[CodecVideoOpen]: Codec %s found\n",
-		codec->long_name);
+#ifdef CODEC_DEBUG
+	fprintf(stderr, "CodecVideoOpen: Codec %s found\n", codec->long_name);
 #endif
 	decoder->VideoCtx = avcodec_alloc_context3(codec);
 	if (!decoder->VideoCtx) {
-		fprintf(stderr, "[CodecVideoOpen]: can't open video codec!\n");
+		fprintf(stderr, "CodecVideoOpen: can't open video codec!\n");
 	}
 
 	decoder->VideoCtx->codec_id = codec_id;
@@ -180,11 +181,16 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 	if (codec->capabilities & AV_CODEC_CAP_FRAME_THREADS ||
 		AV_CODEC_CAP_SLICE_THREADS) {
 		decoder->VideoCtx->thread_count = 4;
-//		fprintf(stderr, "[CodecVideoOpen] codec use threads\n");
+#ifdef CODEC_DEBUG
+		fprintf(stderr, "CodecVideoOpen: decoder use %d threads\n",
+			decoder->VideoCtx->thread_count);
+#endif
 	}
 	if (codec->capabilities & AV_CODEC_CAP_SLICE_THREADS){
 		decoder->VideoCtx->thread_type = FF_THREAD_SLICE;
-//		fprintf(stderr, "[CodecVideoOpen] codec use THREAD_SLICE threads\n");
+#ifdef CODEC_DEBUG
+		fprintf(stderr, "CodecVideoOpen: decoder use THREAD_SLICE threads\n");
+#endif
 	}
 
 	if (type) {
@@ -193,15 +199,14 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 //		decoder->VideoCtx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
 
 		if (av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0) < 0)
-//		if (av_hwdevice_ctx_create(&hw_device_ctx, type, "/dev/dri/card0", NULL, 0) < 0)
-			fprintf(stderr, "[CodecVideoOpen] Error init the HW decoder: ");
+			fprintf(stderr, "CodecVideoOpen: Error init the HW decoder");
 		else
 			decoder->VideoCtx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
 	}
 
 //	pthread_mutex_lock(&CodecLockMutex);
 	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0)
-		fprintf(stderr, "[CodecVideoOpen] Error opening the decoder: ");
+		fprintf(stderr, "CodecVideoOpen: Error opening the decoder");
 //	pthread_mutex_unlock(&CodecLockMutex);
 }
 
@@ -213,7 +218,7 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 void CodecVideoClose(VideoDecoder * decoder)
 {
 #ifdef DEBUG
-		fprintf(stderr, "[CodecVideoClose]\n");
+		fprintf(stderr, "CodecVideoClose:\n");
 #endif
 	if (decoder->VideoCtx) {
 		avcodec_close(decoder->VideoCtx);

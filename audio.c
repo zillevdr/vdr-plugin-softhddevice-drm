@@ -1433,7 +1433,7 @@ found:
 
 	if (AlsaPlayerStop) {
 		av_frame_unref(frame);
-		fprintf(stderr, "AudioEnqueue: AlsaPlayerStop!!!\n");
+//		fprintf(stderr, "AudioEnqueue: AlsaPlayerStop!!!\n");
 		return;
 	}
 
