@@ -35,6 +35,7 @@
 #include <libintl.h>
 #define _(str) gettext(str)		///< gettext shortcut
 #define _N(str) str			///< gettext_noop shortcut
+#include <pthread.h>
 
 #include <libavcodec/avcodec.h>
 
@@ -51,6 +52,8 @@
 //----------------------------------------------------------------------------
 //	Global
 //----------------------------------------------------------------------------
+
+static pthread_mutex_t CodecLockMutex;
 
 //----------------------------------------------------------------------------
 //	Video
@@ -204,10 +207,8 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 			decoder->VideoCtx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
 	}
 
-//	pthread_mutex_lock(&CodecLockMutex);
 	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0)
 		fprintf(stderr, "CodecVideoOpen: Error opening the decoder");
-//	pthread_mutex_unlock(&CodecLockMutex);
 }
 
 /**
@@ -218,14 +219,16 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 void CodecVideoClose(VideoDecoder * decoder)
 {
 #ifdef DEBUG
-		fprintf(stderr, "CodecVideoClose:\n");
+		fprintf(stderr, "CodecVideoClose: VideoCtx %p\n", decoder->VideoCtx);
 #endif
+	pthread_mutex_lock(&CodecLockMutex);
 	if (decoder->VideoCtx) {
 		avcodec_close(decoder->VideoCtx);
 		avcodec_free_context(&decoder->VideoCtx);
 		av_freep(&decoder->VideoCtx);
 		decoder->VideoCtx = NULL;
 	}
+	pthread_mutex_unlock(&CodecLockMutex);
 }
 
 /**
@@ -233,6 +236,8 @@ void CodecVideoClose(VideoDecoder * decoder)
 **
 **	@param decoder	video decoder data
 **	@param avpkt	video packet
+**
+**	@returns 1 if packet must send again.
 */
 int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 {
@@ -296,24 +301,38 @@ int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 	return 0;
 }
 
-void CodecVideoReceiveFrame(VideoDecoder * decoder)
+int CodecVideoReceiveFrame(VideoDecoder * decoder, int no_deint)
 {
 	int ret;
 
 	if (!(decoder->Frame = av_frame_alloc())) {
-		Fatal(_("codec: can't allocate decoder frame\n"));
+		Fatal(_("CodecVideoReceiveFrame: can't allocate decoder frame\n"));
 	}
 
 	ret = avcodec_receive_frame(decoder->VideoCtx, decoder->Frame);
 
 	if (!ret) {
+		if (no_deint) {
+			decoder->Frame->interlaced_frame = 0;
+#ifdef STILL_DEBUG
+			fprintf(stderr, "CodecVideoReceiveFrame: interlaced_frame = 0\n");
+#endif
+		}
 		VideoRenderFrame(decoder->Render, decoder->VideoCtx, decoder->Frame);
 	} else {
 		av_frame_free(&decoder->Frame);
 	}
 
+#ifdef DEBUG
 	if (ret == AVERROR(EINVAL))
 		fprintf(stderr, "CodecVideoReceiveFrame: Error receive frame AVERROR(EINVAL)\n");
+	if (ret == AVERROR(EAGAIN))
+		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR(EAGAIN)\n");
+#endif
+
+	if (ret == AVERROR(EAGAIN))
+		return 1;
+	return 0;
 }
 
 /**
@@ -324,11 +343,13 @@ void CodecVideoReceiveFrame(VideoDecoder * decoder)
 void CodecVideoFlushBuffers(VideoDecoder * decoder)
 {
 #ifdef DEBUG
-	fprintf(stderr, "CodecVideoFlushBuffers: \n");
+	fprintf(stderr, "CodecVideoFlushBuffers: VideoCtx %p\n", decoder->VideoCtx);
 #endif
+	pthread_mutex_lock(&CodecLockMutex);
 	if (decoder->VideoCtx) {
 		avcodec_flush_buffers(decoder->VideoCtx);
 	}
+	pthread_mutex_unlock(&CodecLockMutex);
 }
 
 //----------------------------------------------------------------------------
@@ -455,7 +476,7 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 void CodecAudioClose(AudioDecoder * audio_decoder)
 {
 #ifdef DEBUG
-		fprintf(stderr, "[CodecAudioClose]\n");
+		fprintf(stderr, "CodecAudioClose\n");
 #endif
 	if (audio_decoder->AudioCtx) {
 		avcodec_close(audio_decoder->AudioCtx);
@@ -512,8 +533,6 @@ void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
     // FIXME: don't need to decode pass-through codecs
     frame = audio_decoder->Frame;
     av_frame_unref(frame);
-
-//	fprintf(stderr, "CodecAudioDecode: \n");
 
     got_frame = 0;
     n = avcodec_decode_audio4(audio_ctx, frame, &got_frame,
@@ -610,6 +629,7 @@ void CodecInit(void)
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58,18,100)
     avcodec_register_all();		// register all formats and codecs
 #endif
+	pthread_mutex_init(&CodecLockMutex, NULL);
 }
 
 /**
@@ -617,4 +637,5 @@ void CodecInit(void)
 */
 void CodecExit(void)
 {
+	pthread_mutex_destroy(&CodecLockMutex);
 }

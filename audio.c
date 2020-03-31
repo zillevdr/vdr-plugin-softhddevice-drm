@@ -796,7 +796,9 @@ static void AlsaFlushBuffers(void)
 	int err;
 	snd_pcm_state_t state;
 
-//	fprintf(stderr, "AlsaFlushBuffers: AlsaFlushBuffers\n");
+#ifdef DEBUG
+	fprintf(stderr, "AlsaFlushBuffers: AlsaFlushBuffers\n");
+#endif
 
 	state = snd_pcm_state(AlsaPCMHandle);
 	Debug(3, "audio/alsa: flush state %s\n", snd_pcm_state_name(state));
@@ -813,6 +815,7 @@ static void AlsaFlushBuffers(void)
 	}
 
 	RingBufferReset(AudioRingBuffer);
+	AudioSkip = 0;
 	PTS = AV_NOPTS_VALUE;
 	AudioVideoIsReady = 0;
 }
@@ -1303,19 +1306,22 @@ static void *AudioPlayHandlerThread(void *dummy)
 		}
 
 		Debug(3, "audio: wait on start condition\n");
-		AlsaFlushBuffers();
-		AudioResetCompressor();
-		AudioResetNormalizer();
+		if (!AudioPaused) {
+//			fprintf(stderr, "AudioPlayHandlerThread: => AlsaFlushBuffers\n");
+			AlsaFlushBuffers();
+			AudioResetCompressor();
+			AudioResetNormalizer();
+		}
 		AudioRunning = 0;
 		AlsaPlayerStop = 0;
 		pthread_mutex_lock(&AudioStartMutex);
-#ifdef AV_SYNC_DEBUG
+#ifdef DEBUG
 		fprintf(stderr, "AudioPlayHandlerThread: pthread_cond_wait\n");
 #endif
 		pthread_cond_wait(&AudioStartCond, &AudioStartMutex);
 		pthread_mutex_unlock(&AudioStartMutex);
 
-#ifdef AV_SYNC_DEBUG
+#ifdef DEBUG
 		fprintf(stderr, "AudioPlayHandlerThread: nach pthread_cond_wait ----> %dms start\n",
 			(AudioUsedBytes() * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample));
 		Debug(3, "audio: ----> %dms start\n", (AudioUsedBytes() * 1000)
@@ -1477,21 +1483,20 @@ found:
 	PTS = frame->pts + ((frame->nb_samples * 1000 * 90) / frame->sample_rate);
 	pthread_mutex_unlock(&AudioRbMutex);
 
-	if (!AudioRunning) {		// check, if we can start the thread
+	if (!AudioRunning && !AudioPaused) {		// check, if we can start the thread
 		int skip;
 
 		n = RingBufferUsedBytes(AudioRingBuffer);
 		skip = AudioSkip;
 		// FIXME: round to packet size
 
-		Debug(3, "audio: start? %4zdms skip %dms\n", (n * 1000)
+		Debug(3, "audio: start? in Rb %4zdms to skip %dms\n", (n * 1000)
 			/ (HwSampleRate * HwChannels * AudioBytesProSample),
 			(skip * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample));
 #ifdef AV_SYNC_DEBUG
-		fprintf(stderr, "AudioEnqueue: start? %4zdms skip %dms AudioSkip %dms\n",
+		fprintf(stderr, "AudioEnqueue: start? in Rb %4zdms to skip %dms\n",
 			(n * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
-			(skip * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
-			(AudioSkip * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample));
+			(skip * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample));
 #endif
 		if (skip) {
 			if (n < (unsigned)skip) {
@@ -1608,17 +1613,23 @@ int AudioVideoReady(int64_t pts)
 	// no valid audio known
 	if (!HwSampleRate || !HwChannels || PTS == AV_NOPTS_VALUE) {
 		Debug(3, "audio: a/v start, no valid audio\n");
-		fprintf(stderr, "AudioVideoReady: can't a/v start, HwSampleRate %d HwChannels %d PTS %s\n",
-			HwSampleRate, HwChannels, PTS == AV_NOPTS_VALUE ? "n" : "y");
+//		fprintf(stderr, "AudioVideoReady: can't a/v start, HwSampleRate %d HwChannels %d PTS %s\n",
+//			HwSampleRate, HwChannels, PTS == AV_NOPTS_VALUE ? "n" : "y");
 		return -1;
 	}
 
 	used = RingBufferUsedBytes(AudioRingBuffer);
 	audio_pts = PTS - ((used * 90 * 1000) / (HwSampleRate *
 		HwChannels * AudioBytesProSample));
+
+	if (pts < audio_pts) {
+		fprintf(stderr, "AudioVideoReady: audio is behind video V %s A %s\n",
+			PtsTimestamp2String(pts), PtsTimestamp2String(audio_pts));
+	}
+
 	skip = pts - audio_pts - VideoAudioDelay;
 #ifdef AV_SYNC_DEBUG
-	Debug(3, "AudioVideoReady: a/v sync buf(%4llims) %s|%s = %dms %s\n",
+	Debug(3, "AudioVideoReady: a/v sync buf(%" PRId64 "ms) %s|%s = %dms %s\n",
 		(used * 1000) / (HwSampleRate * HwChannels * AudioBytesProSample),
 		PtsTimestamp2String(pts), PtsTimestamp2String(audio_pts),
 		(int)(pts - audio_pts) / 90, AudioRunning ? "running" : "ready");
@@ -1628,8 +1639,6 @@ int AudioVideoReady(int64_t pts)
 		PtsTimestamp2String(pts), PtsTimestamp2String(audio_pts),
 		skip / 90, AudioRunning ? "running" : "ready");
 #endif
-	// guard against old PTS
-//	if (skip > 0 && skip < 2000 * 90) {
 	if (skip > 0) {
 		skip = (((int64_t)skip * HwSampleRate) / (1000 * 90))
 			* HwChannels * AudioBytesProSample;
@@ -1637,7 +1646,7 @@ int AudioVideoReady(int64_t pts)
 			AudioSkip = skip - used;
 			skip = used;
 		}
-		Debug(3, "audio: sync advance %dms %d/%lli\n",
+		Debug(3, "audio: sync advance %dms %d/%" PRId64 "\n",
 			(skip * 1000) / (HwSampleRate * HwChannels *
 			AudioBytesProSample), skip, used);
 #ifdef AV_SYNC_DEBUG
@@ -1667,15 +1676,16 @@ int AudioVideoReady(int64_t pts)
 */
 void AudioFlushBuffers(void)
 {
-//	fprintf(stderr, "AudioFlushBuffers: AudioFlushBuffers\n");
+#ifdef DEBUG
+	fprintf(stderr, "AudioFlushBuffers: AudioFlushBuffers\n");
+#endif
 
 	if (AudioRunning)
 		AlsaPlayerStop = 1;
 	else if (PTS != AV_NOPTS_VALUE)
 		AlsaFlushBuffers();
 
-	if (FilterInit)
-		Filterchanged = 1;
+	Filterchanged = 1;
 }
 
 /**
@@ -1728,7 +1738,7 @@ int64_t AudioGetClock(void)
 	// delay in frames in alsa + kernel buffers
 	if (snd_pcm_delay(AlsaPCMHandle, &delay) < 0) {
 		//Debug(3, "audio/alsa: no hw delay\n");
-		printf("audio/alsa: no hw delay\n");
+		printf("AudioGetClock: no hw delay\n");
 		delay = 0L;
 	}
 
@@ -1783,7 +1793,10 @@ void AudioPlay(void)
 	}
 	Debug(3, "audio: resumed\n");
 	AudioPaused = 0;
-//    AudioEnqueue(NULL, 0, NULL);		// wakeup thread
+	if (AudioStartThreshold < RingBufferUsedBytes(AudioRingBuffer)) {
+		fprintf(stderr, "AudioPlay: AudioStartThreshold < RingBufferUsedBytes, start play\n");
+		pthread_cond_signal(&AudioStartCond);
+	}
 }
 
 /**

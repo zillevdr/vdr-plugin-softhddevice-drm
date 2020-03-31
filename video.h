@@ -78,11 +78,14 @@ extern void VideoOsdDrawARGB(VideoRender *, int, int, int,
     /// Set closing flag.
 extern void VideoSetClosing(VideoRender *);
 
-    /// Reset start of frame counter
-extern void VideoResetStart(VideoRender *);
-
     /// Set trick play speed.
 extern void VideoSetTrickSpeed(VideoRender *, int);
+
+extern void VideoFlushBuffers(VideoRender *);
+
+extern void VideoPause(VideoRender *);
+
+extern void VideoPlay(VideoRender *);
 
     /// Grab screen.
 extern uint8_t *VideoGrab(int *, int *, int *, int);

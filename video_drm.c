@@ -74,16 +74,24 @@ int VideoAudioDelay;
 int SWDeinterlacer;
 int hdr;
 
-static pthread_t DecodeThread;		///< video decode thread
+static pthread_cond_t DecodeCondition;
+static pthread_mutex_t DecodeMutex;
+
+static pthread_cond_t PauseCondition;
+static pthread_mutex_t PauseMutex;
+
+static pthread_cond_t WaitCleanCondition;
+static pthread_mutex_t WaitCleanMutex;
+
 static pthread_mutex_t VideoLockMutex;	///< video lock mutex
-static pthread_mutex_t VideoDeintMutex;	///< video condition mutex
+
+static pthread_mutex_t VideoDeintMutex;	///< video deinterlace queue mutex
+
+static pthread_t DecodeThread;		///< video decode thread
 
 static pthread_t DisplayThread;
 
 static pthread_t FilterThread;
-
-static pthread_cond_t cond;
-static pthread_mutex_t cond_mutex;
 
 //----------------------------------------------------------------------------
 //	Common Functions
@@ -116,6 +124,7 @@ struct _Drm_Render_
 	VideoStream *Stream;		///< video stream
 	int TrickSpeed;			///< current trick speed
 //	int TrickCounter;			///< current trick speed counter
+	int VideoPaused;
 	int Closing;			///< flag about closing current stream
 	int Deint_Close;
 
@@ -140,7 +149,7 @@ struct _Drm_Render_
 	int use_zpos;
 	uint64_t zpos_overlay;
 	uint64_t zpos_primary;
-	uint32_t connector_id, crtc_id, video_plane, osd_plane, front_buf;
+	uint32_t connector_id, crtc_id, video_plane, osd_plane;
 	AVFrame *lastframe;
 	int buffers;
 	int enqueue_buffer;
@@ -417,7 +426,7 @@ static int FindDevice(VideoRender * render)
 	}
 
 #ifdef DRM_DEBUG
-	Info(_("[FindDevice] DRM have %i connectors, %i crtcs, %i encoders\n"),
+	Info(_("FindDevice: DRM have %i connectors, %i crtcs, %i encoders\n"),
 		resources->count_connectors, resources->count_crtcs,
 		resources->count_encoders);
 #endif
@@ -478,7 +487,7 @@ static int FindDevice(VideoRender * render)
 							DRM_MODE_OBJECT_PLANE, "zpos");
 
 #ifdef DRM_DEBUG // If more then 2 crtcs this must rewriten!!!
-		Info(_("[FindDevice] Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"),
+		Info(_("FindDevice: Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"),
 			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i],
 			(type == DRM_PLANE_TYPE_PRIMARY) ? "primary plane" :
 			(type == DRM_PLANE_TYPE_OVERLAY) ? "overlay plane" :
@@ -520,7 +529,7 @@ static int FindDevice(VideoRender * render)
 	drmModeFreeResources(resources);
 
 #ifdef DRM_DEBUG
-	Info(_("[FindDevice] DRM setup CRTC: %i video_plane: %i osd_plane %i\n"),
+	Info(_("FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i\n"),
 		render->crtc_id, render->video_plane, render->osd_plane);
 #endif
 
@@ -593,7 +602,7 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 	if (drmModeAddFB2WithModifiers(render->fd_drm, buf->width, buf->height, buf->pix_fmt,
 			buf->handle, buf->pitch, buf->offset, modifiers, &buf->fb_id, mod_flags)) {
 
-		fprintf(stderr, "cannot create modifiers framebuffer (%d): %m\n", errno);
+		fprintf(stderr, "SetupFB: cannot create modifiers framebuffer (%d): %m\n", errno);
 		return -errno;
 	}
 
@@ -662,6 +671,11 @@ static void CleanDisplayThread(VideoRender * render, AVFrame *frame)
 {
 	int i;
 
+#ifdef DEBUG
+	fprintf(stderr, "CleanDisplayThread: DecodeCondition for clean decode thread\n");
+#endif
+	pthread_cond_signal(&DecodeCondition);
+
 	if (render->lastframe) {
 		av_frame_free(&render->lastframe);
 	}
@@ -688,15 +702,17 @@ dequeue:
 		}
 		render->buffers = 0;
 		render->enqueue_buffer = 0;
-		render->front_buf = 0;
 	}
 
-	pthread_mutex_lock(&cond_mutex);
-	pthread_cond_signal(&cond);
-	pthread_mutex_unlock(&cond_mutex);
+#ifdef DEBUG
+	fprintf(stderr, "CleanDisplayThread: WaitCleanCondition\n");
+#endif
+	pthread_cond_signal(&WaitCleanCondition);
 
 	render->Closing = 0;
-//	fprintf(stderr, "CleanDisplayThread: DRM cleaned.\n");
+#ifdef DEBUG
+	fprintf(stderr, "CleanDisplayThread: DRM cleaned.\n");
+#endif
 }
 
 ///
@@ -713,6 +729,9 @@ static void Frame2Display(VideoRender * render)
 	if (render->Closing) {
 closing:
 		// set a black FB
+#ifdef DEBUG
+	fprintf(stderr, "Frame2Display: set a black FB\n");
+#endif
 		SetBuf(render, &render->buf_black, render->video_plane);
 		buf = &render->buf_black;
 		goto page_flip;
@@ -721,7 +740,8 @@ closing:
 dequeue:
 	while ((atomic_read(&render->FramesFilled)) == 0 ) {
 #ifdef DEBUG
-		fprintf(stderr, "Frame2Display: Kein Frame in der Queue!!!\n");
+		fprintf(stderr, "Frame2Display: Kein Frame in der Queue!!! pkts %d AudioUsedBytes %d\n",
+			VideoGetPackets(render->Stream), AudioUsedBytes());
 #endif
 		usleep(20000);
 	}
@@ -734,9 +754,7 @@ dequeue:
 		if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX &&
 			atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
 
-			pthread_mutex_lock(&cond_mutex);
-			pthread_cond_signal(&cond);
-			pthread_mutex_unlock(&cond_mutex);
+			pthread_cond_signal(&DecodeCondition);
 		}
 	} else {
 		frame = NULL;
@@ -765,7 +783,7 @@ dequeue:
 		render->buffers++;
 	}
 
-	if(!render->StartCounter && !render->Closing) {
+	if(!render->StartCounter && !render->Closing && !render->TrickSpeed) {
 avready:
 		if (AudioVideoReady(frame->pts)) {
 			usleep(20000);
@@ -774,6 +792,7 @@ avready:
 			goto avready;
 		}
 	}
+
 	render->pts = frame->pts;
 
 audioclock:
@@ -788,7 +807,7 @@ audioclock:
 	}
 	int diff = frame->pts - audio_clock - VideoAudioDelay;
 
-	if ((diff < -25 * 90 || diff > 1500 * 90) && !render->TrickSpeed) {
+	if (diff < -25 * 90 && !render->TrickSpeed) {
 		render->FramesDropped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDropped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
@@ -810,7 +829,7 @@ audioclock:
 		goto dequeue;
 	}
 
-	if(diff > 55 * 90 && !render->TrickSpeed) {
+	if (diff > 55 * 90 && !render->TrickSpeed) {
 		render->FramesDuped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDuped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
@@ -867,7 +886,6 @@ page_flip:
 #endif
 
 	drmModeAtomicFree(ModeReq);
-	render->front_buf ^= 1;
 }
 
 ///
@@ -885,6 +903,18 @@ static void *DisplayHandlerThread(void * arg)
 	}
 
 	while (1) {
+		if (render->VideoPaused) {
+			pthread_mutex_lock(&PauseMutex);
+#ifdef DEBUG
+			fprintf(stderr, "DisplayHandlerThread: pthread_cond_wait\n");
+#endif
+			pthread_cond_wait(&PauseCondition, &PauseMutex);
+			pthread_mutex_unlock(&PauseMutex);
+#ifdef DEBUG
+			fprintf(stderr, "DisplayHandlerThread: NACH pthread_cond_wait\n");
+#endif
+		}
+
 		pthread_testcancel();
 
 		if (atomic_read(&render->FramesFilled)) {
@@ -899,7 +929,11 @@ static void *DisplayHandlerThread(void * arg)
 			render->lastframe = render->act_buf->frame;
 
 		} else {
-			usleep(20000);
+			if (render->buf_black.fb_id != render->act_buf->fb_id &&
+				render->Closing) {
+
+				Frame2Display(render);
+			} else usleep(20000);
 		}
 
 		if (render->buf_black.fb_id == render->act_buf->fb_id &&
@@ -994,15 +1028,12 @@ static void *DecodeHandlerThread(void *arg)
 		// manage fill frame output ring buffer
 		if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX &&
 			atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
-#ifdef DEBUG
-			if (render->Closing)
-				fprintf(stderr, "DecodeHandlerThread: render->Closing\n");
-#endif
+
 			ret = VideoDecodeInput(render->Stream);
 		} else {
-			pthread_mutex_lock(&cond_mutex);
-			pthread_cond_wait(&cond, &cond_mutex);
-			pthread_mutex_unlock(&cond_mutex);
+			pthread_mutex_lock(&DecodeMutex);
+			pthread_cond_wait(&DecodeCondition, &DecodeMutex);
+			pthread_mutex_unlock(&DecodeMutex);
 
 			ret = VideoDecodeInput(render->Stream);
 		}
@@ -1020,8 +1051,12 @@ void VideoThreadExit(void)
 {
 	void *retval;
 
+	Debug(3, "video: video thread canceled\n");
+
 	if (DecodeThread) {
-		Debug(3, "video: video thread canceled\n");
+#ifdef DEBUG
+		fprintf(stderr, "VideoThreadExit: cancel decode thread\n");
+#endif
 		// FIXME: can't cancel locked
 		if (pthread_cancel(DecodeThread)) {
 			Error(_("video: can't queue cancel video display thread\n"));
@@ -1032,13 +1067,20 @@ void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		DecodeThread = 0;
-		pthread_cond_destroy(&cond);
-		pthread_mutex_destroy(&cond_mutex);
+		pthread_cond_destroy(&DecodeCondition);
+		pthread_mutex_destroy(&DecodeMutex);
+
+		pthread_cond_destroy(&PauseCondition);
+		pthread_mutex_destroy(&PauseMutex);
+
 		pthread_mutex_destroy(&VideoDeintMutex);
 		pthread_mutex_destroy(&VideoLockMutex);
 	}
 
 	if (DisplayThread) {
+#ifdef DEBUG
+		fprintf(stderr, "VideoThreadExit: cancel display thread\n");
+#endif
 		if (pthread_cancel(DisplayThread)) {
 			Error(_("video: can't cancel DisplayHandlerThread thread\n"));
 			fprintf(stderr, "VideoThreadExit: can't cancel DisplayHandlerThread thread\n");
@@ -1058,9 +1100,19 @@ void VideoThreadExit(void)
 ///
 void VideoThreadWakeup(VideoRender * render)
 {
+#ifdef DEBUG
+	fprintf(stderr, "VideoThreadWakeup: VideoThreadWakeup\n");
+#endif
 	if (!DecodeThread) {
-		pthread_cond_init(&cond,NULL);
-		pthread_mutex_init(&cond_mutex, NULL);
+		pthread_cond_init(&DecodeCondition,NULL);
+		pthread_mutex_init(&DecodeMutex, NULL);
+
+		pthread_cond_init(&PauseCondition,NULL);
+		pthread_mutex_init(&PauseMutex, NULL);
+
+		pthread_cond_init(&WaitCleanCondition,NULL);
+		pthread_mutex_init(&WaitCleanMutex, NULL);
+
 		pthread_mutex_init(&VideoDeintMutex, NULL);
 		pthread_mutex_init(&VideoLockMutex, NULL);
 		pthread_create(&DecodeThread, NULL, DecodeHandlerThread, render);
@@ -1096,6 +1148,7 @@ VideoRender *VideoNewRender(VideoStream * stream)
 	render->Stream = stream;
 	render->Closing = 0;
 	render->enqueue_buffer = 0;
+	render->VideoPaused = 0;
 
 	return render;
 }
@@ -1175,10 +1228,12 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 			buf->pix_fmt = DRM_FORMAT_NV12;
 
 			if (SetupFB(render, buf, NULL))
-				fprintf(stderr, "EnqueueFB: SetupFB FB %i x %i failed\n", buf->width, buf->height);
+				fprintf(stderr, "EnqueueFB: SetupFB FB %i x %i failed\n",
+					buf->width, buf->height);
 			else render->buffers++;
 
-			if (drmPrimeHandleToFD(render->fd_drm, buf->handle[0], 0, &buf->fd_prime))
+			if (drmPrimeHandleToFD(render->fd_drm, buf->handle[0],
+				DRM_CLOEXEC | DRM_RDWR, &buf->fd_prime))
 				fprintf(stderr, "EnqueueFB: Failed to retrieve the Prime FD (%d): %m\n",
 					errno);
 		}
@@ -1250,9 +1305,7 @@ getinframe:
 			if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX &&
 				atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
 
-				pthread_mutex_lock(&cond_mutex);
-				pthread_cond_signal(&cond);
-				pthread_mutex_unlock(&cond_mutex);
+				pthread_cond_signal(&DecodeCondition);
 			}
 		} else {
 			frame = NULL;
@@ -1312,7 +1365,9 @@ fillframe:
 closing:
 	avfilter_graph_free(&render->filter_graph);
 	render->Deint_Close = 0;
-
+#ifdef DEBUG
+		fprintf(stderr, "FilterHandlerThread: Thread Exit.\n");
+#endif
 	pthread_cleanup_push(ThreadExitHandler, render);
 	pthread_cleanup_pop(1);
 	pthread_exit((void *)pthread_self());
@@ -1448,25 +1503,58 @@ int64_t VideoGetClock(const VideoRender * render)
 ///
 void VideoSetClosing(VideoRender * render)
 {
-	Debug(3, "video: set closing\n");
+#ifdef DEBUG
+	fprintf(stderr, "VideoSetClosing: buffers %d StartCounter %d\n",
+		render->buffers, render->StartCounter);
+#endif
 
-	if (DisplayThread)
+	if (render->buffers){
 		render->Closing = 1;
-	if (FilterThread)
-		render->Deint_Close = 1;
+		if (FilterThread)
+			render->Deint_Close = 1;
+
+		pthread_mutex_lock(&WaitCleanMutex);
+#ifdef DEBUG
+		fprintf(stderr, "VideoSetClosing: pthread_cond_wait\n");
+#endif
+		pthread_cond_wait(&WaitCleanCondition, &WaitCleanMutex);
+		pthread_mutex_unlock(&WaitCleanMutex);
+#ifdef DEBUG
+		fprintf(stderr, "VideoSetClosing: NACH pthread_cond_wait\n");
+#endif
+	}
+	render->StartCounter = 0;
+	render->FramesDuped = 0;
+	render->FramesDropped = 0;
 }
 
 ///
-///	Reset start of frame counter.
+///	send start condition to video thread.
 ///
 ///	@param hw_render	video hardware render
 ///
-void VideoResetStart(VideoRender * render)
+void StartVideo(VideoRender * render)
 {
-    Debug(3, "video: reset start\n");
-    render->StartCounter = 0;
-    render->FramesDuped = 0;
-    render->FramesDropped = 0;
+	render->VideoPaused = 0;
+	render->StartCounter = 0;
+#ifdef DEBUG
+	fprintf(stderr, "StartVideo: reset PauseCondition StartCounter %d Closing %d TrickSpeed %d\n",
+		render->StartCounter, render->Closing, render->TrickSpeed);
+#endif
+	pthread_cond_signal(&PauseCondition);
+
+	fprintf(stderr, "StartVideo: Ende\n");
+}
+
+/**
+**	Pause video.
+*/
+void VideoPause(VideoRender * render)
+{
+#ifdef DEBUG
+	fprintf(stderr, "VideoPause:\n");
+#endif
+	render->VideoPaused = 1;
 }
 
 ///
@@ -1477,11 +1565,32 @@ void VideoResetStart(VideoRender * render)
 ///
 void VideoSetTrickSpeed(VideoRender * render, int speed)
 {
-	Debug(3, "video: set trick-speed %d\n", speed);
+#ifdef DEBUG
+	fprintf(stderr, "VideoSetTrickSpeed: set trick speed %d\n", speed);
+#endif
 	render->TrickSpeed = speed;
 	if (speed) {
-		render->Closing = 0;
+		render->Closing = 0;	// ???
 	}
+
+	if (render->VideoPaused) {
+		StartVideo(render);
+	}
+}
+
+/**
+**	Play video.
+*/
+void VideoPlay(VideoRender * render)
+{
+#ifdef DEBUG
+	fprintf(stderr, "VideoPlay:\n");
+#endif
+	if (render->TrickSpeed) {
+		render->TrickSpeed = 0;
+	}
+
+	StartVideo(render);
 }
 
 ///
@@ -1600,6 +1709,7 @@ void VideoSetSWDeinterlacer(VideoRender * render, int deint)
 ///
 void VideoInit(VideoRender * render)
 {
+	unsigned int i;
 
 	if (FindDevice(render)){
 		fprintf(stderr, "VideoInit: FindDevice() failed\n");
@@ -1610,9 +1720,9 @@ void VideoInit(VideoRender * render)
 	render->bufs[0].width = render->bufs[1].width = 0;
 	render->bufs[0].height = render->bufs[1].height = 0;
 	render->bufs[0].pix_fmt = render->bufs[1].pix_fmt = DRM_FORMAT_NV12;
-	render->buf_osd.pix_fmt = DRM_FORMAT_ARGB8888;
 
 	// osd FB
+	render->buf_osd.pix_fmt = DRM_FORMAT_ARGB8888;
 	render->buf_osd.x = 0;
 	render->buf_osd.width = render->mode.hdisplay;
 	render->buf_osd.height = render->mode.vdisplay;
@@ -1627,7 +1737,7 @@ void VideoInit(VideoRender * render)
 	if (SetupFB(render, &render->buf_black, NULL))
 		fprintf(stderr, "VideoInit: SetupFB black FB %i x %i failed\n",
 			render->buf_black.width, render->buf_black.height);
-	unsigned int i;
+
 	for (i = 0; i < render->buf_black.width * render->buf_black.height; ++i) {
 		render->buf_black.plane[0][i] = 0x10;
 		if (i < render->buf_black.width * render->buf_black.height / 2)

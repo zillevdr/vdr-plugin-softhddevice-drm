@@ -486,9 +486,9 @@ static void MmalDisplayFrame(VideoRender * render)
 	AVFrame *frame;
 
 	if(render->buffers < 7) {
-		pthread_mutex_lock(&cond_mutex);
+//		pthread_mutex_lock(&cond_mutex);
 		pthread_cond_signal(&cond);
-		pthread_mutex_unlock(&cond_mutex);
+//		pthread_mutex_unlock(&cond_mutex);
 	}
 
 	if(render->buffers_in_queue == 0 ){
@@ -518,7 +518,7 @@ dequeue:
 		} else {
 			MmalClose(render);
 		}
-
+		render->Closing = 0;
 		return;
 	}
 
@@ -924,19 +924,20 @@ int64_t VideoGetClock(const VideoRender * render)
 void VideoSetClosing(VideoRender * render)
 {
 	render->Closing = 1;
+
+	render->StartCounter = 0;
+	render->FramesDuped = 0;
+	render->FramesDropped = 0;
 }
 
-///
-///	Reset start of frame counter.
-///
-///	@param hw_render	video hardware render
-///
-void VideoResetStart(VideoRender * render)
+/**
+**	Pause video.
+*/
+void VideoPause( __attribute__ ((unused)) VideoRender * render)
 {
-    Debug(3, "video: reset start\n");
-    render->StartCounter = 0;
-    render->FramesDuped = 0;
-    render->FramesDropped = 0;
+#ifdef DEBUG
+	fprintf(stderr, "VideoPause:\n");
+#endif
 }
 
 ///
@@ -953,6 +954,21 @@ void VideoSetTrickSpeed(VideoRender * render, int speed)
 	if (speed) {
 		render->Closing = 0;
 	}
+}
+
+/**
+**	Play video.
+*/
+void VideoPlay(VideoRender * render)
+{
+#ifdef DEBUG
+	fprintf(stderr, "VideoPlay: Closing %d\n", render->Closing);
+#endif
+	if (render->TrickSpeed) {
+		render->TrickSpeed = 0;
+	}
+
+	VideoThreadWakeup(render);
 }
 
 ///
@@ -1090,7 +1106,7 @@ const char *VideoGetDecoderName(const char *codec_name)
 	return codec_name;
 }
 
-int VideoCodecMode(VideoRender * render)
+int VideoCodecMode( __attribute__ ((unused)) VideoRender * render)
 {
 	return 1;
 }

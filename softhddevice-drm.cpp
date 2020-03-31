@@ -892,6 +892,9 @@ eOSState cSoftHdMenu::ProcessKey(eKeys key)
 cSoftHdDevice::cSoftHdDevice(void)
 {
     //dsyslog("[softhddev]%s\n", __FUNCTION__);
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     spuDecoder = NULL;
 }
 
@@ -901,6 +904,9 @@ cSoftHdDevice::cSoftHdDevice(void)
 cSoftHdDevice::~cSoftHdDevice(void)
 {
     //dsyslog("[softhddev]%s:\n", __FUNCTION__);
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     delete spuDecoder;
 }
 
@@ -912,6 +918,9 @@ cSoftHdDevice::~cSoftHdDevice(void)
 void cSoftHdDevice::MakePrimaryDevice(bool on)
 {
     dsyslog("[softhddev]%s: %d\n", __FUNCTION__, on);
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s: %d\n", __FUNCTION__, on);
+#endif
 
     cDevice::MakePrimaryDevice(on);
     if (on) {
@@ -929,7 +938,9 @@ void cSoftHdDevice::MakePrimaryDevice(bool on)
 cSpuDecoder *cSoftHdDevice::GetSpuDecoder(void)
 {
     dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     if (!spuDecoder && IsPrimaryDevice()) {
 	spuDecoder = new cDvbSpuDecoder();
     }
@@ -950,6 +961,9 @@ bool cSoftHdDevice::HasDecoder(void) const
 */
 bool cSoftHdDevice::CanReplay(void) const
 {
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     return true;
 }
 
@@ -960,24 +974,11 @@ bool cSoftHdDevice::CanReplay(void) const
 */
 bool cSoftHdDevice::SetPlayMode(ePlayMode play_mode)
 {
-    dsyslog("[softhddev]%s: %d\n", __FUNCTION__, play_mode);
-
-    switch (play_mode) {
-	case pmAudioVideo:
-	    break;
-	case pmAudioOnly:
-	case pmAudioOnlyBlack:
-	    break;
-	case pmVideoOnly:
-	    break;
-	case pmNone:
-	    break;
-	default:
-	    dsyslog("[softhddev] playmode not implemented... %d\n", play_mode);
-	    break;
-    }
-
-    return::SetPlayMode(play_mode);
+	dsyslog("[softhddev]%s: %d\n", __FUNCTION__, play_mode);
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s: %d\n", __FUNCTION__, play_mode);
+#endif
+	return::SetPlayMode(play_mode);
 }
 
 /**
@@ -987,7 +988,9 @@ bool cSoftHdDevice::SetPlayMode(ePlayMode play_mode)
 int64_t cSoftHdDevice::GetSTC(void)
 {
     //dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     return::GetSTC();
 }
 
@@ -1003,7 +1006,10 @@ int64_t cSoftHdDevice::GetSTC(void)
 void cSoftHdDevice::TrickSpeed(int speed, bool forward)
 {
     dsyslog("[softhddev]%s: %d %d\n", __FUNCTION__, speed, forward);
-
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]TrickSpeed: speed %d %s\n",
+		speed, forward ? "forward" : "backward");
+#endif
     ::TrickSpeed(speed);
 }
 
@@ -1013,7 +1019,9 @@ void cSoftHdDevice::TrickSpeed(int speed, bool forward)
 void cSoftHdDevice::Clear(void)
 {
     dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     cDevice::Clear();
     ::Clear();
 }
@@ -1024,7 +1032,9 @@ void cSoftHdDevice::Clear(void)
 void cSoftHdDevice::Play(void)
 {
     dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     cDevice::Play();
     ::Play();
 }
@@ -1035,7 +1045,9 @@ void cSoftHdDevice::Play(void)
 void cSoftHdDevice::Freeze(void)
 {
     dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     cDevice::Freeze();
     ::Freeze();
 }
@@ -1046,7 +1058,9 @@ void cSoftHdDevice::Freeze(void)
 void cSoftHdDevice::Mute(void)
 {
     dsyslog("[softhddev]%s:\n", __FUNCTION__);
-
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
     cDevice::Mute();
     ::Mute();
 }
@@ -1059,15 +1073,18 @@ void cSoftHdDevice::Mute(void)
 */
 void cSoftHdDevice::StillPicture(const uchar * data, int length)
 {
-    dsyslog("[softhddev]%s: %s %p %d\n", __FUNCTION__,
-	data[0] == 0x47 ? "ts" : "pes", data, length);
+	if (data[0] == 0x47) {		// ts sync
+		cDevice::StillPicture(data, length);
+		return;
+	}
 
-    if (data[0] == 0x47) {		// ts sync
-	cDevice::StillPicture(data, length);
-	return;
-    }
-
-    ::StillPicture(data, length);
+	dsyslog("[softhddev]%s: %s %p %d\n", __FUNCTION__,
+		data[0] == 0x47 ? "ts" : "pes", data, length);
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s: %s %p %d\n", __FUNCTION__,
+		data[0] == 0x47 ? "ts" : "pes", data, length);
+#endif
+	::StillPicture(data, length);
 }
 
 /**
@@ -1083,7 +1100,7 @@ bool cSoftHdDevice::Poll(
     __attribute__ ((unused)) cPoller & poller, int timeout_ms)
 {
     //dsyslog("[softhddev]%s: %d\n", __FUNCTION__, timeout_ms);
-//	fprintf(stderr, "[softhddev] timeout %dms \n", timeout_ms);
+//	fprintf(stderr, "[softhddev]%s: timeout %d\n", __FUNCTION__, timeout_ms);
 
     return::Poll(timeout_ms);
 }
@@ -1096,7 +1113,9 @@ bool cSoftHdDevice::Poll(
 bool cSoftHdDevice::Flush(int timeout_ms)
 {
     dsyslog("[softhddev]%s: %d ms\n", __FUNCTION__, timeout_ms);
-
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s: %d ms\n", __FUNCTION__, timeout_ms);
+#endif
     return::Flush(timeout_ms);
 }
 
