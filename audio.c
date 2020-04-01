@@ -1685,6 +1685,10 @@ void AudioFlushBuffers(void)
 	else if (PTS != AV_NOPTS_VALUE)
 		AlsaFlushBuffers();
 
+	while(AudioRunning) {
+		usleep(5000);
+	}
+
 	Filterchanged = 1;
 }
 

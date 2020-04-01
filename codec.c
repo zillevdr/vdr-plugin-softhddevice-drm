@@ -326,8 +326,8 @@ int CodecVideoReceiveFrame(VideoDecoder * decoder, int no_deint)
 #ifdef DEBUG
 	if (ret == AVERROR(EINVAL))
 		fprintf(stderr, "CodecVideoReceiveFrame: Error receive frame AVERROR(EINVAL)\n");
-	if (ret == AVERROR(EAGAIN))
-		fprintf(stderr, "CodecVideoDecode: Error receive frame AVERROR(EAGAIN)\n");
+//	if (ret == AVERROR(EAGAIN))
+//		fprintf(stderr, "CodecVideoReceiveFrame: Error receive frame AVERROR(EAGAIN)\n");
 #endif
 
 	if (ret == AVERROR(EAGAIN))
