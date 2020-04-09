@@ -92,7 +92,7 @@ extern void CodecSetAudioPassthrough(int);
 extern void CodecSetAudioDownmix(int);
 
     /// Decode an audio packet.
-extern void CodecAudioDecode(AudioDecoder *, const AVPacket *);
+extern int CodecAudioDecode(AudioDecoder *, const AVPacket *);
 
     /// Flush audio buffers.
 extern void CodecAudioFlushBuffers(AudioDecoder *);

@@ -444,13 +444,14 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 		Fatal(_("codec: can't allocate audio codec context\n"));
 	}
 
-//	if (CodecDownmix) {
+	if (CodecDownmix) {
 #ifdef DEBUG
-		fprintf(stderr, "CodecAudioOpen: CodecDownmix to AV_CH_LAYOUT_STEREO\n");
+		fprintf(stderr, "CodecAudioOpen: CodecDownmix to AV_CH_LAYOUT_STEREO CodecDownmix %d\n",
+			CodecDownmix);
 #endif
 		audio_decoder->AudioCtx->request_channel_layout =
 			AV_CH_LAYOUT_STEREO;
-//	}
+	}
 
 	// open codec
 	if (avcodec_open2(audio_decoder->AudioCtx, audio_decoder->AudioCtx->codec, NULL) < 0) {
@@ -520,8 +521,11 @@ void CodecSetAudioDownmix(int onoff)
 **
 **	@param audio_decoder	audio decoder data
 **	@param avpkt		audio packet
+**
+**	@retval	-1	error, send packet again
+**	@retval	1	error, send packet again with new configuration
 */
-void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
+int CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 {
     AVCodecContext *audio_ctx;
     AVFrame *frame;
@@ -541,17 +545,17 @@ void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
     if (n != avpkt->size) {
 		if (n == AVERROR(EAGAIN)) {
 			Error(_("codec/audio: latm\n"));
-			return;
+			return -1;
 		}
 		if (n < 0) {			// no audio frame could be decompressed
 			Error(_("codec/audio: bad audio frame\n"));
-			return;
+			return 0;	// ???
 		}
 		Error(_("codec/audio: error more than one frame data\n"));
 	}
 	if (!got_frame) {
 		Error(_("codec/audio: no frame\n"));
-		return;
+		return 0;	// ???
 	}
 
 #ifdef AV_SYNC_DEBUG
@@ -577,8 +581,9 @@ void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 		audio_decoder->last_pts = frame->pts;
 	}
 
-	AudioFilter(frame);
-	return;
+	if (AudioFilter(frame))
+		return 1;
+	return 0;
 }
 
 

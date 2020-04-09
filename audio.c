@@ -34,8 +34,6 @@
 ///	@todo FIXME: there can be problems with little/big endian.
 ///
 
-#define USE_AUDIO_MIXER		///< use audio module mixer
-
 #include <stdint.h>
 #include <math.h>
 
@@ -50,6 +48,7 @@
 #endif
 #include <pthread.h>
 
+#include <libavcodec/avcodec.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/opt.h>
 #include <libavfilter/avfilter.h>
@@ -61,6 +60,8 @@
 #include "ringbuffer.h"
 #include "misc.h"
 #include "audio.h"
+#include "video.h"
+#include "codec.h"
 
 
 //----------------------------------------------------------------------------
@@ -72,15 +73,13 @@ static const char *AudioPassthroughDevice;	///< Passthrough device name
 static char AudioAppendAES;		///< flag automatic append AES
 static const char *AudioMixerDevice;	///< mixer device name
 static const char *AudioMixerChannel;	///< mixer channel name
-static char AudioDoingInit;		///> flag in init, reduce error
 static volatile char AudioRunning;	///< thread running / stopped
 static volatile char AudioPaused;	///< audio paused
 static volatile char AudioVideoIsReady;	///< video ready start early
 static int AudioSkip;			///< skip audio to sync to video
 
 static const int AudioBytesProSample = 2;	///< number of bytes per sample
-
-static int AudioBufferTime = 600;	///< audio buffer time in ms
+static int AudioBufferTime = 620;	///< audio buffer time in ms
 
 static pthread_t AudioThread;		///< audio play thread
 static pthread_mutex_t AudioRbMutex;	///< audio condition mutex
@@ -107,35 +106,18 @@ extern int VideoAudioDelay;		///< import audio/video delay
     /// default ring buffer size ~2s 8ch 16bit (3 * 5 * 7 * 8)
 static const unsigned AudioRingBufferSize = 3 * 5 * 7 * 8 * 2 * 1000;
 
-static int AudioChannelsInHw[9];	///< table which channels are supported
-enum _audio_rates
-{					///< sample rates enumeration
-    // HW: 32000 44100 48000 88200 96000 176400 192000
-    //Audio32000,				///< 32.0Khz
-    Audio44100,				///< 44.1Khz
-    Audio48000,				///< 48.0Khz
-    //Audio88200,				///< 88.2Khz
-    //Audio96000,				///< 96.0Khz
-    //Audio176400,				///< 176.4Khz
-    Audio192000,			///< 192.0Khz
-    AudioRatesMax			///< max index
-};
+//	Alsa variables
+static snd_pcm_t *AlsaPCMHandle;	///< alsa pcm handle
+static char AlsaCanPause;		///< hw supports pause
+static int AlsaUseMmap;			///< use mmap
 
-    /// table which rates are supported
-static int AudioRatesInHw[AudioRatesMax];
+static snd_mixer_t *AlsaMixer;		///< alsa mixer handle
+static snd_mixer_elem_t *AlsaMixerElem;	///< alsa pcm mixer element
+static int AlsaRatio;			///< internal -> mixer ratio * 1000
 
-    /// input to hardware channel matrix
-static int AudioChannelMatrix[AudioRatesMax][9];
+static snd_pcm_chmap_query_t **HwChannelMaps;
 
-    /// rates tables (must be sorted by frequency)
-static const unsigned AudioRatesTable[AudioRatesMax] = {
-    44100, 48000, 192000
-};
-
-//----------------------------------------------------------------------------
-//	filter
-//----------------------------------------------------------------------------
-
+//	Filter variables
 static const int AudioNormSamples = 4096;	///< number of samples
 
 #define AudioNormMaxIndex 128		///< number of average values
@@ -151,6 +133,26 @@ int FilterInit;
 float AudioEqBand[18];
 int AudioEq;
 int Filterchanged;
+
+//	ring buffer variables
+char Passthrough;			///< flag: use pass-through (AC-3, ...)
+unsigned int HwSampleRate;		///< hardware sample rate in Hz
+unsigned int HwChannels;		///< hardware number of channels
+int64_t PTS;			///< pts clock
+
+RingBuffer *AudioRingBuffer;		///< sample ring buffer
+
+static unsigned AudioStartThreshold;	///< start play, if filled
+
+
+
+
+static int AlsaSetup(int rate, int channels, int passthrough);
+
+
+//----------------------------------------------------------------------------
+//	Filter
+//----------------------------------------------------------------------------
 
 /**
 **	Audio normalizer.
@@ -347,217 +349,11 @@ static void AudioSoftAmplifier(int16_t * samples, int count)
 	}
 }
 
-#ifdef USE_AUDIO_MIXER
-
-/**
-**	Upmix mono to stereo.
-**
-**	@param in	input sample buffer
-**	@param frames	number of frames in sample buffer
-**	@param out	output sample buffer
-*/
-static void AudioMono2Stereo(const int16_t * in, int frames, int16_t * out)
-{
-    int i;
-
-    for (i = 0; i < frames; ++i) {
-	int t;
-
-	t = in[i];
-	out[i * 2 + 0] = t;
-	out[i * 2 + 1] = t;
-    }
-}
-
-/**
-**	Downmix stereo to mono.
-**
-**	@param in	input sample buffer
-**	@param frames	number of frames in sample buffer
-**	@param out	output sample buffer
-*/
-static void AudioStereo2Mono(const int16_t * in, int frames, int16_t * out)
-{
-    int i;
-
-    for (i = 0; i < frames; i += 2) {
-	out[i / 2] = (in[i + 0] + in[i + 1]) / 2;
-    }
-}
-
-/**
-**	Downmix surround to stereo.
-**
-**	ffmpeg L  R  C	Ls Rs		-> alsa L R  Ls Rs C
-**	ffmpeg L  R  C	LFE Ls Rs	-> alsa L R  Ls Rs C  LFE
-**	ffmpeg L  R  C	LFE Ls Rs Rl Rr	-> alsa L R  Ls Rs C  LFE Rl Rr
-**
-**	@param in	input sample buffer
-**	@param in_chan	nr. of input channels
-**	@param frames	number of frames in sample buffer
-**	@param out	output sample buffer
-*/
-static void AudioSurround2Stereo(const int16_t * in, int in_chan, int frames,
-    int16_t * out)
-{
-    while (frames--) {
-	int l;
-	int r;
-
-	switch (in_chan) {
-	    case 3:			// stereo or surround? =>stereo
-		l = in[0] * 600;	// L
-		r = in[1] * 600;	// R
-		l += in[2] * 400;	// C
-		r += in[2] * 400;
-		break;
-	    case 4:			// quad or surround? =>quad
-		l = in[0] * 600;	// L
-		r = in[1] * 600;	// R
-		l += in[2] * 400;	// Ls
-		r += in[3] * 400;	// Rs
-		break;
-	    case 5:			// 5.0
-		l = in[0] * 500;	// L
-		r = in[1] * 500;	// R
-		l += in[2] * 200;	// Ls
-		r += in[3] * 200;	// Rs
-		l += in[4] * 300;	// C
-		r += in[4] * 300;
-		break;
-	    case 6:			// 5.1
-		l = in[0] * 400;	// L
-		r = in[1] * 400;	// R
-		l += in[2] * 200;	// Ls
-		r += in[3] * 200;	// Rs
-		l += in[4] * 300;	// C
-		r += in[4] * 300;
-		l += in[5] * 100;	// LFE
-		r += in[5] * 100;
-		break;
-	    case 7:			// 7.0
-		l = in[0] * 400;	// L
-		r = in[1] * 400;	// R
-		l += in[2] * 200;	// Ls
-		r += in[3] * 200;	// Rs
-		l += in[4] * 300;	// C
-		r += in[4] * 300;
-		l += in[5] * 100;	// RL
-		r += in[6] * 100;	// RR
-		break;
-	    case 8:			// 7.1
-		l = in[0] * 400;	// L
-		r = in[1] * 400;	// R
-		l += in[2] * 150;	// Ls
-		r += in[3] * 150;	// Rs
-		l += in[4] * 250;	// C
-		r += in[4] * 250;
-		l += in[5] * 100;	// LFE
-		r += in[5] * 100;
-		l += in[6] * 100;	// RL
-		r += in[7] * 100;	// RR
-		break;
-	    default:
-		abort();
-	}
-	in += in_chan;
-
-	out[0] = l / 1000;
-	out[1] = r / 1000;
-	out += 2;
-    }
-}
-
-/**
-**	Upmix @a in_chan channels to @a out_chan.
-**
-**	@param in	input sample buffer
-**	@param in_chan	nr. of input channels
-**	@param frames	number of frames in sample buffer
-**	@param out	output sample buffer
-**	@param out_chan	nr. of output channels
-*/
-static void AudioUpmix(const int16_t * in, int in_chan, int frames,
-    int16_t * out, int out_chan)
-{
-    while (frames--) {
-	int i;
-
-	for (i = 0; i < in_chan; ++i) {	// copy existing channels
-	    *out++ = *in++;
-	}
-	for (; i < out_chan; ++i) {	// silents missing channels
-	    *out++ = 0;
-	}
-    }
-}
-
-/**
-**	Resample ffmpeg sample format to hardware format.
-**
-**	FIXME: use libswresample for this and move it to codec.
-**	FIXME: ffmpeg to alsa conversion is already done in codec.c.
-**
-**	ffmpeg L  R  C	Ls Rs		-> alsa L R  Ls Rs C
-**	ffmpeg L  R  C	LFE Ls Rs	-> alsa L R  Ls Rs C  LFE
-**	ffmpeg L  R  C	LFE Ls Rs Rl Rr	-> alsa L R  Ls Rs C  LFE Rl Rr
-**
-**	@param in	input sample buffer
-**	@param in_chan	nr. of input channels
-**	@param frames	number of frames in sample buffer
-**	@param out	output sample buffer
-**	@param out_chan	nr. of output channels
-*/
-static void AudioResample(const int16_t * in, int in_chan, int frames,
-    int16_t * out, int out_chan)
-{
-    switch (in_chan * 8 + out_chan) {
-	case 1 * 8 + 1:
-	case 2 * 8 + 2:
-	case 3 * 8 + 3:
-	case 4 * 8 + 4:
-	case 5 * 8 + 5:
-	case 6 * 8 + 6:
-	case 7 * 8 + 7:
-	case 8 * 8 + 8:		// input = output channels
-	    memcpy(out, in, frames * in_chan * AudioBytesProSample);
-	    break;
-	case 2 * 8 + 1:
-	    AudioStereo2Mono(in, frames, out);
-	    break;
-	case 1 * 8 + 2:
-	    AudioMono2Stereo(in, frames, out);
-	    break;
-	case 3 * 8 + 2:
-	case 4 * 8 + 2:
-	case 5 * 8 + 2:
-	case 6 * 8 + 2:
-	case 7 * 8 + 2:
-	case 8 * 8 + 2:
-	    AudioSurround2Stereo(in, in_chan, frames, out);
-	    break;
-	case 5 * 8 + 6:
-	case 3 * 8 + 8:
-	case 5 * 8 + 8:
-	case 6 * 8 + 8:
-	    AudioUpmix(in, in_chan, frames, out, out_chan);
-	    break;
-
-	default:
-	    Error("audio: unsupported %d -> %d channels resample\n", in_chan,
-		out_chan);
-	    // play silence
-	    memset(out, 0, frames * out_chan * AudioBytesProSample);
-	    break;
-    }
-}
-
-#endif
-
 /**
 **	Set filter bands.
 **
 **	@param band		setting frequenz bands
+**	@param onoff	set using equalizer
 */
 void AudioSetEq(int band[17], int onoff)
 {
@@ -630,8 +426,12 @@ void AudioSetEq(int band[17], int onoff)
 
 /**
 **	Filter init.
+**
+**	@retval 0	everything ok
+**	@retval 1	didn't support channels, CodecDownmix set > scrap this frame, test next
+**	@retval -1	something gone wrong
 */
-void AudioFilterInit(AVFrame *frame)
+static int AudioFilterInit(AVFrame *frame)
 {
 	const AVFilter  *abuffer;
 	AVFilterContext *filter_ctx[3];
@@ -641,6 +441,15 @@ void AudioFilterInit(AVFrame *frame)
 	char ch_layout[64];
 	char options_str[1024];
 	int err, i, n_filter = 0;
+
+	// Before filter init set HW parameter.
+	if (frame->sample_rate != (int)HwSampleRate ||
+		frame->channels != (int)HwChannels) {
+
+		err = AlsaSetup(frame->sample_rate, frame->channels, 0);
+		if (err)
+			return err;
+	}
 
 #if LIBAVFILTER_VERSION_INT < AV_VERSION_INT(7,16,100)
 	avfilter_register_all();
@@ -724,26 +533,13 @@ void AudioFilterInit(AVFrame *frame)
 	abuffersink_ctx = filter_ctx[n_filter - 1];
 	Filterchanged = 0;
 	FilterInit = 1;
+
+	return 0;
 }
 
 //----------------------------------------------------------------------------
 //	ring buffer
 //----------------------------------------------------------------------------
-
-/**
-**	Audio ring buffer.
-*/
-//char FlushBuffers;			///< flag: flush buffers
-char Passthrough;			///< flag: use pass-through (AC-3, ...)
-unsigned int HwSampleRate;		///< hardware sample rate in Hz
-unsigned int HwChannels;		///< hardware number of channels
-unsigned InSampleRate;		///< input sample rate in Hz
-unsigned InChannels;		///< input number of channels
-int64_t PTS;			///< pts clock
-
-RingBuffer *AudioRingBuffer;		///< sample ring buffer
-
-static unsigned AudioStartThreshold;	///< start play, if filled
 
 /**
 **	Setup audio ring.
@@ -764,25 +560,12 @@ static void AudioRingExit(void)
 		AudioRingBuffer = NULL;
 	}
 	HwSampleRate = 0;	// checked for valid setup
-	InSampleRate = 0;
 }
 
 
 //============================================================================
 //	A L S A
 //============================================================================
-
-//----------------------------------------------------------------------------
-//	Alsa variables
-//----------------------------------------------------------------------------
-
-static snd_pcm_t *AlsaPCMHandle;	///< alsa pcm handle
-static char AlsaCanPause;		///< hw supports pause
-static int AlsaUseMmap;			///< use mmap
-
-static snd_mixer_t *AlsaMixer;		///< alsa mixer handle
-static snd_mixer_elem_t *AlsaMixerElem;	///< alsa pcm mixer element
-static int AlsaRatio;			///< internal -> mixer ratio * 1000
 
 //----------------------------------------------------------------------------
 //	alsa pcm
@@ -949,10 +732,8 @@ static snd_pcm_t *AlsaOpenPCM(int passthrough)
 
 		device = "default";
     }
-    if (!AudioDoingInit) {		// reduce blabla during init
-		Info(_("audio/alsa: using %sdevice '%s'\n"),
-			passthrough ? "pass-through " : "", device);
-    }
+	Info(_("audio/alsa: using %sdevice '%s'\n"),
+		passthrough ? "pass-through " : "", device);
 #if 0
     // for AC3 pass-through try to set the non-audio bit, use AES0=6 to set spdif in raw mode
     if (passthrough && AudioAppendAES) {
@@ -1018,7 +799,7 @@ static void AlsaInitPCM(void)
 	if (err < 0) {
 		printf("Output failed: %s\n", snd_strerror(err));
 	} else {
-		printf("snd_pcm_dump_setup VOR Setup\n");
+		printf("AlsaInitPCM: snd_pcm_dump_setup VOR Setup\n");
 		snd_pcm_dump_setup(AlsaPCMHandle, output);
 	}
 #endif
@@ -1110,42 +891,87 @@ static void AlsaInitMixer(void)
 **	@param passthrough	use pass-through (AC-3, ...) device
 **
 **	@retval 0	everything ok
-**	@retval 1	didn't support frequency/channels combination
+**	@retval 1	didn't support hw channels, CodecDownmix set > retest
 **	@retval -1	something gone wrong
 **
 **	@todo FIXME: remove pointer for freq + channels
 */
-static int AlsaSetup(unsigned int *rate, unsigned int *channels, int passthrough)
+static int AlsaSetup(int rate, int channels, int passthrough)
 {
+	snd_pcm_hw_params_t *hwparams;
     snd_pcm_uframes_t buffer_size;
     snd_pcm_uframes_t period_size;
+	static unsigned int SampleRate;
     int err;
     int delay;
 
     if (!AlsaPCMHandle) {		// alsa not running yet
 		// FIXME: if open fails for fe. pass-through, we never recover
+		fprintf(stderr, "AlsaSetup: No AlsaPCMHandle found!!!\n");
 		return -1;
     }
+
+	if (!HwChannelMaps) {
+		fprintf(stderr, "AlsaSetup: No HwChannelMaps found! Suggest HW can handle 2 channels.\n");
+		HwChannels = 2;
+	} else {
+		for (int i = 0; HwChannelMaps[i] != NULL; i++) {
+			if ((int)HwChannelMaps[i]->map.channels == channels) {
+//				fprintf(stderr, "AlsaSetup: %d channels supported\n",
+//					channels);
+				HwChannels = channels;
+				break;
+			}
+		}
+	}
+
+	if (channels != (int)HwChannels) {
+		Warning(_("AlsaSetup: no channel map found for %d channels, "
+			"HwChannels %d > set CodecDownmix\n"),
+			channels, HwChannels);
+		fprintf(stderr, "AlsaSetup: no channel map found for %d channels, "
+			"HwChannels %d > set CodecDownmix\n",
+			channels, HwChannels);
+		CodecSetAudioDownmix(1);
+		return 1;
+	}
+
+	snd_pcm_hw_params_alloca(&hwparams);
+	if ((err = snd_pcm_hw_params_any(AlsaPCMHandle, hwparams)) < 0) {
+		fprintf(stderr, "AlsaSetup: failed! %s\n", snd_strerror(err));
+		return -1;
+	}
+	if (snd_pcm_hw_params_test_rate(AlsaPCMHandle, hwparams, rate, 0)) {
+		fprintf(stderr, "AlsaSetup: SampleRate %d not supported\n", rate);
+		// If test rate failed should test a rate_near. later.
+		if ((err = snd_pcm_hw_params_set_rate_near(AlsaPCMHandle, hwparams,
+			&SampleRate, NULL)) < 0) {
+			fprintf(stderr, "AlsaSetup: snd_pcm_hw_params_set_rate_near failed %s\n",
+				snd_strerror(err));
+		}
+		return -1;
+	} else {
+		HwSampleRate = rate;
+//		fprintf(stderr, "AlsaSetup: SampleRate %d supported\n", rate);
+	}
 
 	if ((err =
 		snd_pcm_set_params(AlsaPCMHandle, SND_PCM_FORMAT_S16,
 			AlsaUseMmap ? SND_PCM_ACCESS_MMAP_INTERLEAVED :
-			SND_PCM_ACCESS_RW_INTERLEAVED, *channels, *rate, 1,
+			SND_PCM_ACCESS_RW_INTERLEAVED, channels, rate, 1,
 			150000))) {
 		// try reduced buffer size (needed for sunxi)
 		// FIXME: alternativ make this configurable
 		if ((err =
 			snd_pcm_set_params(AlsaPCMHandle, SND_PCM_FORMAT_S16,
 			AlsaUseMmap ? SND_PCM_ACCESS_MMAP_INTERLEAVED :
-			SND_PCM_ACCESS_RW_INTERLEAVED, *channels, *rate, 1,
+			SND_PCM_ACCESS_RW_INTERLEAVED, channels, rate, 1,
 			72 * 1000))) {
 
-		if (!AudioDoingInit) {
-			Error(_("audio/alsa: set params error: %s\n"),
-				snd_strerror(err));
-			fprintf(stderr, "audio/AlsaSetup: set params error: %s\n",
-				snd_strerror(err));
-		}
+		Error(_("audio/alsa: set params error: %s\n"),
+			snd_strerror(err));
+		fprintf(stderr, "AlsaSetup: set params error: %s\n",
+			snd_strerror(err));
 		// FIXME: must stop sound, AudioChannels ... invalid
 		return -1;
 		}
@@ -1156,9 +982,9 @@ static int AlsaSetup(unsigned int *rate, unsigned int *channels, int passthrough
     snd_pcm_get_params(AlsaPCMHandle, &buffer_size, &period_size);
     Debug(3, "audio/alsa: buffer size %lu %zdms, period size %lu %zdms\n",
 		buffer_size, snd_pcm_frames_to_bytes(AlsaPCMHandle,
-		buffer_size) * 1000 / (*rate * *channels * AudioBytesProSample),
+		buffer_size) * 1000 / (rate * channels * AudioBytesProSample),
 		period_size, snd_pcm_frames_to_bytes(AlsaPCMHandle,
-		period_size) * 1000 / (*rate * *channels * AudioBytesProSample));
+		period_size) * 1000 / (rate * channels * AudioBytesProSample));
     Debug(3, "audio/alsa: state %s\n",
 		snd_pcm_state_name(snd_pcm_state(AlsaPCMHandle)));
 
@@ -1170,31 +996,27 @@ static int AlsaSetup(unsigned int *rate, unsigned int *channels, int passthrough
 		delay += VideoAudioDelay / 90;
     }
     if (AudioStartThreshold <
-		(*rate * *channels * AudioBytesProSample * delay) / 1000U) {
+		(rate * channels * AudioBytesProSample * delay) / 1000U) {
 
 		AudioStartThreshold =
-			(*rate * *channels * AudioBytesProSample * delay) / 1000U;
+			(rate * channels * AudioBytesProSample * delay) / 1000U;
    }
     // no bigger, than 1/3 the buffer
     if (AudioStartThreshold > AudioRingBufferSize / 3) {
 		AudioStartThreshold = AudioRingBufferSize / 3;
     }
 
-    if (!AudioDoingInit) {
-		Info(_("audio/alsa: start delay %ums\n"), (AudioStartThreshold * 1000)
-			/ (*rate * *channels * AudioBytesProSample));
-    }
+	Info(_("audio/alsa: start delay %ums\n"), (AudioStartThreshold * 1000)
+		/ (rate * channels * AudioBytesProSample));
 
 #ifdef SOUND_DEBUG
-	if (!AudioDoingInit) {
-		static snd_output_t *output = NULL;
-		err = snd_output_stdio_attach(&output, stdout, 0);
-		if (err < 0) {
-			printf("Output failed: %s\n", snd_strerror(err));
-		} else {
-			printf("snd_pcm_dump_setup nach Setup\n");
-			snd_pcm_dump_setup(AlsaPCMHandle, output);
-		}
+	static snd_output_t *output = NULL;
+	err = snd_output_stdio_attach(&output, stdout, 0);
+	if (err < 0) {
+		printf("Output failed: %s\n", snd_strerror(err));
+	} else {
+		printf("AlsaSetup: snd_pcm_dump_setup nach Setup\n");
+		snd_pcm_dump_setup(AlsaPCMHandle, output);
 	}
 #endif
     return 0;
@@ -1389,14 +1211,12 @@ static void AudioExitThread(void)
 /**
 **	Place samples in audio output queue.
 **
-**	@param samples	sample buffer
-**	@param count	number of bytes in sample buffer
+**	@param frame	audio frame
 */
 void AudioEnqueue(AVFrame *frame)
 {
 	size_t n;
 	int16_t *buffer;
-	unsigned u;
 
 #ifdef AV_SYNC_DEBUG
 	// Control PTS is possible
@@ -1409,33 +1229,6 @@ void AudioEnqueue(AVFrame *frame)
 //			(frame->pts - PTS) / 90);
 //	}
 #endif
-	if (frame->sample_rate != (int)HwSampleRate ||
-		frame->channels != (int)HwChannels) {
-
-		for (u = 0; u < AudioRatesMax; ++u) {
-			if ((int)AudioRatesTable[u] == frame->sample_rate) {
-				goto found;
-			}
-			if ((int)AudioRatesTable[u] > frame->sample_rate) {
-				break;
-			}
-		}
-		fprintf(stderr, "AudioEnqueue: %dHz sample-rate unsupported\n",
-			frame->sample_rate);
-
-found:
-		// Test this with HW more then 2 channels
-		if (AudioChannelMatrix[u][frame->channels] != frame->channels) {
-			fprintf(stderr, "AudioEnqueue: Frame %d channels Matrix %d channels\n",
-				frame->channels, AudioChannelMatrix[u][frame->channels]);
-			HwChannels = AudioChannelMatrix[u][frame->channels];
-		} else {
-			HwChannels = frame->channels;
-		}
-		HwSampleRate = frame->sample_rate;
-
-		AlsaSetup(&HwSampleRate, &HwChannels, 0);
-	}
 
 	if (AlsaPlayerStop) {
 		av_frame_unref(frame);
@@ -1445,27 +1238,6 @@ found:
 
 	int count = frame->nb_samples * frame->channels * AudioBytesProSample;
 	buffer = (void *)frame->data[0];
-
-	// audio sample modification allowed and needed?
-	if (!Passthrough && (frame->channels != (int)HwChannels)) {
-		fprintf(stderr, "AudioEnqueue: audio sample modification allowed and needed\n");
-
-		// resample into ring-buffer is too complex in the case of a roundabout
-		// just use a temporary buffer
-		buffer = alloca(frame->nb_samples * HwChannels * AudioBytesProSample);
-#ifdef USE_AUDIO_MIXER
-		// Convert / resample input to hardware format
-		AudioResample((void *)frame->data[0], frame->channels, frame->nb_samples,
-			buffer, HwChannels);
-#else
-		if (frame->channels != (int)HwChannels) {
-			Debug(3, "audio: internal failure channels mismatch\n");
-			fprintf(stderr, "AudioEnqueue: internal failure channels mismatch\n");
-			return;
-		}
-		buffer = (void *)frame->data[0];
-#endif
-	}
 
 	if (AudioCompression) {		// in place operation
 		AudioCompressor(buffer, count);
@@ -1525,7 +1297,13 @@ found:
 	av_frame_free(&frame);
 }
 
-void AudioFilter(AVFrame *inframe)
+/**
+**	audio filter
+**
+**	@retval	1	error, send again
+**	@retval	0	running
+*/
+int AudioFilter(AVFrame *inframe)
 {
 	AVFrame *outframe = NULL;
 	int err;
@@ -1535,10 +1313,8 @@ void AudioFilter(AVFrame *inframe)
 		fprintf(stderr, "AudioFilter: NO inframe!!!\n");
 	}
 
-//	if (FilterInit && (inframe->sample_rate != filter_graph->sink_links[0]->sample_rate ||
-//		inframe->channels != filter_graph->sink_links[0]->channels || Filterchanged)) {
 	if (FilterInit && (inframe->sample_rate != filter_graph->sink_links[0]->sample_rate ||
-		Filterchanged)) {
+		inframe->channels != filter_graph->sink_links[0]->channels || Filterchanged)) {
 
 		avfilter_graph_free(&filter_graph);
 		FilterInit = 0;
@@ -1548,7 +1324,10 @@ void AudioFilter(AVFrame *inframe)
 	}
 
 	if (!FilterInit) {
-		AudioFilterInit(inframe);
+		if (AudioFilterInit(inframe)) {
+//			fprintf(stderr, "AudioFilter: AudioFilterInit failed!\n");
+			return 1;
+		}
 	}
 
 	if ((err = av_buffersrc_add_frame(abuffersrc_ctx, inframe)) < 0) {
@@ -1556,7 +1335,6 @@ void AudioFilter(AVFrame *inframe)
 		av_strerror(err, errbuf, sizeof(errbuf));
 		fprintf(stderr, "AudioFilter: Error submitting the frame to the filter fmt %s channels %d %s\n",
 			av_get_sample_fmt_name(inframe->format), inframe->channels, errbuf);
-		av_frame_free(&inframe);
 	}
 
 get_frame:
@@ -1593,6 +1371,8 @@ get_frame:
 */
 	if (outframe)
 		AudioEnqueue(outframe);
+
+	return 0;
 }
 
 /**
@@ -1769,17 +1549,17 @@ void AudioSetVolume(int volume)
     AudioVolume = volume;
     AudioMute = !volume;
     // reduce loudness for stereo output
-    if (AudioStereoDescent && InChannels == 2 && !Passthrough) {
-	volume -= AudioStereoDescent;
-	if (volume < 0) {
-	    volume = 0;
-	} else if (volume > 1000) {
-	    volume = 1000;
-	}
+    if (AudioStereoDescent && HwChannels == 2 && !Passthrough) {
+		volume -= AudioStereoDescent;
+		if (volume < 0) {
+			volume = 0;
+		} else if (volume > 1000) {
+			volume = 1000;
+		}
     }
     AudioAmplifier = volume;
     if (!AudioSoftVolume) {
-	AlsaSetVolume(volume);
+		AlsaSetVolume(volume);
     }
 }
 
@@ -1826,8 +1606,10 @@ void AudioPause(void)
 */
 void AudioSetBufferTime(int delay)
 {
+//	fprintf(stderr, "AudioSetBufferTime: %d\n", delay);
+
     if (!delay) {
-	delay = 600;
+	delay = AudioBufferTime;
     }
     AudioBufferTime = delay;
 }
@@ -1952,155 +1734,27 @@ void AudioSetAutoAES(int onoff)
 */
 void AudioInit(void)
 {
-    unsigned u;
-    unsigned int freq;
-    unsigned int chan;
+	AudioRingInit();
+	AlsaInit();
 
-    AudioDoingInit = 1;
-    AudioRingInit();
-    AlsaInit();
+	HwChannelMaps = snd_pcm_query_chmaps(AlsaPCMHandle);
+	if (!HwChannelMaps) {
+		fprintf(stderr, "AudioInit: No HwChannelMaps found!!!\n");
+	}
 #ifdef SOUND_DEBUG
-	snd_pcm_chmap_query_t **chmaps = snd_pcm_query_chmaps(AlsaPCMHandle);
-
-	if (!chmaps) {
-		fprintf(stderr, "AudioInit: No chmaps found!!!\n");
-	} else {
-		for (int i = 0; chmaps[i] != NULL; i++) {
+	else {
+		for (int i = 0; HwChannelMaps[i] != NULL; i++) {
 			char aname[128];
-			if (snd_pcm_chmap_print(&chmaps[i]->map, sizeof(aname), aname) <= 0)
+			if (snd_pcm_chmap_print(&HwChannelMaps[i]->map, sizeof(aname), aname) <= 0)
 				aname[0] = '\0';
-			fprintf(stderr, "AudioInit: chmap %s %d %s found\n",
-				aname, chmaps[i]->map.channels, snd_pcm_chmap_type_name(chmaps[i]->type));
+			fprintf(stderr, "AudioInit: chmap %s channels %d type %s found\n",
+				aname, HwChannelMaps[i]->map.channels,
+				snd_pcm_chmap_type_name(HwChannelMaps[i]->type));
 		}
 	}
-	snd_pcm_free_chmaps(chmaps);
 #endif
-    //
-    //	Check which channels/rates/formats are supported
-    //	FIXME: we force 44.1Khz and 48Khz must be supported equal
-    //	FIXME: should use bitmap of channels supported in RatesInHw
-    //	FIXME: use loop over sample-rates
-    freq = 44100;
-    AudioRatesInHw[Audio44100] = 0;
-    for (chan = 1; chan < 9; ++chan) {
-		unsigned int tchan;
-		unsigned int tfreq;
 
-		tchan = chan;
-		tfreq = freq;
-		if (AlsaSetup(&tfreq, &tchan, 0)) {
-			AudioChannelsInHw[chan] = 0;
-		} else {
-			AudioChannelsInHw[chan] = chan;
-			AudioRatesInHw[Audio44100] |= (1 << chan);
-		}
-    }
-    freq = 48000;
-    AudioRatesInHw[Audio48000] = 0;
-    for (chan = 1; chan < 9; ++chan) {
-		unsigned int tchan;
-		unsigned int tfreq;
-
-		if (!AudioChannelsInHw[chan]) {
-			continue;
-		}
-		tchan = chan;
-		tfreq = freq;
-		if (AlsaSetup(&tfreq, &tchan, 0)) {
-			//AudioChannelsInHw[chan] = 0;
-		} else {
-			AudioChannelsInHw[chan] = chan;
-			AudioRatesInHw[Audio48000] |= (1 << chan);
-		}
-    }
-    freq = 192000;
-    AudioRatesInHw[Audio192000] = 0;
-	for (chan = 1; chan < 9; ++chan) {
-		unsigned int tchan;
-		unsigned int tfreq;
-
-		if (!AudioChannelsInHw[chan]) {
-			continue;
-		}
-		tchan = chan;
-		tfreq = freq;
-		if (AlsaSetup(&tfreq, &tchan, 0)) {
-			//AudioChannelsInHw[chan] = 0;
-		} else {
-			AudioChannelsInHw[chan] = chan;
-			AudioRatesInHw[Audio192000] |= (1 << chan);
-		}
-    }
-    //	build channel support and conversion table
-    for (u = 0; u < AudioRatesMax; ++u) {
-	for (chan = 1; chan < 9; ++chan) {
-	    AudioChannelMatrix[u][chan] = 0;
-	    if (!AudioRatesInHw[u]) {	// rate unsupported
-		continue;
-	    }
-	    if (AudioChannelsInHw[chan]) {
-		AudioChannelMatrix[u][chan] = chan;
-	    } else {
-		switch (chan) {
-		    case 1:
-			if (AudioChannelsInHw[2]) {
-			    AudioChannelMatrix[u][chan] = 2;
-			}
-			break;
-		    case 2:
-		    case 3:
-			if (AudioChannelsInHw[4]) {
-			    AudioChannelMatrix[u][chan] = 4;
-			    break;
-			}
-		    case 4:
-			if (AudioChannelsInHw[5]) {
-			    AudioChannelMatrix[u][chan] = 5;
-			    break;
-			}
-		    case 5:
-			if (AudioChannelsInHw[6]) {
-			    AudioChannelMatrix[u][chan] = 6;
-			    break;
-			}
-		    case 6:
-			if (AudioChannelsInHw[7]) {
-			    AudioChannelMatrix[u][chan] = 7;
-			    break;
-			}
-		    case 7:
-			if (AudioChannelsInHw[8]) {
-			    AudioChannelMatrix[u][chan] = 8;
-			    break;
-			}
-		    case 8:
-			if (AudioChannelsInHw[6]) {
-			    AudioChannelMatrix[u][chan] = 6;
-			    break;
-			}
-			if (AudioChannelsInHw[2]) {
-			    AudioChannelMatrix[u][chan] = 2;
-			    break;
-			}
-			if (AudioChannelsInHw[1]) {
-			    AudioChannelMatrix[u][chan] = 1;
-			    break;
-			}
-			break;
-		}
-	    }
-	}
-    }
-    for (u = 0; u < AudioRatesMax; ++u) {
-	Info(_("audio: %6dHz supports %d %d %d %d %d %d %d %d channels\n"),
-	    AudioRatesTable[u], AudioChannelMatrix[u][1],
-	    AudioChannelMatrix[u][2], AudioChannelMatrix[u][3],
-	    AudioChannelMatrix[u][4], AudioChannelMatrix[u][5],
-	    AudioChannelMatrix[u][6], AudioChannelMatrix[u][7],
-	    AudioChannelMatrix[u][8]);
-    }
 	AudioInitThread();
-    AudioDoingInit = 0;
 }
 
 /**
@@ -2111,6 +1765,8 @@ void AudioExit(void)
     Debug(3, "audio: %s\n", __FUNCTION__);
 
 	AudioExitThread();
+	snd_pcm_free_chmaps(HwChannelMaps);
+
     AlsaExit();
     AudioRingExit();
     AudioRunning = 0;

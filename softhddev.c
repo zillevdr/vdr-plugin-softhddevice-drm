@@ -510,7 +510,7 @@ enum
 */
 int PlayAudio(const uint8_t * data, int size, uint8_t id)
 {
-    int n;
+    int n, err;
     const uint8_t *p;
 
 	AudioAvPkt->pts = AV_NOPTS_VALUE;
@@ -537,7 +537,8 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
     }
     // hard limit buffer full: don't overrun audio buffers on replay
     if (AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE) {
-		fprintf(stderr, "PlayAudio: AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE\n");
+//		fprintf(stderr, "PlayAudio: AudioFreeBytes %d < AUDIO_MIN_BUFFER_FREE %d\n",
+//			AudioFreeBytes(), AUDIO_MIN_BUFFER_FREE);
 		return 0;
     }
     // PES header 0x00 0x00 0x01 ID
@@ -699,9 +700,17 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 			avpkt->pts = AudioAvPkt->pts;
 			avpkt->dts = AudioAvPkt->dts;
 			// FIXME: not aligned for ffmpeg
-			CodecAudioDecode(MyAudioDecoder, avpkt);
+			err = CodecAudioDecode(MyAudioDecoder, avpkt);
 			AudioAvPkt->pts = AV_NOPTS_VALUE;
 			AudioAvPkt->dts = AV_NOPTS_VALUE;
+			if (err) {
+				if (err == 1) {
+//					fprintf(stderr, "PlayAudio: CodecAudioDecode ended with error! "
+//						"send pkt again with new configuration.\n");
+					NewAudioStream = 1;
+				}
+				return 0;
+			}
 			p += r;
 			n -= r;
 			continue;
