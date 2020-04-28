@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2020-04-08 12:03+0200\n"
+"POT-Creation-Date: 2020-04-28 16:55+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -80,6 +80,14 @@ msgstr ""
 
 #, c-format
 msgid "audio: can't place %d samples in ring buffer\n"
+msgstr ""
+
+#, c-format
+msgid "AudioPlay: snd_pcm_pause(): %s\n"
+msgstr ""
+
+#, c-format
+msgid "AudioPause: snd_pcm_pause(): %s\n"
 msgstr ""
 
 msgid "codec: can't allocate vodeo decoder\n"

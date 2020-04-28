@@ -79,7 +79,7 @@ static volatile char AudioVideoIsReady;	///< video ready start early
 static int AudioSkip;			///< skip audio to sync to video
 
 static const int AudioBytesProSample = 2;	///< number of bytes per sample
-static int AudioBufferTime = 620;	///< audio buffer time in ms
+static int AudioBufferTime = 600;	///< audio buffer time in ms
 
 static pthread_t AudioThread;		///< audio play thread
 static pthread_mutex_t AudioRbMutex;	///< audio condition mutex
@@ -640,7 +640,8 @@ static int AlsaPlayer(void)
 		}
 
 		// how many bytes can be written?
-		n = snd_pcm_avail_update(AlsaPCMHandle);
+//		n = snd_pcm_avail_update(AlsaPCMHandle);
+		n = snd_pcm_avail(AlsaPCMHandle);
 		if (n < 0) {
 			if (n == -EAGAIN) {
 				continue;
@@ -681,11 +682,11 @@ static int AlsaPlayer(void)
 		frames = snd_pcm_bytes_to_frames(AlsaPCMHandle, avail);
 
 		pthread_mutex_lock(&AudioRbMutex);
-//		if (AlsaUseMmap) {
-//			err = snd_pcm_mmap_writei(AlsaPCMHandle, p, frames);
-//		} else {
+		if (AlsaUseMmap) {
+			err = snd_pcm_mmap_writei(AlsaPCMHandle, p, frames);
+		} else {
 			err = snd_pcm_writei(AlsaPCMHandle, p, frames);
-//		}
+		}
 		RingBufferReadAdvance(AudioRingBuffer, avail);
 		pthread_mutex_unlock(&AudioRbMutex);
 		if (err != frames) {
@@ -756,9 +757,10 @@ static snd_pcm_t *AlsaOpenPCM(int passthrough)
     if ((err = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK,
 		SND_PCM_NONBLOCK)) < 0) {
 
-		Error(_("audio/alsa: playback open '%s' error: %s\n"), device,
+		fprintf(stderr, "AlsaOpenPCM: playback open '%s' error: %s\n",
+			device, snd_strerror(err));
+		Fatal(_("audio/alsa: playback open '%s' error: %s\n"), device,
 			snd_strerror(err));
-		return NULL;
 	}
 
     if ((err = snd_pcm_nonblock(handle, 0)) < 0) {
@@ -793,7 +795,10 @@ static void AlsaInitPCM(void)
     Info(_("audio/alsa: supports pause: %s\n"), AlsaCanPause ? "yes" : "no");
 
     AlsaPCMHandle = handle;
+
 #ifdef SOUND_DEBUG
+	printf("AlsaInitPCM: supports pause: %s\n", AlsaCanPause ? "yes" : "no");
+
 	static snd_output_t *output = NULL;
 	err = snd_output_stdio_attach(&output, stdout, 0);
 	if (err < 0) {
@@ -955,6 +960,12 @@ static int AlsaSetup(int rate, int channels, int passthrough)
 //		fprintf(stderr, "AlsaSetup: SampleRate %d supported\n", rate);
 	}
 
+	if (!snd_pcm_hw_params_test_access(AlsaPCMHandle, hwparams, SND_PCM_ACCESS_MMAP_INTERLEAVED)) {
+		fprintf(stderr, "AlsaSetup: SND_PCM_ACCESS_MMAP_INTERLEAVED supported\n");
+
+		AlsaUseMmap = 1;
+	}
+
 	if ((err =
 		snd_pcm_set_params(AlsaPCMHandle, SND_PCM_FORMAT_S16,
 			AlsaUseMmap ? SND_PCM_ACCESS_MMAP_INTERLEAVED :
@@ -1021,47 +1032,6 @@ static int AlsaSetup(int rate, int channels, int passthrough)
 #endif
     return 0;
 }
-
-/**
-**	Play audio.
-*/
-/*static void AlsaPlay(void)
-{
-    int err;
-
-    if (AlsaCanPause) {
-	if ((err = snd_pcm_pause(AlsaPCMHandle, 0))) {
-	    Error(_("audio/alsa: snd_pcm_pause(): %s\n"), snd_strerror(err));
-	}
-    } else {
-	if ((err = snd_pcm_prepare(AlsaPCMHandle)) < 0) {
-	    Error(_("audio/alsa: snd_pcm_prepare(): %s\n"), snd_strerror(err));
-	}
-    }
-#ifdef DEBUG
-    if (snd_pcm_state(AlsaPCMHandle) == SND_PCM_STATE_PAUSED) {
-	Error(_("audio/alsa: still paused\n"));
-    }
-#endif
-}*/
-
-/**
-**	Pause audio.
-*/
-/*static void AlsaPause(void)
-{
-    int err;
-
-    if (AlsaCanPause) {
-	if ((err = snd_pcm_pause(AlsaPCMHandle, 1))) {
-	    Error(_("snd_pcm_pause(): %s\n"), snd_strerror(err));
-	}
-    } else {
-	if ((err = snd_pcm_drop(AlsaPCMHandle)) < 0) {
-	    Error(_("snd_pcm_drop(): %s\n"), snd_strerror(err));
-	}
-    }
-}*/
 
 /**
 **	Empty log callback
@@ -1388,6 +1358,7 @@ int AudioVideoReady(int64_t pts)
 
 	if (AudioRunning) {
 		fprintf(stderr, "AudioVideoReady: Audio is Running !!!???\n");
+		return 0;
 	}
 
 	// no valid audio known
@@ -1568,18 +1539,27 @@ void AudioSetVolume(int volume)
 */
 void AudioPlay(void)
 {
-	if (!AudioPaused) {
+	int err;
+
+	if (!AudioPaused && !AlsaCanPause) {
 		Debug(3, "audio: not paused, check the code\n");
 #ifdef DEBUG
 		fprintf(stderr, "AudioPlay: not paused, check the code\n");
 #endif
-		return;
+//		return;
 	}
-	Debug(3, "audio: resumed\n");
-	AudioPaused = 0;
-	if (AudioStartThreshold < RingBufferUsedBytes(AudioRingBuffer)) {
-		fprintf(stderr, "AudioPlay: AudioStartThreshold < RingBufferUsedBytes, start play\n");
-		pthread_cond_signal(&AudioStartCond);
+	Debug(3, "AudioPlay: resumed\n");
+	if (AlsaCanPause) {
+		fprintf(stderr, "AudioPlay: AlsaCanPause\n");
+		if ((err = snd_pcm_pause(AlsaPCMHandle, 0))) {
+			Error(_("AudioPlay: snd_pcm_pause(): %s\n"), snd_strerror(err));
+		}
+	} else {
+		AudioPaused = 0;
+		if (AudioStartThreshold < RingBufferUsedBytes(AudioRingBuffer)) {
+			fprintf(stderr, "AudioPlay: AudioStartThreshold < RingBufferUsedBytes, start play\n");
+			pthread_cond_signal(&AudioStartCond);
+		}
 	}
 }
 
@@ -1588,12 +1568,24 @@ void AudioPlay(void)
 */
 void AudioPause(void)
 {
-    if (AudioPaused) {
-	Debug(3, "audio: already paused, check the code\n");
+	int err;
+
+	if (AudioPaused) {
+		Debug(3, "AudioPause: already paused, check the code\n");
+#ifdef DEBUG
+		fprintf(stderr, "AudioPause: already paused, check the code\n");
+#endif
 	return;
-    }
-    Debug(3, "audio: paused\n");
-    AudioPaused = 1;
+	}
+	Debug(3, "AudioPause: paused\n");
+	if (AlsaCanPause) {
+		fprintf(stderr, "AudioPause: AlsaCanPause\n");
+		if ((err = snd_pcm_pause(AlsaPCMHandle, 1))) {
+			Error(_("AudioPause: snd_pcm_pause(): %s\n"), snd_strerror(err));
+		}
+	} else {
+		AudioPaused = 1;
+	}
 }
 
 /**

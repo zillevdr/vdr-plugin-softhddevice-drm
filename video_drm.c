@@ -807,7 +807,7 @@ audioclock:
 	}
 	int diff = frame->pts - audio_clock - VideoAudioDelay;
 
-	if (diff < -25 * 90 && !render->TrickSpeed) {
+	if (diff < -5 * 90 && !render->TrickSpeed) {
 		render->FramesDropped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDropped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
@@ -829,7 +829,7 @@ audioclock:
 		goto dequeue;
 	}
 
-	if (diff > 55 * 90 && !render->TrickSpeed) {
+	if (diff > 35 * 90 && !render->TrickSpeed) {
 		render->FramesDuped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDuped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
@@ -1542,8 +1542,6 @@ void StartVideo(VideoRender * render)
 		render->StartCounter, render->Closing, render->TrickSpeed);
 #endif
 	pthread_cond_signal(&PauseCondition);
-
-	fprintf(stderr, "StartVideo: Ende\n");
 }
 
 /**

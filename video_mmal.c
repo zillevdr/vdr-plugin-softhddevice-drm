@@ -535,7 +535,7 @@ dequeue:
 	}
 
 
-	if(diff > 55 * 90 && render->FrameCounter % 2 == 0 && !render->TrickSpeed){
+	if(diff > 35 * 90 && render->FrameCounter % 2 == 0 && !render->TrickSpeed){
 		render->FramesDuped++;
 dupe:
 		rbuffer = mmal_queue_get(render->vout_input_pool->queue);
@@ -547,7 +547,7 @@ dupe:
 		render->buffers++;
 		buffer = rbuffer;
 	}
-	if (diff < -25 * 90 && render->buffers_in_queue > 1 && !render->TrickSpeed) {
+	if (diff < -5 * 90 && render->buffers_in_queue > 1 && !render->TrickSpeed) {
 		render->FramesDropped++;
 		if(frame)
 			av_frame_free(&frame);
