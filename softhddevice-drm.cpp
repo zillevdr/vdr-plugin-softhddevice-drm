@@ -719,8 +719,6 @@ void cSoftHdMenu::Create(void)
     current = Current();		// get current menu item index
     Clear();				// clear the menu
 
-    SetHasHotkeys();
-
     Add(new cOsdItem(NULL, osUnknown, false));
     Add(new cOsdItem(NULL, osUnknown, false));
     GetStats(&missed, &duped, &dropped, &counter);
@@ -740,8 +738,6 @@ cSoftHdMenu::cSoftHdMenu(const char *title, int c0, int c1, int c2, int c3,
     int c4)
 :cOsdMenu(title, c0, c1, c2, c3, c4)
 {
-    HotkeyState = HksInitial;
-
     Create();
 }
 
@@ -750,66 +746,6 @@ cSoftHdMenu::cSoftHdMenu(const char *title, int c0, int c1, int c2, int c3,
 */
 cSoftHdMenu::~cSoftHdMenu()
 {
-}
-
-/**
-**	Handle hot key commands.
-**
-**	@param code	numeric hot key code
-*/
-static void HandleHotkey(int code)
-{
-    switch (code) {
-	case 10:			// disable pass-through
-	    AudioPassthroughState = 0;
-	    CodecSetAudioPassthrough(0);
-	    Skins.QueueMessage(mtInfo, tr("pass-through disabled"));
-	    break;
-	case 11:			// enable pass-through
-	    // note: you can't enable, without configured pass-through
-	    AudioPassthroughState = 1;
-	    CodecSetAudioPassthrough(ConfigAudioPassthrough);
-	    Skins.QueueMessage(mtInfo, tr("pass-through enabled"));
-	    break;
-	case 12:			// toggle pass-through
-	    AudioPassthroughState ^= 1;
-	    if (AudioPassthroughState) {
-		CodecSetAudioPassthrough(ConfigAudioPassthrough);
-		Skins.QueueMessage(mtInfo, tr("pass-through enabled"));
-	    } else {
-		CodecSetAudioPassthrough(0);
-		Skins.QueueMessage(mtInfo, tr("pass-through disabled"));
-	    }
-	    break;
-	case 13:			// decrease audio delay
-	    ConfigVideoAudioDelay -= 10;
-	    VideoSetAudioDelay(ConfigVideoAudioDelay);
-	    Skins.QueueMessage(mtInfo,
-		cString::sprintf(tr("audio delay changed to %d"),
-		    ConfigVideoAudioDelay));
-	    break;
-	case 14:			// increase audio delay
-	    ConfigVideoAudioDelay += 10;
-	    VideoSetAudioDelay(ConfigVideoAudioDelay);
-	    Skins.QueueMessage(mtInfo,
-		cString::sprintf(tr("audio delay changed to %d"),
-		    ConfigVideoAudioDelay));
-	    break;
-	case 15:
-	    ConfigAudioDownmix ^= 1;
-	    fprintf(stderr, "toggle downmix\n");
-	    CodecSetAudioDownmix(ConfigAudioDownmix);
-	    if (ConfigAudioDownmix) {
-		Skins.QueueMessage(mtInfo, tr("surround downmix enabled"));
-	    } else {
-		Skins.QueueMessage(mtInfo, tr("surround downmix disabled"));
-	    }
-	    ResetChannelId();
-	    break;
-	default:
-	    esyslog(tr("[softhddev]: hot key %d is not supported\n"), code);
-	    break;
-    }
 }
 
 /**
@@ -823,55 +759,6 @@ eOSState cSoftHdMenu::ProcessKey(eKeys key)
 
     //dsyslog("[softhddev]%s: %x\n", __FUNCTION__, key);
 
-    switch (HotkeyState) {
-	case HksInitial:		// initial state, waiting for hot key
-	    if (key == kBlue) {
-		HotkeyState = HksBlue;	// blue button
-		return osContinue;
-	    }
-	    if (key == kRed) {
-		HotkeyState = HksRed;	// red button
-		return osContinue;
-	    }
-	    break;
-	case HksBlue:			// blue and first number
-	    if (k0 <= key && key <= k9) {
-		HotkeyCode = key - k0;
-		HotkeyState = HksBlue1;
-		return osContinue;
-	    }
-	    HotkeyState = HksInitial;
-	    break;
-	case HksBlue1:			// blue and second number/enter
-	    if (k0 <= key && key <= k9) {
-		HotkeyCode *= 10;
-		HotkeyCode += key - k0;
-		HotkeyState = HksInitial;
-		dsyslog("[softhddev]%s: hot-key %d\n", __FUNCTION__,
-		    HotkeyCode);
-		HandleHotkey(HotkeyCode);
-		return osEnd;
-	    }
-	    if (key == kOk) {
-		HotkeyState = HksInitial;
-		dsyslog("[softhddev]%s: hot-key %d\n", __FUNCTION__,
-		    HotkeyCode);
-		HandleHotkey(HotkeyCode);
-		return osEnd;
-	    }
-	    HotkeyState = HksInitial;
-	case HksRed:			// red and first number
-	    if (k0 <= key && key <= k9) {
-		HotkeyCode = 100 + key - k0;
-		HotkeyState = HksInitial;
-		HandleHotkey(HotkeyCode);
-		return osEnd;
-	    }
-	    HotkeyState = HksInitial;
-	    break;
-    }
-
-    // call standard function
     state = cOsdMenu::ProcessKey(key);
 
     switch (state) {
@@ -1675,16 +1562,17 @@ const char **cPluginSoftHdDevice::SVDRPHelpPages(void)
 **	@param option		all command arguments
 **	@param reply_code	reply code
 */
-cString cPluginSoftHdDevice::SVDRPCommand(const char *command,
-    const char *option, __attribute__ ((unused)) int &reply_code)
+cString cPluginSoftHdDevice::SVDRPCommand( __attribute__ ((unused))
+    const char *command, __attribute__ ((unused)) const char *option,
+    __attribute__ ((unused)) int &reply_code)
 {
-    if (!strcasecmp(command, "HOTK")) {
+/*    if (!strcasecmp(command, "HOTK")) {
 	int hotk;
 
 	hotk = strtol(option, NULL, 0);
 	HandleHotkey(hotk);
 	return "hot-key executed";
-    }
+    }*/
 
     return NULL;
 }

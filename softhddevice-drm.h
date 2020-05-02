@@ -166,24 +166,11 @@ class cMenuSetupSoft:public cMenuSetupPage
 //////////////////////////////////////////////////////////////////////////////
 
 /**
-**	Hotkey parsing state machine.
-*/
-typedef enum
-{
-    HksInitial,				///< initial state
-    HksBlue,				///< blue button pressed
-    HksBlue1,				///< blue and 1 number pressed
-    HksRed,				///< red button pressed
-} HkState;
-
-/**
 **	Soft device plugin menu class.
 */
 class cSoftHdMenu:public cOsdMenu
 {
   private:
-    HkState HotkeyState;		///< current hot-key state
-    int HotkeyCode;			///< current hot-key code
     void Create(void);			///< create plugin main menu
   public:
     cSoftHdMenu(const char *, int = 0, int = 0, int = 0, int = 0, int = 0);

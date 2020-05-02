@@ -880,7 +880,10 @@ page_flip:
 
 	tick = GetMsTicks();
 	if (tick - last_tick > 21) {
-		Debug(3, "Frame2Display: StartCounter %4d %dms\n", render->StartCounter, tick - last_tick);
+		Debug(3, "Frame2Display: StartCounter %4d %dms\n",
+			render->StartCounter, tick - last_tick);
+		fprintf(stderr, "Frame2Display: StartCounter %4d %dms\n",
+			render->StartCounter, tick - last_tick);
 	}
 	last_tick = tick;
 #endif

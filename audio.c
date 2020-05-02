@@ -901,7 +901,7 @@ static void AlsaInitMixer(void)
 **
 **	@todo FIXME: remove pointer for freq + channels
 */
-static int AlsaSetup(int rate, int channels, int passthrough)
+static int AlsaSetup(int rate, int channels, __attribute__ ((unused)) int passthrough)
 {
 	snd_pcm_hw_params_t *hwparams;
     snd_pcm_uframes_t buffer_size;
@@ -961,7 +961,7 @@ static int AlsaSetup(int rate, int channels, int passthrough)
 	}
 
 	if (!snd_pcm_hw_params_test_access(AlsaPCMHandle, hwparams, SND_PCM_ACCESS_MMAP_INTERLEAVED)) {
-		fprintf(stderr, "AlsaSetup: SND_PCM_ACCESS_MMAP_INTERLEAVED supported\n");
+//		fprintf(stderr, "AlsaSetup: SND_PCM_ACCESS_MMAP_INTERLEAVED supported\n");
 
 		AlsaUseMmap = 1;
 	}
@@ -1021,6 +1021,10 @@ static int AlsaSetup(int rate, int channels, int passthrough)
 		/ (rate * channels * AudioBytesProSample));
 
 #ifdef SOUND_DEBUG
+	printf("AlsaSetup: AudioBufferTime %d Threshold %ums\n",
+		AudioBufferTime, (AudioStartThreshold * 1000)
+		/ (rate * channels * AudioBytesProSample));
+
 	static snd_output_t *output = NULL;
 	err = snd_output_stdio_attach(&output, stdout, 0);
 	if (err < 0) {
@@ -1598,12 +1602,13 @@ void AudioPause(void)
 */
 void AudioSetBufferTime(int delay)
 {
-//	fprintf(stderr, "AudioSetBufferTime: %d\n", delay);
 
     if (!delay) {
 	delay = AudioBufferTime;
     }
     AudioBufferTime = delay;
+//	fprintf(stderr, "AudioSetBufferTime: delay %d AudioBufferTime %d\n",
+//		delay, AudioBufferTime);
 }
 
 /**
