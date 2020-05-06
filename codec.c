@@ -136,7 +136,7 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 	enum AVHWDeviceType type = 0;
 	static AVBufferRef *hw_device_ctx = NULL;
 
-	if (VideoCodecMode(decoder->Render) || codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+	if (VideoCodecMode(decoder->Render) == 1) {
 		if (!(codec = avcodec_find_decoder_by_name(VideoGetDecoderName(
 			avcodec_get_name(codec_id)))))
 
@@ -148,19 +148,21 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 			fprintf(stderr, "CodecVideoOpen: The video codec %s is not present in libavcodec\n",
 				avcodec_get_name(codec_id));
 
-		for (int n = 0; ; n++) {
-			const AVCodecHWConfig *cfg = avcodec_get_hw_config(codec, n);
-			if (!cfg)
-				break;
-			if (cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
-				cfg->device_type == AV_HWDEVICE_TYPE_DRM) {
+		if (!(VideoCodecMode(decoder->Render) == 2 && codec_id == AV_CODEC_ID_MPEG2VIDEO)) {
+			for (int n = 0; ; n++) {
+				const AVCodecHWConfig *cfg = avcodec_get_hw_config(codec, n);
+				if (!cfg)
+					break;
+				if (cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
+					cfg->device_type == AV_HWDEVICE_TYPE_DRM) {
 
 #ifdef CODEC_DEBUG
-				fprintf(stderr, "CodecVideoOpen: HW codec %s gefunden\n",
-					av_hwdevice_get_type_name(cfg->device_type));
+					fprintf(stderr, "CodecVideoOpen: HW codec %s gefunden\n",
+						av_hwdevice_get_type_name(cfg->device_type));
 #endif
-				type = cfg->device_type;
-				break;
+					type = cfg->device_type;
+					break;
+				}
 			}
 		}
 	}
@@ -445,21 +447,20 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 	}
 
 	if (CodecDownmix) {
-#ifdef DEBUG
+#ifdef CODEC_DEBUG
 		fprintf(stderr, "CodecAudioOpen: CodecDownmix to AV_CH_LAYOUT_STEREO CodecDownmix %d\n",
 			CodecDownmix);
 #endif
-		audio_decoder->AudioCtx->request_channel_layout =
-			AV_CH_LAYOUT_STEREO;
+		audio_decoder->AudioCtx->request_channel_layout = AV_CH_LAYOUT_STEREO;
 	}
 
 	// open codec
 	if (avcodec_open2(audio_decoder->AudioCtx, audio_decoder->AudioCtx->codec, NULL) < 0) {
 		Fatal(_("codec: can't open audio codec\n"));
 	}
-#ifdef DEBUG
-	Debug(3, "codec: audio '%s'\n", audio_decoder->AudioCtx->codec->long_name);
-	fprintf(stderr,"CodecAudioOpen: audio '%s'\n", audio_decoder->AudioCtx->codec->long_name);
+#ifdef CODEC_DEBUG
+	Debug(3, "CodecAudioOpen: Codec %s found\n", audio_decoder->AudioCtx->codec->long_name);
+	fprintf(stderr,"CodecAudioOpen: Codec %s found\n", audio_decoder->AudioCtx->codec->long_name);
 #endif
 	if (audio_decoder->AudioCtx->codec->capabilities & AV_CODEC_CAP_TRUNCATED) {
 		Debug(3, "codec: audio can use truncated packets\n");

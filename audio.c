@@ -966,6 +966,12 @@ static int AlsaSetup(int rate, int channels, __attribute__ ((unused)) int passth
 		AlsaUseMmap = 1;
 	}
 
+//	unsigned int val = 0;
+//	int dir = 0;
+//	err = snd_pcm_hw_params_test_buffer_time(AlsaPCMHandle, hwparams, val, dir);
+//	fprintf(stderr, "AlsaSetup: there is buffer_time val %d dir %d (%s)\n",
+//		val, dir, snd_strerror(err));
+
 	if ((err =
 		snd_pcm_set_params(AlsaPCMHandle, SND_PCM_FORMAT_S16,
 			AlsaUseMmap ? SND_PCM_ACCESS_MMAP_INTERLEAVED :

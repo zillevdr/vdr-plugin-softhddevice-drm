@@ -133,7 +133,8 @@ struct _Drm_Render_
 	int FramesDropped;			///< number of frames dropped
 	int64_t pts;
 
-	int CodecMode;			/// 0: find codec by id, 1: set rkmpp
+	int CodecMode;			/// 0: find codec by id, 1: set _rkmpp, 2: no mpeg hw
+	int HwDeint;			/// 0: use sw deinterlacer, 1: use hw deinterlacer
 
 	AVFilterGraph *filter_graph;
 	AVFilterContext *buffersrc_ctx, *buffersink_ctx;
@@ -250,6 +251,7 @@ void ChangePlanes(VideoRender * render, int back)
 {
 	drmModeAtomicReqPtr ModeReq;
 	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
+//	const uint32_t flags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_ASYNC;
 	uint64_t zpos_video;
 	uint64_t zpos_osd;
 
@@ -346,21 +348,35 @@ void ReadHWPlatform(VideoRender * render)
 	size_t bufsize = 128;
 	buf = (char *) calloc(bufsize, sizeof(char));
 
+	render->CodecMode = 0;
+
 	if (ReadLineFromFile(buf, bufsize, "/sys/firmware/devicetree/base/compatible")) {
 
-//		if (strstr((char *)&buf[(strlen(buf) + 1)], "sun8i-h3"))	This we need later
-//			printf("main: sun8i-h3 in buf gefunden!\n");
+		if (strstr((char *)&buf[(strlen(buf) + 1)], "sun8i-h3")) {
+#ifdef DEBUG
+			printf("ReadHWPlatform: sun8i-h3 found\n");
+#endif
+//			render->HwDeint = 1;	// This doesn't run yet.
+		}
 
 		if (strstr((char *)&buf[(strlen(buf) + 1)], "rockchip")) {
 			if (ReadLineFromFile(buf, bufsize, "/proc/version")) {
-				if (strstr(buf, "4.4."))
+				if (strstr(buf, "4.4.")) {
+#ifdef DEBUG
+					printf("ReadHWPlatform: rockchip with kernel 4.4.x found\n");
+#endif
 					render->CodecMode = 1;
+				} else {
+#ifdef DEBUG
+					printf("ReadHWPlatform: rockchip with mainline kernel found\n");
+#endif
+					render->CodecMode = 2;	// no mpeg HW
+				}
 			}
 		}
 
 	}
 	free(buf);
-
 }
 
 static int TestCaps(int fd)
@@ -529,8 +545,8 @@ static int FindDevice(VideoRender * render)
 	drmModeFreeResources(resources);
 
 #ifdef DRM_DEBUG
-	Info(_("FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i\n"),
-		render->crtc_id, render->video_plane, render->osd_plane);
+	Info(_("FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n"),
+		render->crtc_id, render->video_plane, render->osd_plane, render->use_zpos);
 #endif
 
 	return 0;
@@ -1187,9 +1203,11 @@ void VideoDelRender(VideoRender * render)
 enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render,
     AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
-	if (!render->CodecMode && video_ctx->codec_id != AV_CODEC_ID_MPEG2VIDEO) {
-//		fprintf(stderr, "Video_get_format: return AV_PIX_FMT_DRM_PRIME Codecname: %s\n",
-//			video_ctx->codec->name);
+	if (!render->CodecMode || (render->CodecMode == 2 && video_ctx->codec_id != AV_CODEC_ID_MPEG2VIDEO)) {
+#ifdef CODEC_DEBUG
+		fprintf(stderr, "Video_get_format: return AV_PIX_FMT_DRM_PRIME for Codecname: %s\n",
+			video_ctx->codec->name);
+#endif
 		return AV_PIX_FMT_DRM_PRIME;
 	}
 
@@ -1348,9 +1366,20 @@ getoutframe:
 				av_frame_free(&filt_frame);
 				goto closing;
 			}
+			if (ret < 0)
+				fprintf(stderr, "FilterHandlerThread: ret %i %s\n", ret, av_err2str(ret));
+
 			if (thread_close) {
 				goto getoutframe;
 			}
+
+			if (!filt_frame->height || !filt_frame->width) {
+				fprintf(stderr, "FilterHandlerThread: width %d height%d\n",
+					filt_frame->width, filt_frame->height);
+				av_frame_free(&filt_frame);
+				goto getinframe;
+			}
+
 			filt_frame->pts = filt_frame->pts / 2;
 fillframe:
 			if (render->Deint_Close) {
@@ -1358,7 +1387,16 @@ fillframe:
 				break;
 			}
 			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
-				EnqueueFB(render, filt_frame);
+				if (filt_frame->format == AV_PIX_FMT_YUV420P) {
+					EnqueueFB(render, filt_frame);
+				} else {
+					fprintf(stderr, "FilterHandlerThread: AV_PIX_FMT_DRM_PRIME\n");
+					pthread_mutex_lock(&VideoLockMutex);
+					render->FramesRb[render->FramesWrite] = filt_frame;
+					render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
+					atomic_inc(&render->FramesFilled);
+					pthread_mutex_unlock(&VideoLockMutex);
+				}
 			} else {
 				usleep(10000);
 				goto fillframe;
@@ -1460,8 +1498,10 @@ void VideoRenderFrame(VideoRender * render,
 		return;
 	}
 
-	if (frame->interlaced_frame && SWDeinterlacer &&
-		frame->format == AV_PIX_FMT_YUV420P) {
+	if ((frame->interlaced_frame && SWDeinterlacer &&
+		frame->format == AV_PIX_FMT_YUV420P) || 
+		(frame->interlaced_frame && render->HwDeint)) {
+
 		if (!FilterThread) {
 			VideoFilterInit(render, video_ctx, frame);
 			pthread_create(&FilterThread, NULL, FilterHandlerThread, render);
