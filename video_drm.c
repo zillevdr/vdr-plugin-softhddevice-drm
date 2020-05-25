@@ -49,6 +49,7 @@
 #include <drm_fourcc.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext_drm.h>
+#include <libavutil/pixdesc.h>
 //#include <libavutil/time.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
@@ -586,6 +587,8 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 
 		if (drmIoctl(render->fd_drm, DRM_IOCTL_MODE_CREATE_DUMB, &creq) < 0){
 			fprintf(stderr, "SetupFB: cannot create dumb buffer (%d): %m\n", errno);
+			fprintf(stderr, "SetupFB: width %d height %d bpp %d\n",
+				creq.width, creq.height, creq.bpp);
 			return -errno;
 		}
 
@@ -1201,30 +1204,24 @@ void VideoDelRender(VideoRender * render)
 ///				quality.
 ///
 enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render,
-    AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
+		AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
-	if (!render->CodecMode || (render->CodecMode == 2 && video_ctx->codec_id != AV_CODEC_ID_MPEG2VIDEO)) {
-#ifdef CODEC_DEBUG
-		fprintf(stderr, "Video_get_format: return AV_PIX_FMT_DRM_PRIME for Codecname: %s\n",
-			video_ctx->codec->name);
-#endif
-		return AV_PIX_FMT_DRM_PRIME;
-	}
-
 	while (*fmt != AV_PIX_FMT_NONE) {
+#ifdef DEBUG
+		fprintf(stderr, "Video_get_format: PixelFormat %s Codecname: %s\n",
+			av_get_pix_fmt_name(*fmt), video_ctx->codec->name);
+#endif
+		if (*fmt == AV_PIX_FMT_DRM_PRIME) {
+			return AV_PIX_FMT_DRM_PRIME;
+		}
+
 		if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
-//			fprintf(stderr, "Video_get_format: AV_PIX_FMT_YUV420P Codecname: %s\n",
-//				video_ctx->codec->name);
 			return AV_PIX_FMT_YUV420P;
 		}
 		if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_H264) {
-//			fprintf(stderr, "Video_get_format: AV_PIX_FMT_NV12 Codecname: %s\n",
-//				video_ctx->codec->name);
 			return AV_PIX_FMT_NV12;
 		}
 		if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_HEVC) {
-//			fprintf(stderr, "Video_get_format: AV_PIX_FMT_NV12 Codecname: %s\n",
-//				video_ctx->codec->name);
 			return AV_PIX_FMT_NV12;
 		}
 		fmt++;
@@ -1769,6 +1766,7 @@ void VideoInit(VideoRender * render)
 	render->buf_osd.height = render->mode.vdisplay;
 	if (SetupFB(render, &render->buf_osd, NULL)){
 		fprintf(stderr, "VideoOsdInit: SetupFB FB OSD failed\n");
+		Fatal(_("VideoOsdInit: SetupFB FB OSD failed!\n"));
 	}
 
 	// black fb

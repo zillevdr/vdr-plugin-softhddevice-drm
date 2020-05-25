@@ -59,7 +59,7 @@ extern VideoDecoder *CodecVideoNewDecoder(VideoRender *);
 extern void CodecVideoDelDecoder(VideoDecoder *);
 
     /// Open video codec.
-extern void CodecVideoOpen(VideoDecoder *, int);
+extern void CodecVideoOpen(VideoDecoder *, int, AVCodecParameters *);
 
     /// Close video codec.
 extern void CodecVideoClose(VideoDecoder *);
@@ -80,7 +80,7 @@ extern AudioDecoder *CodecAudioNewDecoder(void);
 extern void CodecAudioDelDecoder(AudioDecoder *);
 
     /// Open audio codec.
-extern void CodecAudioOpen(AudioDecoder *, int);
+extern void CodecAudioOpen(AudioDecoder *, int, AVCodecParameters *);
 
     /// Close audio codec.
 extern void CodecAudioClose(AudioDecoder *);

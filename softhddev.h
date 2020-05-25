@@ -40,6 +40,12 @@ extern "C"
     extern void OsdDrawARGB(int, int, int, int, int, const uint8_t *, int,
 		int);
 
+    /// C plugin play media file
+    extern void SetAudioCodec(int, AVCodecParameters *);
+    extern void SetVideoCodec(int, AVCodecParameters *);
+    extern int PlayAudioPkts(AVPacket *);
+    extern int PlayVideoPkts(AVPacket *);
+
     /// C plugin play audio packet
     extern int PlayAudio(const uint8_t *, int, uint8_t);
     /// C plugin set audio volume

@@ -130,7 +130,7 @@ void CodecVideoDelDecoder(VideoDecoder * decoder)
 **	@param decoder	private video decoder
 **	@param codec_id	video codec id
 */
-void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
+void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Par)
 {
 	AVCodec * codec;
 	enum AVHWDeviceType type = 0;
@@ -204,13 +204,19 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id)
 //		decoder->VideoCtx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
 
 		if (av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0) < 0)
-			fprintf(stderr, "CodecVideoOpen: Error init the HW decoder");
+			fprintf(stderr, "CodecVideoOpen: Error init the HW decoder\n");
 		else
 			decoder->VideoCtx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
 	}
 
+	if (Par) {
+		fprintf(stderr, "CodecVideoOpen: insert parameters to context.\n");
+		if ((avcodec_parameters_to_context(decoder->VideoCtx, Par)) < 0)
+			fprintf(stderr, "CodecVideoOpen: insert parameters to context failed!\n");
+	}
+
 	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0)
-		fprintf(stderr, "CodecVideoOpen: Error opening the decoder");
+		fprintf(stderr, "CodecVideoOpen: Error opening the decoder\n");
 }
 
 /**
@@ -426,13 +432,17 @@ void CodecAudioDelDecoder(AudioDecoder * decoder)
 **	@param audio_decoder	private audio decoder
 **	@param codec_id	audio	codec id
 */
-void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
+void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id, AVCodecParameters *Par)
 {
 	AVCodec *codec;
 
 	if (codec_id == AV_CODEC_ID_AC3) {
 		if (!(codec = avcodec_find_decoder_by_name("ac3_fixed"))) {
 			Fatal(_("codec: codec ac3_fixed ID %#06x not found\n"), codec_id);
+		}
+	} else if (codec_id == AV_CODEC_ID_AAC) {	// ???
+		if (!(codec = avcodec_find_decoder_by_name("aac_fixed"))) {
+			Fatal(_("codec: codec aac_fixed ID %#06x not found\n"), codec_id);
 		}
 	} else {
 		if (!(codec = avcodec_find_decoder(codec_id))) {
@@ -452,6 +462,12 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id)
 			CodecDownmix);
 #endif
 		audio_decoder->AudioCtx->request_channel_layout = AV_CH_LAYOUT_STEREO;
+	}
+
+	if (Par) {
+		fprintf(stderr, "CodecAudioOpen: insert parameters to context.\n");
+		if ((avcodec_parameters_to_context(audio_decoder->AudioCtx, Par)) < 0)
+			fprintf(stderr, "CodecAudioOpen: insert parameters to context failed!\n");
 	}
 
 	// open codec

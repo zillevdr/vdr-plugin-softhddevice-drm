@@ -23,17 +23,24 @@
 
 #define __STDC_CONSTANT_MACROS		///< needed for ffmpeg UINT64_C
 
+#include <string>
+using std::string;
+#include <fstream>
+using std::ifstream;
+
+#include <vdr/player.h>
 #include <vdr/plugin.h>
 #include <vdr/dvbspu.h>
 
-#include "softhddev.h"
 #include "softhddevice-drm.h"
 #include "softhddevice_service.h"
+#include "mediaplayer.h"
 
 extern "C"
 {
 #include <libavcodec/avcodec.h>
 
+#include "softhddev.h"
 #include "audio.h"
 #include "video.h"
 #include "codec.h"
@@ -698,75 +705,6 @@ void cMenuSetupSoft::Store(void)
 	SetupStore("AudioEqBand17b", SetupAudioEqBand[16] = AudioEqBand[16]);
 	SetupStore("AudioEqBand18b", SetupAudioEqBand[17] = AudioEqBand[17]);
     AudioSetEq(SetupAudioEqBand, ConfigAudioEq);
-}
-
-
-//////////////////////////////////////////////////////////////////////////////
-//	cOsdMenu
-//////////////////////////////////////////////////////////////////////////////
-
-/**
-**	Create main menu.
-*/
-void cSoftHdMenu::Create(void)
-{
-    int current;
-    int missed;
-    int duped;
-    int dropped;
-    int counter;
-
-    current = Current();		// get current menu item index
-    Clear();				// clear the menu
-
-    Add(new cOsdItem(NULL, osUnknown, false));
-    Add(new cOsdItem(NULL, osUnknown, false));
-    GetStats(&missed, &duped, &dropped, &counter);
-    Add(new
-	cOsdItem(cString::sprintf(tr
-		(" Frames missed(%d) duped(%d) dropped(%d) total(%d)"), missed,
-		duped, dropped, counter), osUnknown, false));
-
-    SetCurrent(Get(current));		// restore selected menu entry
-    Display();				// display build menu
-}
-
-/**
-**	Soft device menu constructor.
-*/
-cSoftHdMenu::cSoftHdMenu(const char *title, int c0, int c1, int c2, int c3,
-    int c4)
-:cOsdMenu(title, c0, c1, c2, c3, c4)
-{
-    Create();
-}
-
-/**
-**	Soft device menu destructor.
-*/
-cSoftHdMenu::~cSoftHdMenu()
-{
-}
-
-/**
-**	Handle key event.
-**
-**	@param key	key event
-*/
-eOSState cSoftHdMenu::ProcessKey(eKeys key)
-{
-    eOSState state;
-
-    //dsyslog("[softhddev]%s: %x\n", __FUNCTION__, key);
-
-    state = cOsdMenu::ProcessKey(key);
-
-    switch (state) {
-	default:
-	    Create();
-	    break;
-    }
-    return state;
 }
 
 //////////////////////////////////////////////////////////////////////////////

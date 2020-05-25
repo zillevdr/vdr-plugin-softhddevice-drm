@@ -71,6 +71,7 @@ struct __video_stream__
     VideoDecoder *Decoder;		///< video decoder
 
     enum AVCodecID CodecID;		///< current codec id
+    AVCodecParameters * Par;
 
     volatile char NewStream;		///< flag new video stream
     volatile char ClosingStream;	///< flag closing video stream
@@ -691,7 +692,7 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 			// new codec id, close and open new
 			if (AudioCodecID != codec_id) {
 				CodecAudioClose(MyAudioDecoder);
-				CodecAudioOpen(MyAudioDecoder, codec_id);
+				CodecAudioOpen(MyAudioDecoder, codec_id, NULL);
 				AudioCodecID = codec_id;
 			}
 			av_init_packet(avpkt);
@@ -939,8 +940,9 @@ int VideoDecodeInput(VideoStream * stream)
 	}
 
 	if (stream->NewStream && stream->CodecID != AV_CODEC_ID_NONE) {
-		CodecVideoOpen(stream->Decoder, stream->CodecID);
+		CodecVideoOpen(stream->Decoder, stream->CodecID, stream->Par);
 		stream->NewStream = 0;
+		stream->Par = NULL;
 	}
 
 	if (stream->CodecID != AV_CODEC_ID_NONE) {
@@ -1166,7 +1168,7 @@ void StillPicture(const uint8_t * data, int size)
 	if (MyVideoStream->CodecID != AV_CODEC_ID_NONE)
 		fprintf(stderr, "StillPicture: CodecID != AV_CODEC_ID_NONE\n");
 #endif
-	CodecVideoOpen(MyVideoStream->Decoder, codec);
+	CodecVideoOpen(MyVideoStream->Decoder, codec, NULL);
 	VideoSetTrickSpeed(MyVideoStream->Render, 1);
 
 send:
@@ -1273,6 +1275,62 @@ uint8_t *GrabImage(int *size, int jpeg, int quality, int width, int height)
 	return NULL;
     }
     return VideoGrab(size, &width, &height, 1);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+//	mediaplayer functions
+//////////////////////////////////////////////////////////////////////////////
+
+void SetAudioCodec(int codec_id, AVCodecParameters * par)
+{
+	CodecAudioOpen(MyAudioDecoder, codec_id, par);
+}
+
+void SetVideoCodec(int codec_id, AVCodecParameters * par)
+{
+	MyVideoStream->CodecID = codec_id;
+	MyVideoStream->NewStream = 1;
+	MyVideoStream->Par = par;
+}
+
+int PlayAudioPkts(AVPacket * pkt)
+{
+	if (AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE) {
+		fprintf(stderr, "PlayAudioPkts: AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE!\n");
+		return 0;
+	}
+	 if (CodecAudioDecode(MyAudioDecoder, pkt))
+		fprintf(stderr, "PlayAudioPkts: failed!\n");
+
+	return 1;
+}
+
+int PlayVideoPkts(AVPacket * pkt)
+{
+	AVPacket *avpkt;
+
+	if (atomic_read(&MyVideoStream->PacketsFilled) >= VIDEO_PACKET_MAX - 10) {
+		return 0;
+	}
+
+	pthread_mutex_lock(&PktsLockMutex);
+	MyVideoStream->PacketWrite = (MyVideoStream->PacketWrite + 1) % VIDEO_PACKET_MAX;
+	atomic_inc(&MyVideoStream->PacketsFilled);
+	avpkt = &MyVideoStream->PacketRb[MyVideoStream->PacketWrite];
+	pthread_mutex_unlock(&PktsLockMutex);
+
+	if (pkt->size > avpkt->buf->size) {
+		fprintf(stderr, "PlayVideoPkts: grow packet buffer size by %d\n",
+			pkt->size - avpkt->buf->size + AV_INPUT_BUFFER_PADDING_SIZE);
+		av_grow_packet(avpkt, pkt->size - avpkt->buf->size +
+			AV_INPUT_BUFFER_PADDING_SIZE);
+	}
+
+	memcpy(avpkt->data, pkt->data, pkt->size);
+	avpkt->pts = pkt->pts;
+	avpkt->size = pkt->size;
+
+	return 1;
 }
 
 //////////////////////////////////////////////////////////////////////////////
