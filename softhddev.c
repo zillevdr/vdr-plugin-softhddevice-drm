@@ -33,7 +33,6 @@
 #define _(str) gettext(str)		///< gettext shortcut
 #define _N(str) str			///< gettext_noop shortcut
 
-#include <pthread.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -84,7 +83,6 @@ struct __video_stream__
 };
 
 static VideoStream MyVideoStream[1];	///< normal video stream
-static pthread_mutex_t PktsLockMutex;	///< video packets lock mutex
 
 //////////////////////////////////////////////////////////////////////////////
 //	Audio
@@ -839,15 +837,12 @@ static void VideoEnqueue(VideoStream * stream, int64_t pts, const void *data,
 	avpkt = &stream->PacketRb[stream->PacketWrite];
 
 	if (pts != AV_NOPTS_VALUE) {
-		pthread_mutex_lock(&PktsLockMutex);
 		stream->PacketWrite = (stream->PacketWrite + 1) % VIDEO_PACKET_MAX;
 		atomic_inc(&stream->PacketsFilled);
 		avpkt = &stream->PacketRb[stream->PacketWrite];
-
 		avpkt->size = 0;
 		avpkt->pts = pts;
 		avpkt->dts = AV_NOPTS_VALUE;
-		pthread_mutex_unlock(&PktsLockMutex);
 	}
 
 	if (avpkt->size + size >= avpkt->buf->size) {
@@ -894,7 +889,6 @@ void ClearVideo(VideoStream * stream)
 #ifdef DEBUG
 	fprintf(stderr, "ClearVideo()\n");
 #endif
-	pthread_mutex_lock(&PktsLockMutex);
 	atomic_set(&stream->PacketsFilled, 0);
 	stream->PacketRead = stream->PacketWrite = 0;
 
@@ -903,7 +897,6 @@ void ClearVideo(VideoStream * stream)
 	avpkt->pts = AV_NOPTS_VALUE;
 
 	CodecVideoFlushBuffers(stream->Decoder);
-	pthread_mutex_unlock(&PktsLockMutex);
 }
 
 /**
@@ -946,9 +939,7 @@ int VideoDecodeInput(VideoStream * stream)
 	}
 
 	if (stream->CodecID != AV_CODEC_ID_NONE) {
-		pthread_mutex_lock(&PktsLockMutex);
 		if (!atomic_read(&stream->PacketsFilled)) {
-			pthread_mutex_unlock(&PktsLockMutex);
 			return -1;
 		}
 		avpkt = &stream->PacketRb[stream->PacketRead];
@@ -956,7 +947,6 @@ int VideoDecodeInput(VideoStream * stream)
 			stream->PacketRead = (stream->PacketRead + 1) % VIDEO_PACKET_MAX;
 			atomic_dec(&stream->PacketsFilled);
 		}
-		pthread_mutex_unlock(&PktsLockMutex);
 
 		CodecVideoReceiveFrame(stream->Decoder, 0);
 	}
@@ -1313,11 +1303,9 @@ int PlayVideoPkts(AVPacket * pkt)
 		return 0;
 	}
 
-	pthread_mutex_lock(&PktsLockMutex);
 	MyVideoStream->PacketWrite = (MyVideoStream->PacketWrite + 1) % VIDEO_PACKET_MAX;
 	atomic_inc(&MyVideoStream->PacketsFilled);
 	avpkt = &MyVideoStream->PacketRb[MyVideoStream->PacketWrite];
-	pthread_mutex_unlock(&PktsLockMutex);
 
 	if (pkt->size > avpkt->buf->size) {
 		fprintf(stderr, "PlayVideoPkts: grow packet buffer size by %d\n",
