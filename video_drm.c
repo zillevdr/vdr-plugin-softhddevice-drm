@@ -75,18 +75,11 @@ int VideoAudioDelay;
 int SWDeinterlacer;
 int hdr;
 
-static pthread_cond_t DecodeCondition;
-static pthread_mutex_t DecodeMutex;
-
 static pthread_cond_t PauseCondition;
 static pthread_mutex_t PauseMutex;
 
 static pthread_cond_t WaitCleanCondition;
 static pthread_mutex_t WaitCleanMutex;
-
-static pthread_mutex_t VideoLockMutex;	///< video lock mutex
-
-static pthread_mutex_t VideoDeintMutex;	///< video deinterlace queue mutex
 
 static pthread_t DecodeThread;		///< video decode thread
 
@@ -686,31 +679,24 @@ static void DestroyFB(int fd_drm, struct drm_buf *buf)
 ///
 /// Clean DRM
 ///
-static void CleanDisplayThread(VideoRender * render, AVFrame *frame)
+static void CleanDisplayThread(VideoRender * render)
 {
+	AVFrame *frame;
 	int i;
-
-#ifdef DEBUG
-	fprintf(stderr, "CleanDisplayThread: DecodeCondition for clean decode thread\n");
-#endif
-	pthread_cond_signal(&DecodeCondition);
 
 	if (render->lastframe) {
 		av_frame_free(&render->lastframe);
 	}
 
 dequeue:
-	if (frame) {
-		av_frame_free(&frame);
-		pthread_mutex_lock(&VideoLockMutex);
+	if (atomic_read(&render->FramesFilled)) {
+
+		frame = render->FramesRb[render->FramesRead];
+
 		render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
 		atomic_dec(&render->FramesFilled);
-		pthread_mutex_unlock(&VideoLockMutex);
-	}
-	if (atomic_read(&render->FramesFilled)) {
-		pthread_mutex_lock(&VideoLockMutex);
-		frame = render->FramesRb[render->FramesRead];
-		pthread_mutex_unlock(&VideoLockMutex);
+
+		av_frame_free(&frame);
 		goto dequeue;
 	}
 
@@ -723,9 +709,6 @@ dequeue:
 		render->enqueue_buffer = 0;
 	}
 
-#ifdef DEBUG
-	fprintf(stderr, "CleanDisplayThread: WaitCleanCondition\n");
-#endif
 	pthread_cond_signal(&WaitCleanCondition);
 
 	render->Closing = 0;
@@ -757,30 +740,15 @@ closing:
 	}
 
 dequeue:
-	while ((atomic_read(&render->FramesFilled)) == 0 ) {
-#ifdef DEBUG
-		fprintf(stderr, "Frame2Display: Kein Frame in der Queue!!! pkts %d AudioUsedBytes %d\n",
-			VideoGetPackets(render->Stream), AudioUsedBytes());
-#endif
-		usleep(20000);
+	while (!atomic_read(&render->FramesFilled)) {
+		if (render->Closing)
+			goto closing;
+		usleep(10000);
 	}
 
-	if (atomic_read(&render->FramesFilled)) {
-		pthread_mutex_lock(&VideoLockMutex);
-		frame = render->FramesRb[render->FramesRead];
-		pthread_mutex_unlock(&VideoLockMutex);
-
-		if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX &&
-			atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
-
-			pthread_cond_signal(&DecodeCondition);
-		}
-	} else {
-		frame = NULL;
-		fprintf(stderr, "Frame2Display: frame = NULL Kein Frame in der Queue!!!\n");
-	}
-
+	frame = render->FramesRb[render->FramesRead];
 	primedata = (AVDRMFrameDescriptor *)frame->data[0];
+
 	// search or made fd / FB combination
 	for (i = 0; i < render->buffers; i++) {
 		if (render->bufs[i].fd_prime == primedata->objects[0].fd) {
@@ -805,7 +773,7 @@ dequeue:
 	if(!render->StartCounter && !render->Closing && !render->TrickSpeed) {
 avready:
 		if (AudioVideoReady(frame->pts)) {
-			usleep(20000);
+			usleep(10000);
 			if (render->Closing)
 				goto closing;
 			goto avready;
@@ -813,13 +781,13 @@ avready:
 	}
 
 	render->pts = frame->pts;
-
 audioclock:
 	audio_clock = AudioGetClock();
-	if (audio_clock == (int64_t) AV_NOPTS_VALUE && !render->TrickSpeed) {
 
-		if (render->Closing)
-			goto closing;
+	if (render->Closing)
+		goto closing;
+
+	if (audio_clock == (int64_t) AV_NOPTS_VALUE && !render->TrickSpeed) {
 
 		usleep(20000);
 		goto audioclock;
@@ -834,14 +802,10 @@ audioclock:
 			atomic_read(&render->FramesFilled), AudioUsedBytes(), PtsTimestamp2String(audio_clock),
 			PtsTimestamp2String(frame->pts), VideoAudioDelay / 90, diff / 90);
 #endif
-		if (render->Closing)
-			goto closing;
-
 		av_frame_free(&frame);
-		pthread_mutex_lock(&VideoLockMutex);
 		render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
 		atomic_dec(&render->FramesFilled);
-		pthread_mutex_unlock(&VideoLockMutex);
+
 		if (!render->Closing) {
 			render->StartCounter++;
 		}
@@ -856,28 +820,19 @@ audioclock:
 			atomic_read(&render->FramesFilled), AudioUsedBytes(), PtsTimestamp2String(audio_clock),
 			PtsTimestamp2String(frame->pts), VideoAudioDelay / 90, diff / 90);
 #endif
-		if (render->Closing)
-			goto closing;
-
 		usleep(20000);
 		goto audioclock;
 	}
 
-	if (render->Closing)
-		goto closing;
-
-	if (!render->TrickSpeed) {
+	if (!render->TrickSpeed)
 		render->StartCounter++;
-	}
 
-	if (render->TrickSpeed) {
+	if (render->TrickSpeed)
 		usleep(20000 * render->TrickSpeed);
-	}
+
 	buf->frame = frame;
-	pthread_mutex_lock(&VideoLockMutex);
 	render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
 	atomic_dec(&render->FramesFilled);
-	pthread_mutex_unlock(&VideoLockMutex);
 
 page_flip:
 	render->act_buf = buf;
@@ -893,20 +848,6 @@ page_flip:
 		fprintf(stderr, "Frame2Display: cannot page flip to FB %i (%d): %m\n",
 			buf->fb_id, errno);
 
-#ifdef AV_SYNC_DEBUG
-	static uint32_t last_tick;
-	uint32_t tick;
-
-	tick = GetMsTicks();
-	if (tick - last_tick > 21) {
-		Debug(3, "Frame2Display: StartCounter %4d %dms\n",
-			render->StartCounter, tick - last_tick);
-		fprintf(stderr, "Frame2Display: StartCounter %4d %dms\n",
-			render->StartCounter, tick - last_tick);
-	}
-	last_tick = tick;
-#endif
-
 	drmModeAtomicFree(ModeReq);
 }
 
@@ -921,47 +862,48 @@ static void *DisplayHandlerThread(void * arg)
 	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 
 	while ((atomic_read(&render->FramesFilled)) < 2 ){
-		usleep(20000);
+		usleep(10000);
 	}
 
 	while (1) {
 		if (render->VideoPaused) {
 			pthread_mutex_lock(&PauseMutex);
-#ifdef DEBUG
-			fprintf(stderr, "DisplayHandlerThread: pthread_cond_wait\n");
-#endif
 			pthread_cond_wait(&PauseCondition, &PauseMutex);
 			pthread_mutex_unlock(&PauseMutex);
-#ifdef DEBUG
-			fprintf(stderr, "DisplayHandlerThread: NACH pthread_cond_wait\n");
-#endif
 		}
 
 		pthread_testcancel();
 
-		if (atomic_read(&render->FramesFilled)) {
-			Frame2Display(render);
+		Frame2Display(render);
 
-			if (drmHandleEvent(render->fd_drm, &render->ev) != 0)
-				fprintf(stderr, "DisplayHandlerThread: drmHandleEvent failed!\n");
+		if (drmHandleEvent(render->fd_drm, &render->ev) != 0)
+			fprintf(stderr, "DisplayHandlerThread: drmHandleEvent failed!\n");
 
-			if (render->lastframe) {
-				av_frame_free(&render->lastframe);
-			}
-			render->lastframe = render->act_buf->frame;
+#ifdef AV_SYNC_DEBUG
+		static uint32_t last_tick;
+		uint32_t tick;
 
-		} else {
-			if (render->buf_black.fb_id != render->act_buf->fb_id &&
-				render->Closing) {
-
-				Frame2Display(render);
-			} else usleep(20000);
+		tick = GetMsTicks();
+		if (tick - last_tick > 21) {
+			Debug(3, "DisplayHandlerThread: StartCounter %4d %dms\n",
+				render->StartCounter, tick - last_tick);
+			fprintf(stderr, "DisplayHandlerThread: StartCounter %4d FramesFilled %d %dms\n",
+				render->StartCounter, atomic_read(&render->FramesFilled), tick - last_tick);
 		}
+		last_tick = tick;
+#endif
 
-		if (render->buf_black.fb_id == render->act_buf->fb_id &&
-			render->Closing) {
+		if (render->lastframe) {
+			av_frame_free(&render->lastframe);
+		}
+		render->lastframe = render->act_buf->frame;
 
-			CleanDisplayThread(render, NULL);
+		if (render->Closing) {
+			if (render->buf_black.fb_id == render->act_buf->fb_id) {
+				CleanDisplayThread(render);
+			} else {
+				Frame2Display(render);
+			}
 		}
 	}
 	pthread_exit((void *)pthread_self());
@@ -1037,7 +979,6 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 static void *DecodeHandlerThread(void *arg)
 {
 	VideoRender * render = (VideoRender *)arg;
-	int ret;
 
 	Debug(3, "video: display thread started\n");
 
@@ -1051,15 +992,10 @@ static void *DecodeHandlerThread(void *arg)
 		if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX &&
 			atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
 
-			ret = VideoDecodeInput(render->Stream);
-		} else {
-			pthread_mutex_lock(&DecodeMutex);
-			pthread_cond_wait(&DecodeCondition, &DecodeMutex);
-			pthread_mutex_unlock(&DecodeMutex);
+			if (VideoDecodeInput(render->Stream))
+				usleep(10000);
 
-			ret = VideoDecodeInput(render->Stream);
-		}
-		if (ret) {
+		} else {
 			usleep(10000);
 		}
 	}
@@ -1089,14 +1025,9 @@ void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		DecodeThread = 0;
-		pthread_cond_destroy(&DecodeCondition);
-		pthread_mutex_destroy(&DecodeMutex);
 
 		pthread_cond_destroy(&PauseCondition);
 		pthread_mutex_destroy(&PauseMutex);
-
-		pthread_mutex_destroy(&VideoDeintMutex);
-		pthread_mutex_destroy(&VideoLockMutex);
 	}
 
 	if (DisplayThread) {
@@ -1126,17 +1057,12 @@ void VideoThreadWakeup(VideoRender * render)
 	fprintf(stderr, "VideoThreadWakeup: VideoThreadWakeup\n");
 #endif
 	if (!DecodeThread) {
-		pthread_cond_init(&DecodeCondition,NULL);
-		pthread_mutex_init(&DecodeMutex, NULL);
-
 		pthread_cond_init(&PauseCondition,NULL);
 		pthread_mutex_init(&PauseMutex, NULL);
 
 		pthread_cond_init(&WaitCleanCondition,NULL);
 		pthread_mutex_init(&WaitCleanMutex, NULL);
 
-		pthread_mutex_init(&VideoDeintMutex, NULL);
-		pthread_mutex_init(&VideoLockMutex, NULL);
 		pthread_create(&DecodeThread, NULL, DecodeHandlerThread, render);
 		pthread_setname_np(DecodeThread, "softhddev video");
 	}
@@ -1286,11 +1212,9 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 
 	av_frame_free(&inframe);
 
-	pthread_mutex_lock(&VideoLockMutex);
 	render->FramesRb[render->FramesWrite] = frame;
 	render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
 	atomic_inc(&render->FramesFilled);
-	pthread_mutex_unlock(&VideoLockMutex);
 
 	if (render->enqueue_buffer == VIDEO_SURFACES_MAX + 1)
 		render->enqueue_buffer = 0;
@@ -1314,17 +1238,9 @@ static void *FilterHandlerThread(void * arg)
 
 getinframe:
 		if (atomic_read(&render->FramesDeintFilled)) {
-			pthread_mutex_lock(&VideoDeintMutex);
 			frame = render->FramesDeintRb[render->FramesDeintRead];
 			render->FramesDeintRead = (render->FramesDeintRead + 1) % VIDEO_SURFACES_MAX;
 			atomic_dec(&render->FramesDeintFilled);
-			pthread_mutex_unlock(&VideoDeintMutex);
-
-			if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX &&
-				atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
-
-				pthread_cond_signal(&DecodeCondition);
-			}
 		} else {
 			frame = NULL;
 #ifdef DEBUG
@@ -1388,11 +1304,9 @@ fillframe:
 					EnqueueFB(render, filt_frame);
 				} else {
 					fprintf(stderr, "FilterHandlerThread: AV_PIX_FMT_DRM_PRIME\n");
-					pthread_mutex_lock(&VideoLockMutex);
 					render->FramesRb[render->FramesWrite] = filt_frame;
 					render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
 					atomic_inc(&render->FramesFilled);
-					pthread_mutex_unlock(&VideoLockMutex);
 				}
 			} else {
 				usleep(10000);
@@ -1505,18 +1419,14 @@ void VideoRenderFrame(VideoRender * render,
 			pthread_setname_np(FilterThread, "softhddev deint");
 		}
 
-		pthread_mutex_lock(&VideoDeintMutex);
 		render->FramesDeintRb[render->FramesDeintWrite] = frame;
 		render->FramesDeintWrite = (render->FramesDeintWrite + 1) % VIDEO_SURFACES_MAX;
 		atomic_inc(&render->FramesDeintFilled);
-		pthread_mutex_unlock(&VideoDeintMutex);
 	} else {
 		if (frame->format == AV_PIX_FMT_DRM_PRIME) {
-			pthread_mutex_lock(&VideoLockMutex);
 			render->FramesRb[render->FramesWrite] = frame;
 			render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
 			atomic_inc(&render->FramesFilled);
-			pthread_mutex_unlock(&VideoLockMutex);
 		} else {
 			EnqueueFB(render, frame);
 		}
@@ -1550,8 +1460,15 @@ void VideoSetClosing(VideoRender * render)
 
 	if (render->buffers){
 		render->Closing = 1;
+
 		if (FilterThread)
 			render->Deint_Close = 1;
+
+		if (render->VideoPaused) {
+			pthread_cond_signal(&PauseCondition);
+			fprintf(stderr, "VideoSetClosing: cond_signal PauseCondition\n");
+		}
+
 
 		pthread_mutex_lock(&WaitCleanMutex);
 #ifdef DEBUG

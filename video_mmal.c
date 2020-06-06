@@ -69,10 +69,6 @@ int VideoAudioDelay;
 int hdr;
 
 static pthread_t VideoThread;		///< video decode thread
-static pthread_mutex_t VideoLockMutex;	///< video lock mutex
-
-static pthread_cond_t cond;
-static pthread_mutex_t cond_mutex;
 
 //----------------------------------------------------------------------------
 //	Common Functions
@@ -485,12 +481,6 @@ static void MmalDisplayFrame(VideoRender * render)
 	MMAL_STATUS_T status;
 	AVFrame *frame;
 
-	if(render->buffers < 7) {
-//		pthread_mutex_lock(&cond_mutex);
-		pthread_cond_signal(&cond);
-//		pthread_mutex_unlock(&cond_mutex);
-	}
-
 	if(render->buffers_in_queue == 0 ){
 		if(render->StartCounter > 0)
 			render->FramesMissed++;
@@ -701,7 +691,6 @@ void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
 static void *DisplayHandlerThread(void *arg)
 {
 	VideoRender * render = (VideoRender *)arg;
-	int err;
 
 	Debug(3, "video: display thread started\n");
 
@@ -712,20 +701,14 @@ static void *DisplayHandlerThread(void *arg)
 		pthread_testcancel();
 
 		if (render->buffers < 7) {
-			err = VideoDecodeInput(render->Stream);
-		} else {
-			pthread_mutex_lock(&cond_mutex);
-			pthread_cond_wait(&cond, &cond_mutex);
-			pthread_mutex_unlock(&cond_mutex);
+			if (VideoDecodeInput(render->Stream))
+				usleep(10000);
 
-			err = VideoDecodeInput(render->Stream);
-		}
-		if (err) {
+		} else {
 			usleep(10000);
 		}
 	}
-
-	return 0;
+	pthread_exit((void *)pthread_self());
 }
 
 ///
@@ -748,10 +731,7 @@ void VideoThreadExit(void)
 			fprintf(stderr, "VideoThreadExit: can't cancel video display thread\n");
 		}
 		VideoThread = 0;
-		pthread_cond_destroy(&cond);
-		pthread_mutex_destroy(&cond_mutex);
-		pthread_mutex_destroy(&VideoLockMutex);
-    }
+	}
 }
 
 ///
@@ -764,9 +744,6 @@ void VideoThreadWakeup(VideoRender * render)
 	render->Closing = 0;
 
 	if (!VideoThread) {
-		pthread_cond_init(&cond,NULL);
-		pthread_mutex_init(&cond_mutex, NULL);
-		pthread_mutex_init(&VideoLockMutex, NULL);
 		pthread_create(&VideoThread, NULL, DisplayHandlerThread, render);
 		pthread_setname_np(VideoThread, "softhddev video");
 	}

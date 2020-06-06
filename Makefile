@@ -14,12 +14,12 @@ PLUGIN = softhddevice-drm
 	# enable this for MMAL (RaspberryPi)
 MMAL ?= 0
 
-CONFIG := -DDEBUG 				# enable debug output+functions
-CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC
+CONFIG := #-DDEBUG 				# enable debug output+functions
+#CONFIG += -DAV_SYNC_DEBUG		# enable debug messages AV_SYNC
 #CONFIG += -DSOUND_DEBUG		# enable debug messages SOUND
 #CONFIG += -DOSD_DEBUG			# enable debug messages OSD
 #CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
-CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
+#CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
 #CONFIG += -DSTILL_DEBUG		# still picture debug
 
 ### The version number of this plugin (taken from the main source file):
