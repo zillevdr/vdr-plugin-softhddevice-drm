@@ -27,7 +27,7 @@
 //	Prototypes
 //----------------------------------------------------------------------------
 
-extern int AudioFilter(AVFrame *);	///< buffer audio samples
+extern int AudioFilter(AVFrame *, AVCodecContext *);	///< buffer audio samples
 extern void AudioFlushBuffers(void);	///< flush audio buffers
 extern void AudioPoller(void);		///< poll audio events/handling		not used!
 extern int AudioFreeBytes(void);	///< free bytes in audio output

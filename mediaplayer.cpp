@@ -51,25 +51,25 @@ cSoftHdPlayer::cSoftHdPlayer(const char *File)
 //	pPlayer= this;
 	Path = (char *) malloc(1 + strlen(File));
 	strcpy(Path, File);
-	fprintf(stderr, "cSoftHdPlayer: Player gestartet.\n");
+//	fprintf(stderr, "cSoftHdPlayer: Player gestartet.\n");
 }
 
 cSoftHdPlayer::~cSoftHdPlayer()
 {
 	StopFile = 1;
-	fprintf(stderr, "cSoftHdPlayer: Player beendet.\n");
+//	fprintf(stderr, "cSoftHdPlayer: Player beendet.\n");
 }
 
 void cSoftHdPlayer::Activate(bool On)
 {
-	fprintf(stderr, "cSoftHdPlayer: Activate %s\n", On ? "On" : "Off");
+//	fprintf(stderr, "cSoftHdPlayer: Activate %s\n", On ? "On" : "Off");
 	if (On)
 		Start();
 }
 
 void cSoftHdPlayer::Action(void)
 {
-	fprintf(stderr, "cSoftHdPlayer: Action\n");
+//	fprintf(stderr, "cSoftHdPlayer: Action\n");
 	PlayFile(Path);
 
 	sleep (10);
@@ -103,28 +103,10 @@ void cSoftHdPlayer::PlayFile(const char *path)
 		return;
 	}
 
-	int secs  = format->duration / AV_TIME_BASE;
-	int us    = format->duration % AV_TIME_BASE;
-	int mins  = secs / 60;
-	secs %= 60;
-	int hours = mins / 60;
-	mins %= 60;
-	fprintf(stderr, "Player: %s codec: %s duration %02d:%02d:%02d.%02d\n",
-		format->url, format->iformat->name, hours, mins, secs,
-						(100 * us) / AV_TIME_BASE);
-
-	fprintf(stderr, "Player:  nb_streams %d  %s\n", format->nb_streams,
-		av_get_media_type_string(format->streams[0]->codecpar->codec_type));
-
 	for (unsigned int i = 0; i < format->nb_streams; i++) {
-
-		fprintf(stderr, "Player: i %d nb_streams %d  %s %s\n", i, format->nb_streams,
-			av_get_media_type_string(format->streams[i]->codecpar->codec_type),
-			avcodec_get_name(format->streams[i]->codecpar->codec_id));
-
 		if (format->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
 			SetAudioCodec(format->streams[i]->codecpar->codec_id,
-				format->streams[i]->codecpar);
+				format->streams[i]->codecpar, &format->streams[i]->time_base);
 			audio_stream_index = i;
 			break;
 		}
@@ -132,10 +114,13 @@ void cSoftHdPlayer::PlayFile(const char *path)
 
 	video_stream_index = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO,
 		-1, -1, &video_codec, 0);
-	if (video_stream_index < 0)
+	if (video_stream_index < 0) {
 		fprintf(stderr, "Player: stream does not seem to contain video\n");
-	else  SetVideoCodec(video_codec->id,
-				format->streams[video_stream_index]->codecpar);
+	} else {
+		 SetVideoCodec(video_codec->id,
+			format->streams[video_stream_index]->codecpar,
+			&format->streams[video_stream_index]->time_base);
+	}
 
 	while (err == 0 && !StopFile) {
 		err = av_read_frame(format, &packet);
@@ -144,8 +129,8 @@ repeat:
 			if (audio_stream_index == packet.stream_index) {
 				if (!PlayAudioPkts(&packet)) {
 					usleep(packet.duration * AV_TIME_BASE *
-						format->streams[0]->time_base.num 
-						/ format->streams[0]->time_base.den);
+						format->streams[audio_stream_index]->time_base.num	// ???
+						/ format->streams[audio_stream_index]->time_base.den);
 					goto repeat;
 				}
 			}
@@ -153,12 +138,13 @@ repeat:
 			if (video_stream_index == packet.stream_index) {
 				if (!PlayVideoPkts(&packet)) {
 					usleep(packet.duration * AV_TIME_BASE *
-						format->streams[0]->time_base.num 
-						/ format->streams[0]->time_base.den);
+						format->streams[video_stream_index]->time_base.num	// ???
+						/ format->streams[video_stream_index]->time_base.den);
 					goto repeat;
 				}
 			}
-		}
+		} else
+			fprintf(stderr, "Player: av_read_frame error!!!\n");
 
 		if (StopFile)
 			DeviceClear();
@@ -182,7 +168,7 @@ cSoftHdControl *cSoftHdControl::pControl = NULL;
 cSoftHdControl::cSoftHdControl(const char *File)
 :cControl(pPlayer = new cSoftHdPlayer(File))
 {
-	fprintf(stderr, "cSoftHdControl: Player gestartet.\n");
+//	fprintf(stderr, "cSoftHdControl: Player gestartet.\n");
 	pControl = this;
 	Close = 0;
 }
@@ -195,12 +181,12 @@ cSoftHdControl::~cSoftHdControl()
 	delete pPlayer;
 	pPlayer = NULL;
 
-	fprintf(stderr, "cSoftHdControl: Player beendet.\n");
+//	fprintf(stderr, "cSoftHdControl: Player beendet.\n");
 }
 
 void cSoftHdControl::Hide(void)
 {
-	fprintf(stderr, "[cSoftHdControl] Hide\n");
+//	fprintf(stderr, "[cSoftHdControl] Hide\n");
 }
 
 /**
@@ -349,11 +335,8 @@ eOSState cSoftHdMenu::ProcessKey(eKeys key)
 		case kRed:
 			if (item->Text()) {	// make compiler happy
 				string NewPathString = Path + "/" + item->Text();
-				fprintf(stderr, "ProcessKey: Play file path %s\n", NewPathString.c_str());
 				cControl::Launch(Control = new cSoftHdControl(NewPathString.c_str()));
-				fprintf(stderr, "ProcessKey: Clear()\n");
 				Clear();	// clear the menu
-				fprintf(stderr, "ProcessKey: return osEnd\n");
 				return osEnd;
 			}
 			break;
@@ -364,7 +347,6 @@ eOSState cSoftHdMenu::ProcessKey(eKeys key)
 	switch (state) {
 		case osUser1:			// Play File
 			Path = cVideoDirectory::Name();
-			fprintf(stderr, "ProcessKey: Play file path %s\n", Path.c_str());
 			FindFile(Path, NULL);
 		default:
 //			MainMenu();

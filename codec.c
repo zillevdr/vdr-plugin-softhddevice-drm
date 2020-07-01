@@ -130,7 +130,8 @@ void CodecVideoDelDecoder(VideoDecoder * decoder)
 **	@param decoder	private video decoder
 **	@param codec_id	video codec id
 */
-void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Par)
+void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Par,
+		AVRational * timebase)
 {
 	AVCodec * codec;
 	enum AVHWDeviceType type = 0;
@@ -199,10 +200,6 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 	}
 
 	if (type) {
-//		decoder->VideoCtx->time_base.num = 1;
-//		decoder->VideoCtx->time_base.den = 1000000;
-//		decoder->VideoCtx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
-
 		if (av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0) < 0)
 			fprintf(stderr, "CodecVideoOpen: Error init the HW decoder\n");
 		else
@@ -210,9 +207,12 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 	}
 
 	if (Par) {
-		fprintf(stderr, "CodecVideoOpen: insert parameters to context.\n");
 		if ((avcodec_parameters_to_context(decoder->VideoCtx, Par)) < 0)
 			fprintf(stderr, "CodecVideoOpen: insert parameters to context failed!\n");
+	}
+	if (timebase) {
+		decoder->VideoCtx->pkt_timebase.num = timebase->num;
+		decoder->VideoCtx->pkt_timebase.den = timebase->den;
 	}
 
 	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0)
@@ -432,7 +432,8 @@ void CodecAudioDelDecoder(AudioDecoder * decoder)
 **	@param audio_decoder	private audio decoder
 **	@param codec_id	audio	codec id
 */
-void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id, AVCodecParameters *Par)
+void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id,
+		AVCodecParameters *Par, AVRational * timebase)
 {
 	AVCodec *codec;
 
@@ -464,8 +465,10 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id, AVCodecParameter
 		audio_decoder->AudioCtx->request_channel_layout = AV_CH_LAYOUT_STEREO;
 	}
 
+	audio_decoder->AudioCtx->pkt_timebase.num = timebase->num;
+	audio_decoder->AudioCtx->pkt_timebase.den = timebase->den;
+
 	if (Par) {
-		fprintf(stderr, "CodecAudioOpen: insert parameters to context.\n");
 		if ((avcodec_parameters_to_context(audio_decoder->AudioCtx, Par)) < 0)
 			fprintf(stderr, "CodecAudioOpen: insert parameters to context failed!\n");
 	}
@@ -583,10 +586,10 @@ int CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 	}
 	if (frame->pts != (int64_t) AV_NOPTS_VALUE &&
 		frame->pts != audio_decoder->last_pts + 
-			(int64_t)(frame->nb_samples * 1000 * 90 / frame->sample_rate)) {
-		fprintf(stderr, "CodecAudioDecode: frame->pts %s last_pts + samples %s\n",
-			PtsTimestamp2String(frame->pts), PtsTimestamp2String(audio_decoder->last_pts + 
-			(int64_t)(frame->nb_samples * 1000 * 90 / frame->sample_rate)));
+			(int64_t)(frame->nb_samples * audio_ctx->pkt_timebase.den / frame->sample_rate)) {
+//		fprintf(stderr, "CodecAudioDecode: frame->pts %s last_pts + samples %s\n",
+//			PtsTimestamp2String(frame->pts), PtsTimestamp2String(audio_decoder->last_pts + 
+//			(int64_t)(frame->nb_samples * audio_ctx->pkt_timebase.den / frame->sample_rate)));
 	}
 #endif
 	// update audio clock
@@ -594,11 +597,11 @@ int CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 		audio_decoder->last_pts = frame->pts;
 	} else if (audio_decoder->last_pts != (int64_t) AV_NOPTS_VALUE) {
 		frame->pts = audio_decoder->last_pts + 
-			(int64_t)(frame->nb_samples * 1000 * 90 / frame->sample_rate);
+			(int64_t)(frame->nb_samples * audio_ctx->pkt_timebase.den / frame->sample_rate);
 		audio_decoder->last_pts = frame->pts;
 	}
 
-	if (AudioFilter(frame))
+	if (AudioFilter(frame, audio_decoder->AudioCtx))
 		return 1;
 	return 0;
 }

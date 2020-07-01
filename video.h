@@ -58,7 +58,7 @@ extern enum AVPixelFormat Video_get_format(VideoRender *, AVCodecContext *,
     const enum AVPixelFormat *);
 
     /// Render a ffmpeg frame.
-extern void VideoRenderFrame(VideoRender *, const AVCodecContext *,
+extern void VideoRenderFrame(VideoRender *, AVCodecContext *,
     AVFrame *);
 
     /// Set audio delay.

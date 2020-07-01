@@ -125,6 +125,7 @@ struct _Drm_Render_
 	int StartCounter;			///< counter for video start
 	int FramesDuped;			///< number of frames duplicated
 	int FramesDropped;			///< number of frames dropped
+	AVRational *timebase;		///< pointer to AVCodecContext pkts_timebase
 	int64_t pts;
 
 	int CodecMode;			/// 0: find codec by id, 1: set _rkmpp, 2: no mpeg hw
@@ -725,7 +726,8 @@ static void Frame2Display(VideoRender * render)
 	struct drm_buf *buf = 0;
 	AVFrame *frame;
 	AVDRMFrameDescriptor *primedata = NULL;
-	int64_t audio_clock;
+	int64_t audio_pts;
+	int64_t video_pts;
 	int i;
 
 	if (render->Closing) {
@@ -770,9 +772,11 @@ dequeue:
 		render->buffers++;
 	}
 
+	render->pts = frame->pts;
+	video_pts = frame->pts * 1000 * av_q2d(*render->timebase);
 	if(!render->StartCounter && !render->Closing && !render->TrickSpeed) {
 avready:
-		if (AudioVideoReady(frame->pts)) {
+		if (AudioVideoReady(video_pts)) {
 			usleep(10000);
 			if (render->Closing)
 				goto closing;
@@ -780,45 +784,43 @@ avready:
 		}
 	}
 
-	render->pts = frame->pts;
 audioclock:
-	audio_clock = AudioGetClock();
+	audio_pts = AudioGetClock();
 
 	if (render->Closing)
 		goto closing;
 
-	if (audio_clock == (int64_t) AV_NOPTS_VALUE && !render->TrickSpeed) {
-
+	if (audio_pts == (int64_t)AV_NOPTS_VALUE && !render->TrickSpeed) {
 		usleep(20000);
 		goto audioclock;
 	}
-	int diff = frame->pts - audio_clock - VideoAudioDelay;
 
-	if (diff < -5 * 90 && !render->TrickSpeed) {
+	int diff = video_pts - audio_pts - VideoAudioDelay;
+
+	if (diff < -5 && !render->TrickSpeed) {
 		render->FramesDropped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDropped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
 			VideoGetPackets(render->Stream), atomic_read(&render->FramesDeintFilled),
-			atomic_read(&render->FramesFilled), AudioUsedBytes(), PtsTimestamp2String(audio_clock),
-			PtsTimestamp2String(frame->pts), VideoAudioDelay / 90, diff / 90);
+			atomic_read(&render->FramesFilled), AudioUsedBytes(), Timestamp2String(audio_pts),
+			Timestamp2String(video_pts), VideoAudioDelay, diff);
 #endif
 		av_frame_free(&frame);
 		render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
 		atomic_dec(&render->FramesFilled);
 
-		if (!render->Closing) {
+		if (!render->StartCounter)
 			render->StartCounter++;
-		}
 		goto dequeue;
 	}
 
-	if (diff > 35 * 90 && !render->TrickSpeed) {
+	if (diff > 35 && !render->TrickSpeed) {
 		render->FramesDuped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDuped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
 			VideoGetPackets(render->Stream), atomic_read(&render->FramesDeintFilled),
-			atomic_read(&render->FramesFilled), AudioUsedBytes(), PtsTimestamp2String(audio_clock),
-			PtsTimestamp2String(frame->pts), VideoAudioDelay / 90, diff / 90);
+			atomic_read(&render->FramesFilled), AudioUsedBytes(), Timestamp2String(audio_pts),
+			Timestamp2String(video_pts), VideoAudioDelay, diff);
 #endif
 		usleep(20000);
 		goto audioclock;
@@ -1397,13 +1399,17 @@ void VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 ///
 ///	Display a ffmpeg frame
 ///
-///	@param hw_render	video hardware render
+///	@param render	video render
 ///	@param video_ctx	ffmpeg video codec context
 ///	@param frame		frame to display
 ///
 void VideoRenderFrame(VideoRender * render,
-    const AVCodecContext * video_ctx, AVFrame * frame)
+    AVCodecContext * video_ctx, AVFrame * frame)
 {
+	if (!render->StartCounter) {
+		render->timebase = &video_ctx->pkt_timebase;
+	}
+
 	if (render->Closing) {
 		av_frame_free(&frame);
 		return;
@@ -1466,7 +1472,6 @@ void VideoSetClosing(VideoRender * render)
 
 		if (render->VideoPaused) {
 			pthread_cond_signal(&PauseCondition);
-			fprintf(stderr, "VideoSetClosing: cond_signal PauseCondition\n");
 		}
 
 
@@ -1640,7 +1645,7 @@ void VideoSetScreenSize(char *size)
 ///
 void VideoSetAudioDelay(int ms)
 {
-	VideoAudioDelay = ms * 90;
+	VideoAudioDelay = ms;
 }
 
 ///

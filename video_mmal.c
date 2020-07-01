@@ -91,7 +91,7 @@ struct _Mmal_Render_
     int FramesMissed;			///< number of frames missed
     int FramesDropped;			///< number of frames dropped
     int FrameCounter;			///< number of frames decoded
-
+	AVRational *timebase;		///< pointer to AVCodecContext pkts_timebase
 	int64_t pts;
 
 	MMAL_COMPONENT_T *vout;
@@ -214,7 +214,7 @@ static void deint_output_port_cb(MMAL_PORT_T *port,
 		if (buffer->length > 0) {
 			buffer->user_data = NULL;
 			// Correct PTS MMAL use microseconds
-			buffer->pts = (buffer->pts * 90 / 1000);
+			buffer->pts = (buffer->pts * render->timebase->den / render->timebase->num);
 			mmal_queue_put(render->vout_queue, buffer);
             render->buffers_deint_out--;
 			render->buffers_in_queue++;
@@ -513,7 +513,8 @@ dequeue:
 	}
 
 	int64_t audio_clock = AudioGetClock();
-	int64_t video_clock = render->pts = buffer->pts;
+	int64_t video_clock = buffer->pts * 1000 * av_q2d(*render->timebase);
+	render->pts = buffer->pts;
 	int diff = video_clock - audio_clock - VideoAudioDelay;
 
 	if (render->TrickCounter) {
@@ -525,8 +526,14 @@ dequeue:
 	}
 
 
-	if(diff > 35 * 90 && render->FrameCounter % 2 == 0 && !render->TrickSpeed){
+	if(diff > 35 && render->FrameCounter % 2 == 0 && !render->TrickSpeed){
 		render->FramesDuped++;
+#ifdef AV_SYNC_DEBUG
+		fprintf(stderr, "FrameDuped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
+			VideoGetPackets(render->Stream), render->buffers_deint_out,
+			render->buffers_in_queue, AudioUsedBytes(), Timestamp2String(audio_clock),
+			Timestamp2String(video_clock), VideoAudioDelay, diff);
+#endif
 dupe:
 		rbuffer = mmal_queue_get(render->vout_input_pool->queue);
 		memcpy(rbuffer->data, buffer->data, buffer->length);
@@ -537,8 +544,14 @@ dupe:
 		render->buffers++;
 		buffer = rbuffer;
 	}
-	if (diff < -5 * 90 && render->buffers_in_queue > 1 && !render->TrickSpeed) {
+	if (diff < -5 && render->buffers_in_queue > 1 && !render->TrickSpeed) {
 		render->FramesDropped++;
+#ifdef AV_SYNC_DEBUG
+		fprintf(stderr, "FrameDropped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
+			VideoGetPackets(render->Stream), render->buffers_deint_out,
+			render->buffers_in_queue, AudioUsedBytes(), Timestamp2String(audio_clock),
+			Timestamp2String(video_clock), VideoAudioDelay, diff);
+#endif
 		if(frame)
 			av_frame_free(&frame);
 		mmal_buffer_header_release(buffer);
@@ -816,10 +829,14 @@ enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render
 ///	@param frame		frame to display
 ///
 void VideoRenderFrame(VideoRender * render,
-		const AVCodecContext * video_ctx, AVFrame * frame)
+		AVCodecContext * video_ctx, AVFrame * frame)
 {
 	MMAL_BUFFER_HEADER_T *buffer, *qbuffer;
 	MMAL_STATUS_T status;
+
+	if (!render->StartCounter) {
+		render->timebase = &video_ctx->pkt_timebase;
+	}
 
 	if(render->Closing){
 		av_frame_free(&frame);
@@ -873,7 +890,7 @@ void VideoRenderFrame(VideoRender * render,
 		render->buffers++;
 	} else {
 		// MMAL use microseconds
-		qbuffer->pts = buffer->pts / 90 * 1000;
+		qbuffer->pts = buffer->pts * render->timebase->num / render->timebase->den;
 		mmal_port_send_buffer(render->deint->input[0], qbuffer);
 		render->buffers++;
 		render->buffers++;
@@ -1040,7 +1057,7 @@ void VideoSetScreenSize(char *size)
 void VideoSetAudioDelay(int ms)
 {
 //	fprintf(stderr, "VideoSetAudioDelay %i\n", ms);
-    VideoAudioDelay = ms * 90;
+    VideoAudioDelay = ms;
 }
 
 ///

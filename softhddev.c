@@ -39,6 +39,7 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/timestamp.h>
 
 #include "iatomic.h"			// portable atomic_t
 #include "misc.h"
@@ -72,6 +73,7 @@ struct __video_stream__
 
     enum AVCodecID CodecID;		///< current codec id
     AVCodecParameters * Par;
+    struct AVRational timebase;
 
     volatile char NewStream;		///< flag new video stream
     volatile char ClosingStream;	///< flag closing video stream
@@ -692,8 +694,13 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 
 			// new codec id, close and open new
 			if (AudioCodecID != codec_id) {
+
+				AVRational timebase;
+				timebase.den = 90000;
+				timebase.num = 1;
+
 				CodecAudioClose(MyAudioDecoder);
-				CodecAudioOpen(MyAudioDecoder, codec_id, NULL);
+				CodecAudioOpen(MyAudioDecoder, codec_id, NULL, &timebase);
 				AudioCodecID = codec_id;
 			}
 			av_init_packet(avpkt);
@@ -938,7 +945,8 @@ int VideoDecodeInput(VideoStream * stream)
 	}
 
 	if (stream->NewStream && stream->CodecID != AV_CODEC_ID_NONE) {
-		CodecVideoOpen(stream->Decoder, stream->CodecID, stream->Par);
+		CodecVideoOpen(stream->Decoder, stream->CodecID, stream->Par,
+			&stream->timebase);
 		stream->NewStream = 0;
 		stream->Par = NULL;
 	}
@@ -954,9 +962,8 @@ int VideoDecodeInput(VideoStream * stream)
 			stream->PacketRead = (stream->PacketRead + 1) % VIDEO_PACKET_MAX;
 			atomic_dec(&stream->PacketsFilled);
 		}
-		pthread_mutex_unlock(&PktsLockMutex);
-
 		CodecVideoReceiveFrame(stream->Decoder, 0);
+		pthread_mutex_unlock(&PktsLockMutex);
 	}
 
 	return 0;
@@ -1037,6 +1044,8 @@ int PlayVideo(const uint8_t * data, int size)
 						Debug(3, "video: mpeg2 detected\n");
 						stream->CodecID = AV_CODEC_ID_MPEG2VIDEO;
 						stream->NewStream = 1;
+						stream->timebase.den = 90000;
+						stream->timebase.num = 1;
 						VideoEnqueue(stream, pts, data + i + n, size - i - n);
 					}
 				}
@@ -1051,6 +1060,8 @@ int PlayVideo(const uint8_t * data, int size)
 						Debug(3, "video: H264 detected\n");
 						stream->CodecID = AV_CODEC_ID_H264;
 						stream->NewStream = 1;
+						stream->timebase.den = 90000;
+						stream->timebase.num = 1;
 						VideoEnqueue(stream, pts, data + i + n, size - i - n);
 					}
 				}
@@ -1063,8 +1074,11 @@ int PlayVideo(const uint8_t * data, int size)
 				} else {
 					if (data[i + n + 5] == 0x10) {
 						Debug(3, "video: hevc detected\n");
+						fprintf(stderr, "video: hevc detected\n");
 						stream->CodecID = AV_CODEC_ID_HEVC;
 						stream->NewStream = 1;
+						stream->timebase.den = 90000;
+						stream->timebase.num = 1;
 						VideoEnqueue(stream, pts, data + i + n, size - i - n);
 					}
 				}
@@ -1166,7 +1180,7 @@ void StillPicture(const uint8_t * data, int size)
 	if (MyVideoStream->CodecID != AV_CODEC_ID_NONE)
 		fprintf(stderr, "StillPicture: CodecID != AV_CODEC_ID_NONE\n");
 #endif
-	CodecVideoOpen(MyVideoStream->Decoder, codec, NULL);
+	CodecVideoOpen(MyVideoStream->Decoder, codec, NULL, NULL);
 	VideoSetTrickSpeed(MyVideoStream->Render, 1);
 
 send:
@@ -1279,16 +1293,18 @@ uint8_t *GrabImage(int *size, int jpeg, int quality, int width, int height)
 //	mediaplayer functions
 //////////////////////////////////////////////////////////////////////////////
 
-void SetAudioCodec(int codec_id, AVCodecParameters * par)
+void SetAudioCodec(int codec_id, AVCodecParameters * par, AVRational * timebase)
 {
-	CodecAudioOpen(MyAudioDecoder, codec_id, par);
+	CodecAudioOpen(MyAudioDecoder, codec_id, par, timebase);
 }
 
-void SetVideoCodec(int codec_id, AVCodecParameters * par)
+void SetVideoCodec(int codec_id, AVCodecParameters * par, AVRational * timebase)
 {
 	MyVideoStream->CodecID = codec_id;
 	MyVideoStream->NewStream = 1;
 	MyVideoStream->Par = par;
+	MyVideoStream->timebase.num = timebase->num;
+	MyVideoStream->timebase.den = timebase->den;
 }
 
 int PlayAudioPkts(AVPacket * pkt)
@@ -1308,6 +1324,7 @@ int PlayVideoPkts(AVPacket * pkt)
 	AVPacket *avpkt;
 
 	if (atomic_read(&MyVideoStream->PacketsFilled) >= VIDEO_PACKET_MAX - 10) {
+//		fprintf(stderr, "PlayVideoPkts: failed! >= VIDEO_PACKET_MAX\n");
 		return 0;
 	}
 
