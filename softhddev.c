@@ -962,8 +962,10 @@ int VideoDecodeInput(VideoStream * stream)
 			stream->PacketRead = (stream->PacketRead + 1) % VIDEO_PACKET_MAX;
 			atomic_dec(&stream->PacketsFilled);
 		}
-		CodecVideoReceiveFrame(stream->Decoder, 0);
 		pthread_mutex_unlock(&PktsLockMutex);
+
+		if (!stream->NewStream)
+			CodecVideoReceiveFrame(stream->Decoder, 0);
 	}
 
 	return 0;
@@ -1630,10 +1632,6 @@ void Stop(void)
 int64_t GetSTC(void)
 {
 	if (MyVideoStream->Render) {
-#ifdef DEBUG
-		fprintf(stderr, "GetSTC: Video Clock %s\n",
-			PtsTimestamp2String(VideoGetClock(MyVideoStream->Render)));
-#endif
 		return VideoGetClock(MyVideoStream->Render);
 	}
     // could happen during dettached

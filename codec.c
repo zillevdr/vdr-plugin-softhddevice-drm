@@ -290,10 +290,6 @@ int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 #endif
 
 	if (!avpkt->size) {
-#ifdef DEBUG
-		fprintf(stderr, "CodecVideoSendPacket: !avpkt->size pts %s\n",
-			PtsTimestamp2String(avpkt->pts));
-#endif
 		return 0;
 	}
 
