@@ -591,6 +591,7 @@ static void AlsaFlushBuffers(void)
 	if (state != SND_PCM_STATE_OPEN) {
 		if ((err = snd_pcm_drop(AlsaPCMHandle)) < 0) {
 			Error(_("audio: snd_pcm_drop(): %s\n"), snd_strerror(err));
+			fprintf(stderr, "AlsaFlushBuffers: snd_pcm_drop(): %s\n", snd_strerror(err));
 		}
 		// ****ing alsa crash, when in open state here
 		if ((err = snd_pcm_prepare(AlsaPCMHandle)) < 0) {
@@ -1386,8 +1387,13 @@ int AudioVideoReady(int64_t video_pts)
 				used * 1000 / HwSampleRate / HwChannels / AudioBytesProSample;
 
 	skip = video_pts - audio_pts - VideoAudioDelay;
+
 	if (skip > 0) {
 		skip = (int64_t)skip * HwSampleRate * HwChannels * AudioBytesProSample / 1000;
+
+		//skip must be a multiple of HwChannels * AudioBytesProSample
+		int frames = skip / HwChannels / AudioBytesProSample;
+		skip = frames * HwChannels * AudioBytesProSample;
 
 		if ((unsigned)skip > used) {
 			AudioSkip = skip - used;

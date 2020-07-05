@@ -146,6 +146,15 @@ repeat:
 		} else
 			fprintf(stderr, "Player: av_read_frame error!!!\n");
 
+		if (Jump) {
+			av_seek_frame(format, format->streams[0]->index,
+			packet.pts + (int64_t)(Jump *		// - BufferOffset
+			format->streams[0]->time_base.den / format->streams[0]->time_base.num),
+			0);
+			DeviceClear();
+			Jump = 0;
+		}
+
 		if (StopFile)
 			DeviceClear();
 
@@ -201,6 +210,14 @@ eOSState cSoftHdControl::ProcessKey(eKeys key)
 			if (Close)
 				return osStopReplay;
 			break;
+
+		case kGreen:
+			pPlayer->Jump = -30;
+		break;
+
+		case kYellow:
+			pPlayer->Jump = 30;
+		break;
 
 		case kBlue:
 			return osStopReplay;

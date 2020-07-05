@@ -41,6 +41,7 @@ protected:
 public:
 	cSoftHdPlayer(const char *);
 	virtual ~ cSoftHdPlayer();
+	int Jump;
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -58,13 +59,13 @@ friend class cSoftHdPlayer;
 private:
 	static cSoftHdControl *pControl;
 	virtual eOSState ProcessKey(eKeys);	///< process input events
+	cSoftHdPlayer *pPlayer;
 	int Close;
 public:
 	cSoftHdControl(const char *);		///< control constructor
 	virtual ~cSoftHdControl();		///< control destructor
 
 	virtual void Hide(void);		///< hide control
-	cSoftHdPlayer *pPlayer;
 	static cSoftHdControl *Control() { return pControl; }
 };
 

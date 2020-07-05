@@ -354,6 +354,14 @@ void ReadHWPlatform(VideoRender * render)
 //			render->HwDeint = 1;	// This doesn't run yet.
 		}
 
+		if (strstr((char *)&buf[(strlen(buf) + 1)], "sun50i-h5")) {
+#ifdef DEBUG
+			printf("ReadHWPlatform: sun50i-h5 found\n");
+#endif
+//			render->HwDeint = 1;	// This doesn't run yet.
+			render->CodecMode = 2;	// no mpeg HW
+		}
+
 		if (strstr((char *)&buf[(strlen(buf) + 1)], "rockchip")) {
 			if (ReadLineFromFile(buf, bufsize, "/proc/version")) {
 				if (strstr(buf, "4.4.")) {
@@ -868,20 +876,20 @@ static void *DisplayHandlerThread(void * arg)
 	}
 
 	while (1) {
+		pthread_testcancel();
+
 		if (render->VideoPaused) {
 			pthread_mutex_lock(&PauseMutex);
 			pthread_cond_wait(&PauseCondition, &PauseMutex);
 			pthread_mutex_unlock(&PauseMutex);
 		}
 
-		pthread_testcancel();
-
 		Frame2Display(render);
 
 		if (drmHandleEvent(render->fd_drm, &render->ev) != 0)
 			fprintf(stderr, "DisplayHandlerThread: drmHandleEvent failed!\n");
 
-#ifdef AV_SYNC_DEBUG
+/*#ifdef AV_SYNC_DEBUG
 		static uint32_t last_tick;
 		uint32_t tick;
 
@@ -893,19 +901,15 @@ static void *DisplayHandlerThread(void * arg)
 				render->StartCounter, atomic_read(&render->FramesFilled), tick - last_tick);
 		}
 		last_tick = tick;
-#endif
+#endif*/
 
 		if (render->lastframe) {
 			av_frame_free(&render->lastframe);
 		}
 		render->lastframe = render->act_buf->frame;
 
-		if (render->Closing) {
-			if (render->buf_black.fb_id == render->act_buf->fb_id) {
-				CleanDisplayThread(render);
-			} else {
-				Frame2Display(render);
-			}
+		if (render->Closing && render->buf_black.fb_id == render->act_buf->fb_id) {
+			CleanDisplayThread(render);
 		}
 	}
 	pthread_exit((void *)pthread_self());
