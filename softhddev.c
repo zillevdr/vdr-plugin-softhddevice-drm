@@ -1312,7 +1312,7 @@ void SetVideoCodec(int codec_id, AVCodecParameters * par, AVRational * timebase)
 int PlayAudioPkts(AVPacket * pkt)
 {
 	if (AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE) {
-		fprintf(stderr, "PlayAudioPkts: AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE!\n");
+//		fprintf(stderr, "PlayAudioPkts: AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE!\n");
 		return 0;
 	}
 	 if (CodecAudioDecode(MyAudioDecoder, pkt))
@@ -1344,7 +1344,6 @@ int PlayVideoPkts(AVPacket * pkt)
 	memcpy(avpkt->data, pkt->data, pkt->size);
 	avpkt->pts = pkt->pts;
 	avpkt->size = pkt->size;
-
 	return 1;
 }
 

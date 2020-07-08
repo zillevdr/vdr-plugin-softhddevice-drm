@@ -159,7 +159,7 @@ static inline uint32_t GetMsTicks(void)
 **
 **	@returns 0 or 1
 */
-inline int PesHasLength(const uint8_t *p)
+static inline int PesHasLength(const uint8_t *p)
 {
   return p[4] | p[5];
 }
@@ -169,7 +169,7 @@ inline int PesHasLength(const uint8_t *p)
 **
 **	@returns length
 */
-inline int PesLength(const uint8_t *p)
+static inline int PesLength(const uint8_t *p)
 {
   return 6 + p[4] * 256 + p[5];
 }
@@ -179,7 +179,7 @@ inline int PesLength(const uint8_t *p)
 **
 **	@returns length
 */
-inline int PesHeadLength(const uint8_t *p)
+static inline int PesHeadLength(const uint8_t *p)
 {
   return 9 + p[8];
 }

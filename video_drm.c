@@ -1309,7 +1309,6 @@ fillframe:
 				if (filt_frame->format == AV_PIX_FMT_YUV420P) {
 					EnqueueFB(render, filt_frame);
 				} else {
-					fprintf(stderr, "FilterHandlerThread: AV_PIX_FMT_DRM_PRIME\n");
 					render->FramesRb[render->FramesWrite] = filt_frame;
 					render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
 					atomic_inc(&render->FramesFilled);
@@ -1338,6 +1337,7 @@ void VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 		AVFrame * frame)
 {
 	char args[512];
+	const char *filter_descr;
 	const AVFilter *buffersrc  = avfilter_get_by_name("buffer");
 	const AVFilter *buffersink = avfilter_get_by_name("buffersink");
 	AVFilterInOut *outputs = avfilter_inout_alloc();
@@ -1345,8 +1345,14 @@ void VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 	render->filter_graph = avfilter_graph_alloc();
 
 //	const char *filter_descr = "yadif=1:-1:0";
-	const char *filter_descr = "bwdif=1:-1:0";
-//	const char *filter_descr = "deinterlace_v4l2m2m";
+	if (render->HwDeint)
+		filter_descr = "deinterlace_v4l2m2m";
+	else
+		filter_descr = "bwdif=1:-1:0";
+#ifdef DEBUG
+	fprintf(stderr, "VideoFilterInit: filter %s\n",
+		filter_descr);
+#endif
 
 #if LIBAVFILTER_VERSION_INT < AV_VERSION_INT(7,16,100)
 	avfilter_register_all();
@@ -1412,6 +1418,10 @@ void VideoRenderFrame(VideoRender * render,
 {
 	if (!render->StartCounter) {
 		render->timebase = &video_ctx->pkt_timebase;
+	}
+
+	if (frame->decode_error_flags || frame->flags & AV_FRAME_FLAG_CORRUPT) {
+		fprintf(stderr, "VideoRenderFrame: error_flag or FRAME_FLAG_CORRUPT\n");
 	}
 
 	if (render->Closing) {
