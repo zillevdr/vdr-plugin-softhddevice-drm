@@ -51,6 +51,7 @@ cSoftHdPlayer::cSoftHdPlayer(const char *File)
 //	pPlayer= this;
 	Path = (char *) malloc(1 + strlen(File));
 	strcpy(Path, File);
+	Pause = 0;
 //	fprintf(stderr, "cSoftHdPlayer: Player gestartet.\n");
 }
 
@@ -143,20 +144,26 @@ repeat:
 					goto repeat;
 				}
 			}
-		} else
+		} else {
 			fprintf(stderr, "Player: av_read_frame error!!!\n");
+			StopFile = 1;
+		}
+
+		while (Pause) {
+			sleep(1);
+		}
 
 		if (Jump) {
 			av_seek_frame(format, format->streams[0]->index,
-			packet.pts + (int64_t)(Jump *		// - BufferOffset
-			format->streams[0]->time_base.den / format->streams[0]->time_base.num),
-			0);
-			DeviceClear();
+				packet.pts + (int64_t)(Jump *		// - BufferOffset
+				format->streams[0]->time_base.den /
+				format->streams[0]->time_base.num), 0);
+			Clear();
 			Jump = 0;
 		}
 
 		if (StopFile)
-			DeviceClear();
+			Clear();
 
 		av_packet_unref(&packet);
 	}
@@ -211,16 +218,33 @@ eOSState cSoftHdControl::ProcessKey(eKeys key)
 				return osStopReplay;
 			break;
 
+		case kPlay:
+			if (pPlayer->Pause) {
+				pPlayer->Pause = 0;
+				Play();
+			}
+			break;
+
 		case kGreen:
-			pPlayer->Jump = -30;
+			pPlayer->Jump = -60;
 		break;
 
 		case kYellow:
-			pPlayer->Jump = 30;
+			pPlayer->Jump = 60;
 		break;
 
 		case kBlue:
 			return osStopReplay;
+
+		case kPause:
+			if (pPlayer->Pause) {
+				pPlayer->Pause = 0;
+				Play();
+			} else {
+				pPlayer->Pause = 1;
+				Freeze();
+			}
+			break;
 
 		default:
 			break;

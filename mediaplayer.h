@@ -42,6 +42,7 @@ public:
 	cSoftHdPlayer(const char *);
 	virtual ~ cSoftHdPlayer();
 	int Jump;
+	int Pause;
 };
 
 //////////////////////////////////////////////////////////////////////////////

@@ -351,7 +351,7 @@ void ReadHWPlatform(VideoRender * render)
 #ifdef DEBUG
 			printf("ReadHWPlatform: sun8i-h3 found\n");
 #endif
-//			render->HwDeint = 1;	// This doesn't run yet.
+			render->HwDeint = 1;	// This doesn't run yet.
 		}
 
 		if (strstr((char *)&buf[(strlen(buf) + 1)], "sun50i-h5")) {
