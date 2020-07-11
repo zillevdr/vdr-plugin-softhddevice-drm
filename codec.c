@@ -227,14 +227,11 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 void CodecVideoClose(VideoDecoder * decoder)
 {
 #ifdef DEBUG
-		fprintf(stderr, "CodecVideoClose: VideoCtx %p\n", decoder->VideoCtx);
+	fprintf(stderr, "CodecVideoClose: VideoCtx %p\n", decoder->VideoCtx);
 #endif
 	pthread_mutex_lock(&CodecLockMutex);
 	if (decoder->VideoCtx) {
-		avcodec_close(decoder->VideoCtx);
 		avcodec_free_context(&decoder->VideoCtx);
-		av_freep(&decoder->VideoCtx);
-		decoder->VideoCtx = NULL;
 	}
 	pthread_mutex_unlock(&CodecLockMutex);
 }
@@ -493,11 +490,10 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id,
 void CodecAudioClose(AudioDecoder * audio_decoder)
 {
 #ifdef DEBUG
-		fprintf(stderr, "CodecAudioClose\n");
+	fprintf(stderr, "CodecAudioClose\n");
 #endif
 	if (audio_decoder->AudioCtx) {
-		avcodec_close(audio_decoder->AudioCtx);
-		av_freep(&audio_decoder->AudioCtx);
+		avcodec_free_context(&audio_decoder->AudioCtx);
 	}
 }
 
