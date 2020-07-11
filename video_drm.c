@@ -646,6 +646,7 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 	}
 	buf->plane[1] = buf->plane[0] + buf->offset[1];
 	buf->plane[2] = buf->plane[0] + buf->offset[2];
+	buf->handle[0] = 0;
 
 	return 0;
 }
@@ -662,7 +663,7 @@ static void DestroyFB(int fd_drm, struct drm_buf *buf)
 {
 	struct drm_mode_destroy_dumb dreq;
 
-//	fprintf(stderr, "DestroyFB: destroy FB.\n");
+//	fprintf(stderr, "DestroyFB: destroy FB %d\n", buf->fb_id);
 
 	if (buf->plane[0] != 0) {
 		munmap(buf->plane[0], buf->size);
@@ -677,12 +678,18 @@ static void DestroyFB(int fd_drm, struct drm_buf *buf)
 		if (drmIoctl(fd_drm, DRM_IOCTL_MODE_DESTROY_DUMB, &dreq) < 0)
 			fprintf(stderr, "DestroyFB: cannot destroy dumb buffer (%d): %m\n", errno);
 	}
+
+	if (buf->handle[0])
+		if (drmIoctl(fd_drm, DRM_IOCTL_GEM_CLOSE, &buf->handle[0]) < 0)
+			fprintf(stderr, "DestroyFB: cannot close GEM (%d): %m\n", errno);
+
 	buf->width = 0;
 	buf->height = 0;
 	buf->fb_id = 0;
 	buf->plane[0] = 0;
 	buf->size = 0;
 	buf->fd_prime = 0;
+	buf->handle[0] = 0;
 }
 
 ///
