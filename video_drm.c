@@ -340,29 +340,39 @@ size_t ReadLineFromFile(char *buf, size_t size, char * file)
 void ReadHWPlatform(VideoRender * render)
 {
 	char *buf;
+	char *read_ptr;
 	size_t bufsize = 128;
+	size_t read_size;
 	buf = (char *) calloc(bufsize, sizeof(char));
 
 	render->CodecMode = 0;
 
-	if (ReadLineFromFile(buf, bufsize, "/sys/firmware/devicetree/base/compatible")) {
+	read_size = ReadLineFromFile(buf, bufsize, "/sys/firmware/devicetree/base/compatible");
+	if (!read_size)
+		return;
 
-		if (strstr((char *)&buf[(strlen(buf) + 1)], "sun8i-h3")) {
+	read_ptr = buf;
+
+	while(read_size) {
+
+		if (strstr(read_ptr, "sun8i-h3")) {
 #ifdef DEBUG
 			printf("ReadHWPlatform: sun8i-h3 found\n");
 #endif
 			render->HwDeint = 1;	// This doesn't run yet.
+			break;
 		}
 
-		if (strstr((char *)&buf[(strlen(buf) + 1)], "sun50i-h5")) {
+		if (strstr(read_ptr, "sun50i-h5")) {
 #ifdef DEBUG
 			printf("ReadHWPlatform: sun50i-h5 found\n");
 #endif
 //			render->HwDeint = 1;	// This doesn't run yet.
 			render->CodecMode = 2;	// no mpeg HW
+			break;
 		}
 
-		if (strstr((char *)&buf[(strlen(buf) + 1)], "rockchip")) {
+		if (strstr(read_ptr, "rockchip")) {
 			if (ReadLineFromFile(buf, bufsize, "/proc/version")) {
 				if (strstr(buf, "4.4.")) {
 #ifdef DEBUG
@@ -376,8 +386,10 @@ void ReadHWPlatform(VideoRender * render)
 					render->CodecMode = 2;	// no mpeg HW
 				}
 			}
+			break;
 		}
-
+		read_size -= (strlen(read_ptr) + 1);
+		read_ptr = (char *)&read_ptr[(strlen(read_ptr) + 1)];
 	}
 	free(buf);
 }
