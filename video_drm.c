@@ -66,7 +66,7 @@
 //	Defines
 //----------------------------------------------------------------------------
 
-#define VIDEO_SURFACES_MAX	5	///< video output surfaces for queue
+#define VIDEO_SURFACES_MAX	3	///< video output surfaces for queue
 
 //----------------------------------------------------------------------------
 //	Variables
@@ -1315,7 +1315,7 @@ getoutframe:
 				fprintf(stderr, "FilterHandlerThread: width %d height%d\n",
 					filt_frame->width, filt_frame->height);
 				av_frame_free(&filt_frame);
-				goto getinframe;
+				break;
 			}
 
 			filt_frame->pts = filt_frame->pts / 2;
