@@ -1471,15 +1471,8 @@ bool cPluginSoftHdDevice::Service(const char *id, void *data)
 **	FIXME: translation?
 */
 static const char *SVDRPHelpText[] = {
-    "HOTK key\n" "    Execute hotkey.\n\n"
-	"    key is the hotkey number, following are supported:\n"
-	"    10: disable audio pass-through\n"
-	"    11: enable audio pass-through\n"
-	"    12: toggle audio pass-through\n"
-	"    13: decrease audio delay by 10ms\n"
-	"    14: increase audio delay by 10ms\n"
-	"    15: toggle ac3 mixdown\n",
-    NULL
+	"PLAY Url\n" "    Play the media from the given url.\n",
+	NULL
 };
 
 /**
@@ -1500,17 +1493,15 @@ const char **cPluginSoftHdDevice::SVDRPHelpPages(void)
 **	@param option		all command arguments
 **	@param reply_code	reply code
 */
-cString cPluginSoftHdDevice::SVDRPCommand( __attribute__ ((unused))
-    const char *command, __attribute__ ((unused)) const char *option,
-    __attribute__ ((unused)) int &reply_code)
+cString cPluginSoftHdDevice::SVDRPCommand(const char *command,
+		__attribute__ ((unused)) const char *option,
+		__attribute__ ((unused)) int &reply_code)
 {
-/*    if (!strcasecmp(command, "HOTK")) {
-	int hotk;
-
-	hotk = strtol(option, NULL, 0);
-	HandleHotkey(hotk);
-	return "hot-key executed";
-    }*/
+	if (!strcasecmp(command, "PLAY")) {
+		fprintf(stderr, "SVDRPCommand: %s %s\n", command, option);
+		cControl::Launch(cSoftHdMenu::Control = new cSoftHdControl(option));
+		return "PLAY url";
+	}
 
     return NULL;
 }

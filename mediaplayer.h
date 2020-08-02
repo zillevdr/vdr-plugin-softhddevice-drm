@@ -32,7 +32,7 @@ class cSoftHdPlayer : public cPlayer, cThread
 {
 //friend class cSoftHdControl;
 private:
-	void PlayFile(const char *path);
+	void Player(const char *);
 	char *Path;
 	int StopFile;
 protected:
@@ -83,10 +83,10 @@ private:
 	void MainMenu(void);			///< create plugin main menu
 	void FindFile(string, FILE *);
 	string Path;
-	static cSoftHdControl *Control;
 public:
 	cSoftHdMenu(const char *, int = 0, int = 0, int = 0, int = 0, int = 0);
 	virtual ~ cSoftHdMenu();
+	static cSoftHdControl *Control;
 	virtual eOSState ProcessKey(eKeys);
 };
 

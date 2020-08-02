@@ -39,7 +39,16 @@ extern "C"
 #include "softhddev.h"
 }
 
-
+// fix temporary array error in c++1x
+#ifdef av_err2str
+#undef av_err2str
+av_always_inline char* av_err2str(int errnum)
+{
+	static char str[AV_ERROR_MAX_STRING_SIZE];
+	memset(str, 0, sizeof(str));
+	return av_make_error_string(str, AV_ERROR_MAX_STRING_SIZE, errnum);
+}
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 //	cPlayer Mediaplayer
@@ -71,13 +80,13 @@ void cSoftHdPlayer::Activate(bool On)
 void cSoftHdPlayer::Action(void)
 {
 //	fprintf(stderr, "cSoftHdPlayer: Action\n");
-	PlayFile(Path);
+	Player(Path);
 
-	sleep (10);
+	sleep (1);
 	cSoftHdControl::Control()->Close = 1;
 }
 
-void cSoftHdPlayer::PlayFile(const char *path)
+void cSoftHdPlayer::Player(const char *url)
 {
 	AVPacket packet;
 	AVCodec *video_codec;
@@ -89,18 +98,16 @@ void cSoftHdPlayer::PlayFile(const char *path)
 	StopFile = 0;
 
 	// get format from file
-	AVFormatContext* format = avformat_alloc_context();
-	if (avformat_open_input(&format, path, NULL, NULL) != 0) {
-//		esyslog("Mediaplayer: Could not open file '%s'\n", path);
-		fprintf(stderr, "Mediaplayer: Could not open file '%s'\n", path);
+	AVFormatContext *format = avformat_alloc_context();
+	if (avformat_open_input(&format, url, NULL, NULL) != 0) {
+		fprintf(stderr, "Mediaplayer: Could not open file '%s'\n", url);
 		return;
 	}
-
-	av_dump_format(format, -1, path, 0);
-
+#ifdef DEBUG
+	av_dump_format(format, -1, url, 0);
+#endif
 	if (avformat_find_stream_info(format, NULL) < 0) {
-//		esyslog("Mediaplayer: Could not retrieve stream info from file '%s'\n", path);
-		fprintf(stderr, "Mediaplayer: Could not retrieve stream info from file '%s'\n", path);
+		fprintf(stderr, "Mediaplayer: Could not retrieve stream info from file '%s'\n", url);
 		return;
 	}
 
@@ -115,6 +122,7 @@ void cSoftHdPlayer::PlayFile(const char *path)
 
 	video_stream_index = av_find_best_stream(format, AVMEDIA_TYPE_VIDEO,
 		-1, -1, &video_codec, 0);
+
 	if (video_stream_index < 0) {
 		fprintf(stderr, "Player: stream does not seem to contain video\n");
 	} else {
@@ -123,7 +131,7 @@ void cSoftHdPlayer::PlayFile(const char *path)
 			&format->streams[video_stream_index]->time_base);
 	}
 
-	while (err == 0 && !StopFile) {
+	while (!StopFile) {
 		err = av_read_frame(format, &packet);
 		if (err == 0) {
 repeat:
@@ -145,8 +153,10 @@ repeat:
 				}
 			}
 		} else {
-			fprintf(stderr, "Player: av_read_frame error!!!\n");
+			fprintf(stderr, "Player: av_read_frame error: %s\n",
+				av_err2str(err));
 			StopFile = 1;
+			continue;
 		}
 
 		while (Pause) {
@@ -367,14 +377,22 @@ eOSState cSoftHdMenu::ProcessKey(eKeys key)
 				string NewPathString = Path.substr(0,Path.find_last_of("/"));
 				Path = NewPathString;
 				FindFile(Path.c_str(), NULL);
-			} else { // Fixme! Control this is a folder!!!
-				string NewPathString = Path + "/" + item->Text();
-				Path = NewPathString;
-				FindFile(NewPathString.c_str(), NULL);
+			} else {
+				if (strcasestr(item->Text(), ".MP")) {
+					fprintf(stderr, "[ProcessKey] %s:\n", item->Text());
+					string NewPathString = Path + "/" + item->Text();
+					cControl::Launch(Control = new cSoftHdControl(NewPathString.c_str()));
+					Clear();	// clear the menu
+					return osEnd;
+				} else { // Fixme! Control this is a folder!!!
+					string NewPathString = Path + "/" + item->Text();
+					Path = NewPathString;
+					FindFile(NewPathString.c_str(), NULL);
+				}
 			}
 			break;
 		case kRed:
-			if (item->Text()) {	// make compiler happy
+			if (item->Text()) {
 				string NewPathString = Path + "/" + item->Text();
 				cControl::Launch(Control = new cSoftHdControl(NewPathString.c_str()));
 				Clear();	// clear the menu
