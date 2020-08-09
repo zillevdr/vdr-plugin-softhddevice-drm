@@ -37,6 +37,7 @@ extern "C"
 #include <libavformat/avformat.h>
 
 #include "softhddev.h"
+#include "audio.h"
 }
 
 // fix temporary array error in c++1x
@@ -94,6 +95,7 @@ void cSoftHdPlayer::Player(const char *url)
 	int err = 0;
 	int audio_stream_index = 0;
 	int video_stream_index;
+	int start_time;
 
 	StopFile = 0;
 
@@ -103,7 +105,7 @@ void cSoftHdPlayer::Player(const char *url)
 		fprintf(stderr, "Mediaplayer: Could not open file '%s'\n", url);
 		return;
 	}
-#ifdef DEBUG
+#ifdef MEDIA_DEBUG
 	av_dump_format(format, -1, url, 0);
 #endif
 	if (avformat_find_stream_info(format, NULL) < 0) {
@@ -131,6 +133,9 @@ void cSoftHdPlayer::Player(const char *url)
 			&format->streams[video_stream_index]->time_base);
 	}
 
+	duration = format->duration / AV_TIME_BASE;
+	start_time = format->start_time / AV_TIME_BASE;
+
 	while (!StopFile) {
 		err = av_read_frame(format, &packet);
 		if (err == 0) {
@@ -142,6 +147,7 @@ repeat:
 						/ format->streams[audio_stream_index]->time_base.den);
 					goto repeat;
 				}
+				current_time = AudioGetClock() / 1000 - start_time;
 			}
 
 			if (video_stream_index == packet.stream_index) {
@@ -178,6 +184,9 @@ repeat:
 		av_packet_unref(&packet);
 	}
 
+	duration = 0;
+	current_time = 0;
+
 	avformat_close_input(&format);
 	avformat_free_context(format);
 }
@@ -197,6 +206,7 @@ cSoftHdControl::cSoftHdControl(const char *File)
 //	fprintf(stderr, "cSoftHdControl: Player gestartet.\n");
 	pControl = this;
 	Close = 0;
+	pOsd = NULL;
 }
 
 /**
@@ -206,13 +216,37 @@ cSoftHdControl::~cSoftHdControl()
 {
 	delete pPlayer;
 	pPlayer = NULL;
-
-//	fprintf(stderr, "cSoftHdControl: Player beendet.\n");
+#ifdef MEDIA_DEBUG
+	fprintf(stderr, "cSoftHdControl: Player beendet.\n");
+#endif
 }
 
 void cSoftHdControl::Hide(void)
 {
-//	fprintf(stderr, "[cSoftHdControl] Hide\n");
+#ifdef MEDIA_DEBUG
+	fprintf(stderr, "[cSoftHdControl] Hide\n");
+#endif
+	if (pOsd) {
+		delete pOsd;
+		pOsd = NULL;
+	}
+}
+
+void cSoftHdControl::ShowProgress(void)
+{
+	if (!pOsd) {
+#ifdef MEDIA_DEBUG
+		fprintf(stderr, "[cSoftHdControl] ShowProgress get OSD\n");
+#endif
+		pOsd = Skins.Current()->DisplayReplay(false);
+	}
+
+	pOsd->SetTitle(pPlayer->GetTitle());
+	pOsd->SetProgress(pPlayer->CurrentTime(), pPlayer->TotalTime());
+	pOsd->SetCurrent(IndexToHMSF(pPlayer->CurrentTime(), false, 1));
+	pOsd->SetTotal(IndexToHMSF(pPlayer->TotalTime(), false, 1));
+
+	Skins.Flush();
 }
 
 /**
@@ -224,8 +258,20 @@ eOSState cSoftHdControl::ProcessKey(eKeys key)
 {
 	switch (key) {
 		case kNone:
-			if (Close)
+			if (pOsd)
+				ShowProgress();
+			if (Close) {
+				Hide();
 				return osStopReplay;
+			}
+			break;
+
+		case kOk:
+			if (pOsd) {
+				Hide();
+			} else {
+				ShowProgress();
+			}
 			break;
 
 		case kPlay:
@@ -244,6 +290,8 @@ eOSState cSoftHdControl::ProcessKey(eKeys key)
 		break;
 
 		case kBlue:
+			Hide();
+			pPlayer->StopFile = 1;
 			return osStopReplay;
 
 		case kPause:

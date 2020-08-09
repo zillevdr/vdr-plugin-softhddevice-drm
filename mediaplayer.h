@@ -34,7 +34,8 @@ class cSoftHdPlayer : public cPlayer, cThread
 private:
 	void Player(const char *);
 	char *Path;
-	int StopFile;
+	int current_time;
+	int duration;
 protected:
 	virtual void Activate(bool On);
 	virtual void Action(void);
@@ -43,6 +44,10 @@ public:
 	virtual ~ cSoftHdPlayer();
 	int Jump;
 	int Pause;
+	int StopFile;
+	int CurrentTime() { return current_time; }
+	int TotalTime() { return duration; }
+	const char * GetTitle() { return Path; }
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -61,6 +66,8 @@ private:
 	static cSoftHdControl *pControl;
 	virtual eOSState ProcessKey(eKeys);	///< process input events
 	cSoftHdPlayer *pPlayer;
+	cSkinDisplayReplay *pOsd;
+	void ShowProgress();
 	int Close;
 public:
 	cSoftHdControl(const char *);		///< control constructor

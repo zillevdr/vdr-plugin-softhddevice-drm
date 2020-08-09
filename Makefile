@@ -21,6 +21,7 @@ CONFIG := #-DDEBUG 				# enable debug output+functions
 #CONFIG += -DDRM_DEBUG			# enable debug messages in drm configuration
 #CONFIG += -DCODEC_DEBUG		# enable debug messages in codec configuration
 #CONFIG += -DSTILL_DEBUG		# still picture debug
+#CONFIG += -DMEDIA_DEBUG		# media player debug
 
 ### The version number of this plugin (taken from the main source file):
 
