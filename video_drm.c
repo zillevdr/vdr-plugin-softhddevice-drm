@@ -339,19 +339,22 @@ size_t ReadLineFromFile(char *buf, size_t size, char * file)
 
 void ReadHWPlatform(VideoRender * render)
 {
-	char *buf;
+	char *txt_buf;
 	char *read_ptr;
 	size_t bufsize = 128;
 	size_t read_size;
-	buf = (char *) calloc(bufsize, sizeof(char));
+
+	txt_buf = (char *) calloc(bufsize, sizeof(char));
+	if (!txt_buf)
+		printf("ReadHWPlatform: No memory!\n");
 
 	render->CodecMode = 0;
 
-	read_size = ReadLineFromFile(buf, bufsize, "/sys/firmware/devicetree/base/compatible");
+	read_size = ReadLineFromFile(txt_buf, bufsize, "/sys/firmware/devicetree/base/compatible");
 	if (!read_size)
 		return;
 
-	read_ptr = buf;
+	read_ptr = txt_buf;
 
 	while(read_size) {
 
@@ -373,8 +376,8 @@ void ReadHWPlatform(VideoRender * render)
 		}
 
 		if (strstr(read_ptr, "rockchip")) {
-			if (ReadLineFromFile(buf, bufsize, "/proc/version")) {
-				if (strstr(buf, "4.4.")) {
+			if (ReadLineFromFile(txt_buf, bufsize, "/proc/version")) {
+				if (strstr(txt_buf, "4.4.")) {
 #ifdef DEBUG
 					printf("ReadHWPlatform: rockchip with kernel 4.4.x found\n");
 #endif
@@ -391,7 +394,7 @@ void ReadHWPlatform(VideoRender * render)
 		read_size -= (strlen(read_ptr) + 1);
 		read_ptr = (char *)&read_ptr[(strlen(read_ptr) + 1)];
 	}
-	free(buf);
+	free((void *)txt_buf);
 }
 
 static int TestCaps(int fd)
@@ -824,7 +827,7 @@ audioclock:
 
 	int diff = video_pts - audio_pts - VideoAudioDelay;
 
-	if (diff < -5 && !render->TrickSpeed) {
+	if (diff < -5 && !render->TrickSpeed && !(abs(diff) > 5000)) {
 		render->FramesDropped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDropped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
@@ -841,7 +844,7 @@ audioclock:
 		goto dequeue;
 	}
 
-	if (diff > 35 && !render->TrickSpeed) {
+	if (diff > 35 && !render->TrickSpeed && !(abs(diff) > 5000)) {
 		render->FramesDuped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDuped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
@@ -852,6 +855,15 @@ audioclock:
 		usleep(20000);
 		goto audioclock;
 	}
+
+#ifdef AV_SYNC_DEBUG
+	if (abs(diff) > 5000) {	// more than 5s
+		fprintf(stderr, "More then 5s Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
+			VideoGetPackets(render->Stream), atomic_read(&render->FramesDeintFilled),
+			atomic_read(&render->FramesFilled), AudioUsedBytes(), Timestamp2String(audio_pts),
+			Timestamp2String(video_pts), VideoAudioDelay, diff);
+	}
+#endif
 
 	if (!render->TrickSpeed)
 		render->StartCounter++;
