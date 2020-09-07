@@ -805,6 +805,9 @@ dequeue:
 	render->pts = frame->pts;
 	video_pts = frame->pts * 1000 * av_q2d(*render->timebase);
 	if(!render->StartCounter && !render->Closing && !render->TrickSpeed) {
+#ifdef DEBUG
+		fprintf(stderr, "Frame2Display: start PTS %s\n", Timestamp2String(video_pts));
+#endif
 avready:
 		if (AudioVideoReady(video_pts)) {
 			usleep(10000);

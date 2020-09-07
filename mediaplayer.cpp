@@ -95,6 +95,7 @@ void cSoftHdPlayer::Player(const char *url)
 	int err = 0;
 	int audio_stream_index = 0;
 	int video_stream_index;
+	int jump_stream_index = 0;
 	int start_time;
 
 	StopFile = 0;
@@ -117,7 +118,7 @@ void cSoftHdPlayer::Player(const char *url)
 		if (format->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
 			SetAudioCodec(format->streams[i]->codecpar->codec_id,
 				format->streams[i]->codecpar, &format->streams[i]->time_base);
-			audio_stream_index = i;
+			audio_stream_index = jump_stream_index = i;
 			break;
 		}
 	}
@@ -131,6 +132,7 @@ void cSoftHdPlayer::Player(const char *url)
 		 SetVideoCodec(video_codec->id,
 			format->streams[video_stream_index]->codecpar,
 			&format->streams[video_stream_index]->time_base);
+		jump_stream_index = video_stream_index;
 	}
 
 	duration = format->duration / AV_TIME_BASE;
@@ -170,10 +172,10 @@ repeat:
 		}
 
 		if (Jump) {
-			av_seek_frame(format, format->streams[0]->index,
+			av_seek_frame(format, format->streams[jump_stream_index]->index,
 				packet.pts + (int64_t)(Jump *		// - BufferOffset
-				format->streams[0]->time_base.den /
-				format->streams[0]->time_base.num), 0);
+				format->streams[jump_stream_index]->time_base.den /
+				format->streams[jump_stream_index]->time_base.num), 0);
 			Clear();
 			Jump = 0;
 		}

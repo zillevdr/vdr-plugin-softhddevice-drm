@@ -322,6 +322,10 @@ int CodecVideoReceiveFrame(VideoDecoder * decoder, int no_deint)
 		VideoRenderFrame(decoder->Render, decoder->VideoCtx, decoder->Frame);
 	} else {
 		av_frame_free(&decoder->Frame);
+#ifdef DEBUG
+		fprintf(stderr, "CodecVideoReceiveFrame: av_frame_free ret: %s\n",
+			av_err2str(ret));
+#endif
 	}
 
 #ifdef DEBUG
