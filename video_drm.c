@@ -679,19 +679,26 @@ static void DestroyFB(int fd_drm, struct drm_buf *buf)
 
 //	fprintf(stderr, "DestroyFB: destroy FB %d\n", buf->fb_id);
 
-	if (buf->plane[0] != 0) {
-		munmap(buf->plane[0], buf->size);
+	if (buf->plane[0]) {
+		if (munmap(buf->plane[0], buf->size))
+				fprintf(stderr, "DestroyFB: failed unmap FB (%d): %m\n", errno);
 	}
 
 	if (drmModeRmFB(fd_drm, buf->fb_id) < 0)
 		fprintf(stderr, "DestroyFB: cannot remake FB (%d): %m\n", errno);
 
-	if (buf->plane[0] != 0) {
+	if (buf->plane[0]) {
 		memset(&dreq, 0, sizeof(dreq));
 		dreq.handle = buf->handle[0];
+
 		if (drmIoctl(fd_drm, DRM_IOCTL_MODE_DESTROY_DUMB, &dreq) < 0)
 			fprintf(stderr, "DestroyFB: cannot destroy dumb buffer (%d): %m\n", errno);
 		buf->handle[0] = 0;
+
+		if (buf->fd_prime) {
+			if (close(buf->fd_prime))
+				fprintf(stderr, "DestroyFB: failed close fd prime (%d): %m\n", errno);
+		}
 	}
 
 	if (buf->handle[0]) {
@@ -1357,7 +1364,7 @@ closing:
 	avfilter_graph_free(&render->filter_graph);
 	render->Deint_Close = 0;
 #ifdef DEBUG
-		fprintf(stderr, "FilterHandlerThread: Thread Exit.\n");
+	fprintf(stderr, "FilterHandlerThread: Thread Exit.\n");
 #endif
 	pthread_cleanup_push(ThreadExitHandler, render);
 	pthread_cleanup_pop(1);
