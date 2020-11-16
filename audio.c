@@ -1309,7 +1309,9 @@ int AudioFilter(AVFrame *inframe, AVCodecContext *AudioCtx)
 
 	if (!FilterInit) {
 		if (AudioFilterInit(AudioCtx)) {
-//			fprintf(stderr, "AudioFilter: AudioFilterInit failed!\n");
+#ifdef DEBUG
+			fprintf(stderr, "AudioFilter: AudioFilterInit failed!\n");
+#endif
 			return 1;
 		}
 	}

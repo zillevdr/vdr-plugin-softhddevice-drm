@@ -1499,7 +1499,7 @@ cString cPluginSoftHdDevice::SVDRPCommand(const char *command,
 {
 	if (!strcasecmp(command, "PLAY")) {
 		fprintf(stderr, "SVDRPCommand: %s %s\n", command, option);
-		cControl::Launch(cSoftHdMenu::Control = new cSoftHdControl(option));
+		cControl::Launch(new cSoftHdControl(option));
 		return "PLAY url";
 	}
 

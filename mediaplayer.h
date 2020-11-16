@@ -20,6 +20,13 @@
 ///	$Id$
 //////////////////////////////////////////////////////////////////////////////
 
+	struct PLEntry {
+		string Path;
+		string File;
+		string Folder;
+		string SubFolder;
+		struct PLEntry *NextEntry;
+	};
 
 //////////////////////////////////////////////////////////////////////////////
 //	cPlayer
@@ -30,24 +37,28 @@
 */
 class cSoftHdPlayer : public cPlayer, cThread
 {
-//friend class cSoftHdControl;
 private:
 	void Player(const char *);
-	char *Path;
-	int current_time;
-	int duration;
+	void ReadPL(const char *);
+	char *Source;
+	int Entries;
 protected:
 	virtual void Activate(bool On);
 	virtual void Action(void);
 public:
 	cSoftHdPlayer(const char *);
 	virtual ~ cSoftHdPlayer();
+	struct PLEntry *FirstEntry;
+	struct PLEntry *CurrentEntry;
+	void SetEntry(int);
+	const char * GetTitle(void);
 	int Jump;
 	int Pause;
-	int StopFile;
-	int CurrentTime() { return current_time; }
-	int TotalTime() { return duration; }
-	const char * GetTitle() { return Path; }
+	int StopPlay;
+	int Random;
+	int NoModify;
+	int CurrentTime;
+	int Duration;
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -60,21 +71,20 @@ public:
 
 class cSoftHdControl : public cControl
 {
-//friend class cSoftHdMenu;
-friend class cSoftHdPlayer;
 private:
-	static cSoftHdControl *pControl;
-	virtual eOSState ProcessKey(eKeys);	///< process input events
-	cSoftHdPlayer *pPlayer;
-	cSkinDisplayReplay *pOsd;
 	void ShowProgress();
-	int Close;
+	static cSoftHdControl *pControl;
+	static cSoftHdPlayer *pPlayer;
+	cSkinDisplayReplay *pOsd;
 public:
 	cSoftHdControl(const char *);		///< control constructor
 	virtual ~cSoftHdControl();		///< control destructor
-
 	virtual void Hide(void);		///< hide control
+	virtual cOsdObject *GetInfo(void) { return NULL; }
+	virtual eOSState ProcessKey(eKeys);	///< process input events
 	static cSoftHdControl *Control() { return pControl; }
+	static cSoftHdPlayer *Player() { return pPlayer; }
+	int Close;
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -88,12 +98,19 @@ class cSoftHdMenu : public cOsdMenu
 {
 private:
 	void MainMenu(void);			///< create plugin main menu
+	void SelectPL(void);
 	void FindFile(string, FILE *);
+	void MakePlayList(const char *, const char *);
+	int TestMedia(const char *);
+	void PlayMedia(const char *);
 	string Path;
+	string LastItem;
+	string Playlist;
 public:
 	cSoftHdMenu(const char *, int = 0, int = 0, int = 0, int = 0, int = 0);
 	virtual ~ cSoftHdMenu();
-	static cSoftHdControl *Control;
+	void PlayListMenu(void);
 	virtual eOSState ProcessKey(eKeys);
+	static cSoftHdMenu *pSoftHdMenu;
+	static cSoftHdMenu *Menu() { return pSoftHdMenu; }
 };
-
