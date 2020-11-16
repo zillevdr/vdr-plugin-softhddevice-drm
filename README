@@ -1,5 +1,5 @@
 Copyright (c) 2011 - 2013 by Johns.  All Rights Reserved.
-Copyright (c) 2018 - 2019 by zillevdr.  All Rights Reserved.
+Copyright (c) 2018 - 2020 by zillevdr.  All Rights Reserved.
 
 License: AGPLv3
 
@@ -34,6 +34,7 @@ Requirement:
 	media-video/ffmpeg
 		MMAL (RaspberryPi) 	version >=3.2
 		rkmpp (Rockchip)	version >=4.0
+		v4l2-request (Rockchip, Allwinner)	WIP LE version
 
 	media-libs/alsa-lib
 		Advanced Linux Sound Architecture Library
@@ -103,7 +104,7 @@ Setup: /etc/vdr/setup.conf
 	reduce volume level (/1000) for stereo sources
 
 	softhddevice.AudioBufferTime = 0
-	0 = default (336 ms)
+	0 = default (400 ms)
 	1 - 1000 = size of the buffer in ms
 
 Commandline:
@@ -117,14 +118,20 @@ Commandline:
 
 SVDRP:
 ------
-	Use 'svdrpsend.pl plug softhddevice HELP'
-	or 'svdrpsend plug softhddevice HELP' to see the SVDRP commands help
-	and which are supported by the plugin.
+	PLAY Url    Play the media from the given url.
+
+	Play a local file:
+	svdrpsend plug softhddevice-drm PLAY /path_to_file/media_file.mp4
+
+	Play a playlist inside ConfigDirectory:
+	svdrpsend plug softhddevice-drm PLAY playlist_name.m3u
+
+	Play a media file from web:
+	svdrpsend plug softhddevice-drm PLAY http://www.media-server/path_to_file/media_file.mp4
 
 Known Bugs:
 -----------
 	PASSTHROUGH is broken
-	audio only 2 channels supported
 
 Optional:
 ---------
