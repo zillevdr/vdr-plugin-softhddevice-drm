@@ -158,7 +158,7 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 					cfg->device_type == AV_HWDEVICE_TYPE_DRM) {
 
 #ifdef CODEC_DEBUG
-					fprintf(stderr, "CodecVideoOpen: HW codec %s gefunden\n",
+					fprintf(stderr, "CodecVideoOpen: HW codec %s found\n",
 						av_hwdevice_get_type_name(cfg->device_type));
 #endif
 					type = cfg->device_type;
@@ -167,6 +167,8 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 			}
 		}
 	}
+	if (!type)
+		Info(_("CodecVideoOpen: No HW codec found!\n"));
 #ifdef CODEC_DEBUG
 	fprintf(stderr, "CodecVideoOpen: Codec %s found\n", codec->long_name);
 #endif

@@ -498,6 +498,8 @@ static int FindDevice(VideoRender * render)
 			}
 		}
 		drmModeFreeConnector(connector);
+		if (!render->mode.hdisplay || !render->mode.vdisplay)
+			Fatal(_("FindDevice: No Monitor Mode found!\n"));
 	}
 
 	// find first plane
