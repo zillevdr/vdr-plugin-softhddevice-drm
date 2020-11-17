@@ -1648,15 +1648,13 @@ uint8_t *VideoGrabService(int *size, int *width, int *height)
 ///	Get render statistics.
 ///
 ///	@param hw_render	video hardware render
-///	@param[out] missed	missed frames
 ///	@param[out] duped	duped frames
 ///	@param[out] dropped	dropped frames
 ///	@param[out] count	number of decoded frames
 ///
-void VideoGetStats(VideoRender * render, int *missed, int *duped,
+void VideoGetStats(VideoRender * render, int *duped,
     int *dropped, int *counter)
 {
-    *missed = render->FramesDuped;
     *duped = render->FramesDuped;
     *dropped = render->FramesDropped;
     *counter = render->StartCounter;

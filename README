@@ -104,7 +104,7 @@ Setup: /etc/vdr/setup.conf
 	reduce volume level (/1000) for stereo sources
 
 	softhddevice.AudioBufferTime = 0
-	0 = default (400 ms)
+	0 = default (600 ms)
 	1 - 1000 = size of the buffer in ms
 
 Commandline:

@@ -100,7 +100,7 @@ extern "C"
     /// C plugin house keeping
 
     /// Get decoder statistics
-    extern void GetStats(int *, int *, int *, int *);
+    extern void GetStats(int *, int *, int *);
 
 #ifdef __cplusplus
 }

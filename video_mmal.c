@@ -88,7 +88,6 @@ struct _Mmal_Render_
 
     int StartCounter;			///< counter for video start
     int FramesDuped;			///< number of frames duplicated
-    int FramesMissed;			///< number of frames missed
     int FramesDropped;			///< number of frames dropped
     int FrameCounter;			///< number of frames decoded
 	AVRational *timebase;		///< pointer to AVCodecContext pkts_timebase
@@ -482,8 +481,6 @@ static void MmalDisplayFrame(VideoRender * render)
 	AVFrame *frame;
 
 	if(render->buffers_in_queue == 0 ){
-		if(render->StartCounter > 0)
-			render->FramesMissed++;
 		return;
 	}
 
@@ -560,10 +557,10 @@ dupe:
 
 	//Debug
 //	uint32_t newtime = GetMsTicks();
-/*	fprintf(stderr, "vor Dec %3d buffers %2d queue %d deint_in %d deint_out %i Diff %5i Dup %i Drop %i Miss %i Closing %i TSpeed %i TCount %i\n",
+/*	fprintf(stderr, "vor Dec %3d buffers %2d queue %d deint_in %d deint_out %i Diff %5i Dup %i Drop %i Closing %i TSpeed %i TCount %i\n",
 		VideoGetPackets(render->Stream), render->buffers,
 		render->buffers_in_queue, render->buffers_deint_in, render->buffers_deint_out,
-		diff, render->FramesDuped, render->FramesDropped, render->FramesMissed,
+		diff, render->FramesDuped, render->FramesDropped,
 		render->Closing, render->TrickSpeed, render->TrickCounter);*/
 //	render->mytime = newtime;
 
@@ -1005,15 +1002,13 @@ uint8_t *VideoGrabService(int *size, int *width, int *height)
 ///	Get render statistics.
 ///
 ///	@param hw_render	video hardware render
-///	@param[out] missed	missed frames
 ///	@param[out] duped	duped frames
 ///	@param[out] dropped	dropped frames
 ///	@param[out] count	number of decoded frames
 ///
-void VideoGetStats(VideoRender * render, int *missed, int *duped,
+void VideoGetStats(VideoRender * render, int *duped,
     int *dropped, int *counter)
 {
-    *missed = render->FramesDuped;
     *duped = render->FramesDuped;
     *dropped = render->FramesDropped;
     *counter = render->StartCounter;

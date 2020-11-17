@@ -468,7 +468,6 @@ cSoftHdMenu::~cSoftHdMenu()
 void cSoftHdMenu::MainMenu(void)
 {
 	int current;
-	int missed;
 	int duped;
 	int dropped;
 	int counter;
@@ -480,9 +479,9 @@ void cSoftHdMenu::MainMenu(void)
 	Add(new cOsdItem(hk(tr(" select play list")), osUser2));
 	Add(new cOsdItem(NULL, osUnknown, false));
 	Add(new cOsdItem(NULL, osUnknown, false));
-	GetStats(&missed, &duped, &dropped, &counter);
+	GetStats(&duped, &dropped, &counter);
 	Add(new cOsdItem(cString::sprintf(tr
-		(" Frames missed(%d) duped(%d) dropped(%d) total(%d)"), missed,
+		(" Frames duped(%d) dropped(%d) total(%d)"),
 		duped, dropped, counter), osUnknown, false));
 
 	SetCurrent(Get(current));		// restore selected menu entry

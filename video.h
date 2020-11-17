@@ -94,7 +94,7 @@ extern uint8_t *VideoGrab(int *, int *, int *, int);
 extern uint8_t *VideoGrabService(int *, int *, int *);
 
     /// Get decoder statistics.
-extern void VideoGetStats(VideoRender *, int *, int *, int *, int *);
+extern void VideoGetStats(VideoRender *, int *, int *, int *);
 
     /// Get screen size
 extern void VideoGetScreenSize(VideoRender *, int *, int *, double *);
