@@ -64,7 +64,7 @@ cSoftHdPlayer::cSoftHdPlayer(const char *Url)
 //	pPlayer= this;
 	Source = (char *) malloc(1 + strlen(Url));
 	strcpy(Source, Url);
-	if (strcasestr(Source, ".M3U")) {
+	if (strcasestr(Source, ".M3U") && !strcasestr(Source, ".M3U8")) {
 		ReadPL(Source);
 		CurrentEntry = FirstEntry;
 	} else {
@@ -103,7 +103,7 @@ void cSoftHdPlayer::Action(void)
 //	fprintf(stderr, "cSoftHdPlayer: Action\n");
 	NoModify = 0;
 
-	if (strcasestr(Source, ".M3U")) {
+	if (strcasestr(Source, ".M3U") && !strcasestr(Source, ".M3U8")) {
 		while(CurrentEntry) {
 			Jump = 0;
 			Player(CurrentEntry->Path.c_str());

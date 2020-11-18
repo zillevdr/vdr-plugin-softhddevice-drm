@@ -119,6 +119,7 @@ Commandline:
 SVDRP:
 ------
 	PLAY Url    Play the media from the given url.
+	Tested extension: *.mp3, *.mp4, *.m3u, *.m3u8
 
 	Play a local file:
 	svdrpsend plug softhddevice-drm PLAY /path_to_file/media_file.mp4
