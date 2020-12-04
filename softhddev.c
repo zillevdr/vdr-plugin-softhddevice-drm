@@ -573,7 +573,8 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
     p = data + 9 + n;
     n = size - 9 - n;			// skip pes header
     if (n + AudioAvPkt->stream_index > AudioAvPkt->size) {
-		Fatal(_("[softhddev] audio buffer too small\n"));
+		Fatal(_("[softhddev] audio buffer too small needed %d avail %d\n"),
+			n + AudioAvPkt->stream_index, AudioAvPkt->size);
 		AudioAvPkt->stream_index = 0;
     }
 

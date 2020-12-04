@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2020-11-17 12:46+0100\n"
+"POT-Creation-Date: 2020-11-30 18:57+0100\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -145,7 +145,8 @@ msgstr ""
 msgid "[softhddev] invalid audio packet %d bytes\n"
 msgstr ""
 
-msgid "[softhddev] audio buffer too small\n"
+#, c-format
+msgid "[softhddev] audio buffer too small needed %d avail %d\n"
 msgstr ""
 
 #, c-format

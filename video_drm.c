@@ -34,6 +34,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 
+#include <inttypes.h>
+
 #include <libintl.h>
 #define _(str) gettext(str)		///< gettext shortcut
 #define _N(str) str			///< gettext_noop shortcut
@@ -302,7 +304,7 @@ void SetBuf(VideoRender * render, struct drm_buf *buf, uint32_t plane_id)
 	drmModeAtomicReqPtr ModeReq;
 	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
 
-//	fprintf(stderr, "Set atomic buf buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
+//	fprintf(stderr, "Set atomic buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
 //		render->buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
 
 	if (!(ModeReq = drmModeAtomicAlloc()))
@@ -1223,7 +1225,11 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 			if (SetupFB(render, buf, NULL))
 				fprintf(stderr, "EnqueueFB: SetupFB FB %i x %i failed\n",
 					buf->width, buf->height);
-			else render->buffers++;
+			else {
+				if (render->buffers == 0)
+					SetBuf(render, buf, render->video_plane);
+				render->buffers++;
+			}
 
 			if (drmPrimeHandleToFD(render->fd_drm, buf->handle[0],
 				DRM_CLOEXEC | DRM_RDWR, &buf->fd_prime))
@@ -1251,9 +1257,11 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 
 	frame = av_frame_alloc();
 	frame->pts = inframe->pts;
-	primedata = av_mallocz(sizeof(AVDRMFrameDescriptor));
-
+	frame->width = inframe->width;
+	frame->height = inframe->height;
 	frame->format = AV_PIX_FMT_DRM_PRIME;
+
+	primedata = av_mallocz(sizeof(AVDRMFrameDescriptor));
 	primedata->objects[0].fd = buf->fd_prime;
 	frame->data[0] = (uint8_t *)primedata;
 	frame->buf[0] = av_buffer_create((uint8_t *)primedata, sizeof(*primedata),
