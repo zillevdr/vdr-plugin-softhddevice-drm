@@ -292,7 +292,14 @@ int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 		return 0;
 	}
 
-	ret = avcodec_send_packet(decoder->VideoCtx, avpkt);
+	pthread_mutex_lock(&CodecLockMutex);
+	if (decoder->VideoCtx) {
+		ret = avcodec_send_packet(decoder->VideoCtx, avpkt);
+	} else {
+		pthread_mutex_unlock(&CodecLockMutex);
+		return 1;
+	}
+	pthread_mutex_unlock(&CodecLockMutex);
 
 	if (ret == AVERROR(ENOMEM))
 		fprintf(stderr, "CodecVideoSendPacket: Error sending a packet for decoding AVERROR(ENOMEM)\n");
@@ -304,6 +311,14 @@ int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 	return 0;
 }
 
+/**
+**	Get a decoded a video frame.
+**
+**	@param decoder		video decoder data
+**	@param no_deint		set interlaced_frame to 0
+**
+**	@returns 1	get no frame.
+*/
 int CodecVideoReceiveFrame(VideoDecoder * decoder, int no_deint)
 {
 	int ret;
@@ -312,7 +327,15 @@ int CodecVideoReceiveFrame(VideoDecoder * decoder, int no_deint)
 		Fatal(_("CodecVideoReceiveFrame: can't allocate decoder frame\n"));
 	}
 
-	ret = avcodec_receive_frame(decoder->VideoCtx, decoder->Frame);
+	pthread_mutex_lock(&CodecLockMutex);
+	if (decoder->VideoCtx) {
+		ret = avcodec_receive_frame(decoder->VideoCtx, decoder->Frame);
+	} else {
+		av_frame_free(&decoder->Frame);
+		pthread_mutex_unlock(&CodecLockMutex);
+		return 1;
+	}
+	pthread_mutex_unlock(&CodecLockMutex);
 
 	if (!ret) {
 		if (no_deint) {
