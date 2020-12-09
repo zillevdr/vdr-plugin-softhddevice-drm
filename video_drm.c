@@ -525,16 +525,19 @@ static int FindDevice(VideoRender * render)
 							DRM_MODE_OBJECT_PLANE, "zpos");
 
 #ifdef DRM_DEBUG // If more then 2 crtcs this must rewriten!!!
-		Info(_("FindDevice: Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n"),
+		fprintf(stderr, "FindDevice: Plane id %i crtc_id %i possible_crtcs %i possible CRTC %i type %s\n",
 			plane->plane_id, plane->crtc_id, plane->possible_crtcs, resources->crtcs[i],
 			(type == DRM_PLANE_TYPE_PRIMARY) ? "primary plane" :
 			(type == DRM_PLANE_TYPE_OVERLAY) ? "overlay plane" :
 			(type == DRM_PLANE_TYPE_CURSOR) ? "cursor plane" : "No plane type");
+		fprintf(stderr, "FindDevice: PixelFormats");
 #endif
-
 		// test pixel format and plane caps
 		for (k = 0; k < plane->count_formats; k++) {
 			if (encoder->possible_crtcs & plane->possible_crtcs) {
+#ifdef DRM_DEBUG
+				fprintf(stderr, " %4.4s", (char *)&plane->formats[k]);
+#endif
 				switch (plane->formats[k]) {
 					case DRM_FORMAT_NV12:
 						if (!render->video_plane) {
@@ -559,6 +562,9 @@ static int FindDevice(VideoRender * render)
 				}
 			}
 		}
+#ifdef DRM_DEBUG
+		fprintf(stderr, "\n");
+#endif
 		drmModeFreePlane(plane);
 	}
 
@@ -569,8 +575,9 @@ static int FindDevice(VideoRender * render)
 #ifdef DRM_DEBUG
 	Info(_("FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n"),
 		render->crtc_id, render->video_plane, render->osd_plane, render->use_zpos);
+	fprintf(stderr, "FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n",
+		render->crtc_id, render->video_plane, render->osd_plane, render->use_zpos);
 #endif
-
 	return 0;
 }
 
@@ -596,6 +603,13 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 		buf->offset[0] = primedata->layers[0].planes[0].offset;
 		buf->pitch[1] = primedata->layers[0].planes[1].pitch;
 		buf->offset[1] = primedata->layers[0].planes[1].offset;
+
+#ifdef DRM_DEBUG
+		fprintf(stderr, "SetupFB: nb_objects %d nb_layers %d nb_planes %d pix_fmt %4.4s modifier %s\n",
+			primedata->nb_objects, primedata->nb_layers,
+			primedata->layers[0].nb_planes, (char *)&buf->pix_fmt,
+			modifiers[0] == DRM_FORMAT_MOD_NONE ? "no" : "yes");
+#endif
 	} else {
 		memset(&creq, 0, sizeof(struct drm_mode_create_dumb));
 		creq.width = buf->width;
@@ -1184,9 +1198,10 @@ enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render
 		AVCodecContext * video_ctx, const enum AVPixelFormat *fmt)
 {
 	while (*fmt != AV_PIX_FMT_NONE) {
-#ifdef DEBUG
-		fprintf(stderr, "Video_get_format: PixelFormat %s Codecname: %s\n",
-			av_get_pix_fmt_name(*fmt), video_ctx->codec->name);
+#ifdef CODEC_DEBUG
+		fprintf(stderr, "Video_get_format: PixelFormat %s sw_pix_fmt %s Codecname: %s\n",
+			av_get_pix_fmt_name(*fmt), av_get_pix_fmt_name(video_ctx->sw_pix_fmt),
+			video_ctx->codec->name);
 #endif
 		if (*fmt == AV_PIX_FMT_DRM_PRIME) {
 			return AV_PIX_FMT_DRM_PRIME;
@@ -1203,7 +1218,7 @@ enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render
 		}
 		fmt++;
 	}
-	fprintf(stderr, "Video_get_format: No pixel format found!\n");
+	fprintf(stderr, "Video_get_format: No pixel format found! Set default format.\n");
 
 	return avcodec_default_get_format(video_ctx, fmt);
 }

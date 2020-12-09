@@ -1373,7 +1373,9 @@ int AudioVideoReady(int64_t video_pts)
 	int skip;
 
 	if (AudioRunning) {
+#ifdef DEBUG
 		fprintf(stderr, "AudioVideoReady: Audio is Running !!!???\n");
+#endif
 		return 0;
 	}
 
@@ -1582,7 +1584,6 @@ void AudioPause(void)
 	}
 	Debug(3, "AudioPause: paused\n");
 	if (AlsaCanPause) {
-		fprintf(stderr, "AudioPause: AlsaCanPause\n");
 		if ((err = snd_pcm_pause(AlsaPCMHandle, 1))) {
 			Error(_("AudioPause: snd_pcm_pause(): %s\n"), snd_strerror(err));
 		}

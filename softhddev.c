@@ -1077,7 +1077,6 @@ int PlayVideo(const uint8_t * data, int size)
 				} else {
 					if (data[i + n + 5] == 0x10) {
 						Debug(3, "video: hevc detected\n");
-						fprintf(stderr, "video: hevc detected\n");
 						stream->CodecID = AV_CODEC_ID_HEVC;
 						stream->NewStream = 1;
 						stream->timebase.den = 90000;
