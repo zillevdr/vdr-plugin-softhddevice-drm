@@ -98,8 +98,8 @@ static pthread_t FilterThread;
 //----------------------------------------------------------------------------
 
 struct drm_buf {
-	uint32_t x, y, width, height, size, pitch[3], handle[3], offset[3], fb_id;
-	uint8_t *plane[3];
+	uint32_t x, y, width, height, size, pitch[4], handle[4], offset[4], fb_id;
+	uint8_t *plane[4];
 	uint32_t pix_fmt;
 	int fd_prime;
 	AVFrame *frame;
@@ -585,30 +585,34 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 			AVDRMFrameDescriptor *primedata)
 {
 	struct drm_mode_create_dumb creq;
-	uint64_t modifiers[4] = { 0, 0, 0, 0 };
+	uint64_t modifier[4] = { 0, 0, 0, 0 };
 	uint32_t mod_flags = 0;
 
 	if (primedata) {
 		uint32_t prime_handle;
 
 		buf->pix_fmt = primedata->layers[0].format;
-		modifiers[0] = modifiers[1] = primedata->objects[0].format_modifier;
+		modifier[0] = modifier[1] = primedata->objects[0].format_modifier;
 
 		if (drmPrimeFDToHandle(render->fd_drm, primedata->objects[0].fd, &prime_handle))
 			fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %zu (%d): %m\n",
 				primedata->objects[0].fd, primedata->objects[0].size, errno);
 
-		buf->handle[0] = buf->handle[1] = prime_handle;
-		buf->pitch[0] = primedata->layers[0].planes[0].pitch;
-		buf->offset[0] = primedata->layers[0].planes[0].offset;
-		buf->pitch[1] = primedata->layers[0].planes[1].pitch;
-		buf->offset[1] = primedata->layers[0].planes[1].offset;
+		for (int plane = 0; plane < primedata->layers[0].nb_planes; plane++) {
+			buf->handle[plane] = prime_handle;
+			buf->pitch[plane] = primedata->layers[0].planes[plane].pitch;
+			buf->offset[plane] = primedata->layers[0].planes[plane].offset;
+			modifier[plane] = primedata->objects[primedata->layers[0].planes[plane].object_index].format_modifier;
+
+//			fprintf(stderr, "SetupFB: plane %d pitch %d offset %d\n",
+//				plane, buf->pitch[plane], buf->offset[plane]);
+		}
 
 #ifdef DRM_DEBUG
 		fprintf(stderr, "SetupFB: nb_objects %d nb_layers %d nb_planes %d pix_fmt %4.4s modifier %s\n",
 			primedata->nb_objects, primedata->nb_layers,
 			primedata->layers[0].nb_planes, (char *)&buf->pix_fmt,
-			modifiers[0] == DRM_FORMAT_MOD_NONE ? "no" : "yes");
+			modifier[0] == DRM_FORMAT_MOD_NONE ? "no" : "yes");
 #endif
 	} else {
 		memset(&creq, 0, sizeof(struct drm_mode_create_dumb));
@@ -654,7 +658,7 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 	}
 
 	if (drmModeAddFB2WithModifiers(render->fd_drm, buf->width, buf->height, buf->pix_fmt,
-			buf->handle, buf->pitch, buf->offset, modifiers, &buf->fb_id, mod_flags)) {
+			buf->handle, buf->pitch, buf->offset, modifier, &buf->fb_id, mod_flags)) {
 
 		fprintf(stderr, "SetupFB: cannot create modifiers framebuffer (%d): %m\n", errno);
 		return -errno;
