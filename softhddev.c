@@ -1524,6 +1524,8 @@ int SetPlayMode(int play_mode)
 		if (MyAudioDecoder && AudioCodecID != AV_CODEC_ID_NONE) {
 			NewAudioStream = 1;
 		}
+		StreamFreezed = 0;
+		SkipAudio = 0;
 		break;
 	case 1:			// audio/video
 		VideoThreadWakeup(MyVideoStream->Render);

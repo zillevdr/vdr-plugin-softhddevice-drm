@@ -197,6 +197,7 @@ void cSoftHdPlayer::Player(const char *url)
 	int start_time;
 
 	StopPlay = 0;
+	Jump = 0;
 
 	AVFormatContext *format = avformat_alloc_context();
 	if (avformat_open_input(&format, url, NULL, NULL) != 0) {
@@ -272,7 +273,7 @@ repeat:
 			sleep(1);
 		}
 
-		if (Jump) {
+		if (Jump && format->pb->seekable) {
 			av_seek_frame(format, format->streams[jump_stream_index]->index,
 				packet.pts + (int64_t)(Jump *		// - BufferOffset
 				format->streams[jump_stream_index]->time_base.den /
