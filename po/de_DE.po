@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2020-12-08 12:20+0100\n"
+"POT-Creation-Date: 2020-12-12 08:58+0100\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -63,6 +63,9 @@ msgstr ""
 msgid "audio/alsa: can't open mixer '%s'\n"
 msgstr ""
 
+msgid "AlsaSetup: No HwChannelMaps found! Suggest HW can handle 2 channels.\n"
+msgstr ""
+
 #, c-format
 msgid "AlsaSetup: no channel map found for %d channels, HwChannels %d > set CodecDownmix\n"
 msgstr ""
@@ -82,12 +85,18 @@ msgstr ""
 msgid "audio: can't place %d samples in ring buffer\n"
 msgstr ""
 
+msgid "AudioGetClock: delay < 0\n"
+msgstr ""
+
 #, c-format
 msgid "AudioPlay: snd_pcm_pause(): %s\n"
 msgstr ""
 
 #, c-format
 msgid "AudioPause: snd_pcm_pause(): %s\n"
+msgstr ""
+
+msgid "AudioInit: No HwChannelMaps found!\n"
 msgstr ""
 
 msgid "codec: can't allocate vodeo decoder\n"
@@ -324,6 +333,10 @@ msgstr ""
 
 #, c-format
 msgid "FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n"
+msgstr ""
+
+#, c-format
+msgid "SetupFB: cannot create modifiers framebuffer (%d): %m\n"
 msgstr ""
 
 msgid "video: can't queue cancel video display thread\n"

@@ -634,9 +634,9 @@ static int AlsaPlayer(void)
 
 		// wait for space in kernel buffers
 		if ((err = snd_pcm_wait(AlsaPCMHandle, 150)) < 0) {
-			fprintf(stderr, "AlsaPlayer: snd_pcm_wait error? '%s'\n", snd_strerror(err));
+//			fprintf(stderr, "AlsaPlayer: snd_pcm_wait error? '%s'\n", snd_strerror(err));
 			err = snd_pcm_recover(AlsaPCMHandle, err, 0);
-			printf("AlsaPlayer: snd_pcm_wait error: snd_pcm_recover %s\n", snd_strerror(err));
+//			printf("AlsaPlayer: snd_pcm_wait error: snd_pcm_recover %s\n", snd_strerror(err));
 		}
 
 		if (AudioPaused || AlsaPlayerStop) {
@@ -920,7 +920,7 @@ static int AlsaSetup(AVCodecContext *AudioCtx, __attribute__ ((unused)) int pass
     }
 
 	if (!HwChannelMaps) {
-		fprintf(stderr, "AlsaSetup: No HwChannelMaps found! Suggest HW can handle 2 channels.\n");
+		Info(_("AlsaSetup: No HwChannelMaps found! Suggest HW can handle 2 channels.\n"));
 		HwChannels = 2;
 	} else {
 		for (int i = 0; HwChannelMaps[i] != NULL; i++) {
@@ -1503,7 +1503,7 @@ int64_t AudioGetClock(void)
 	}
 
 	if (delay < 0) {
-		printf("AudioGetClock: delay < 0 ??? !!!\n");
+		Info(_("AudioGetClock: delay < 0\n"));
 		delay = 0L;
 	}
 
@@ -1736,7 +1736,7 @@ void AudioInit(void)
 
 	HwChannelMaps = snd_pcm_query_chmaps(AlsaPCMHandle);
 	if (!HwChannelMaps) {
-		fprintf(stderr, "AudioInit: No HwChannelMaps found!!!\n");
+		Info(_("AudioInit: No HwChannelMaps found!\n"));
 	}
 #ifdef SOUND_DEBUG
 	else {

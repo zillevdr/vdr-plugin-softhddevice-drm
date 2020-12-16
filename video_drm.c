@@ -364,7 +364,7 @@ void ReadHWPlatform(VideoRender * render)
 #ifdef DEBUG
 			printf("ReadHWPlatform: sun8i-h3 found\n");
 #endif
-			render->HwDeint = 1;	// This doesn't run yet.
+			render->HwDeint = 1;
 			break;
 		}
 
@@ -378,19 +378,10 @@ void ReadHWPlatform(VideoRender * render)
 		}
 
 		if (strstr(read_ptr, "rockchip")) {
-			if (ReadLineFromFile(txt_buf, bufsize, "/proc/version")) {
-				if (strstr(txt_buf, "4.4.")) {
 #ifdef DEBUG
-					printf("ReadHWPlatform: rockchip with kernel 4.4.x found\n");
+			printf("ReadHWPlatform: rockchip with mainline kernel found\n");
 #endif
-					render->CodecMode = 1;
-				} else {
-#ifdef DEBUG
-					printf("ReadHWPlatform: rockchip with mainline kernel found\n");
-#endif
-					render->CodecMode = 2;	// no mpeg HW
-				}
-			}
+			render->CodecMode = 2;	// no mpeg HW
 			break;
 		}
 		read_size -= (strlen(read_ptr) + 1);
@@ -590,30 +581,37 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 
 	if (primedata) {
 		uint32_t prime_handle;
+		buf->handle[0] = buf->handle[1] = buf->handle[2] = buf->handle[3] = 0;
+		buf->pitch[0] = buf->pitch[1] = buf->pitch[2] = buf->pitch[3] = 0;
+		buf->offset[0] = buf->offset[1] = buf->offset[2] = buf->offset[3] = 0;
 
 		buf->pix_fmt = primedata->layers[0].format;
-		modifier[0] = modifier[1] = primedata->objects[0].format_modifier;
 
 		if (drmPrimeFDToHandle(render->fd_drm, primedata->objects[0].fd, &prime_handle))
 			fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %zu (%d): %m\n",
 				primedata->objects[0].fd, primedata->objects[0].size, errno);
-
+#ifdef DRM_DEBUG
+		if (!render->buffers)
+			fprintf(stderr, "SetupFB: %d x %d nb_objects %d nb_layers %d nb_planes %d size %zu pix_fmt %4.4s modifier %" PRIx64 "\n",
+				buf->width, buf->height, primedata->nb_objects, primedata->nb_layers,
+				primedata->layers[0].nb_planes, primedata->objects[0].size,
+				(char *)&buf->pix_fmt, primedata->objects[0].format_modifier);
+#endif
 		for (int plane = 0; plane < primedata->layers[0].nb_planes; plane++) {
 			buf->handle[plane] = prime_handle;
 			buf->pitch[plane] = primedata->layers[0].planes[plane].pitch;
 			buf->offset[plane] = primedata->layers[0].planes[plane].offset;
-			modifier[plane] = primedata->objects[primedata->layers[0].planes[plane].object_index].format_modifier;
-
-//			fprintf(stderr, "SetupFB: plane %d pitch %d offset %d\n",
-//				plane, buf->pitch[plane], buf->offset[plane]);
-		}
-
+			if (primedata->objects[0].format_modifier) {
+				modifier[plane] =
+					primedata->objects[primedata->layers[0].planes[plane].object_index].format_modifier;
+				mod_flags = DRM_MODE_FB_MODIFIERS;
+			}
 #ifdef DRM_DEBUG
-		fprintf(stderr, "SetupFB: nb_objects %d nb_layers %d nb_planes %d pix_fmt %4.4s modifier %s\n",
-			primedata->nb_objects, primedata->nb_layers,
-			primedata->layers[0].nb_planes, (char *)&buf->pix_fmt,
-			modifier[0] == DRM_FORMAT_MOD_NONE ? "no" : "yes");
+			if (!render->buffers)
+				fprintf(stderr, "SetupFB: plane %d pitch %d offset %d\n",
+					plane, buf->pitch[plane], buf->offset[plane]);
 #endif
+		}
 	} else {
 		memset(&creq, 0, sizeof(struct drm_mode_create_dumb));
 		creq.width = buf->width;
@@ -661,7 +659,7 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 			buf->handle, buf->pitch, buf->offset, modifier, &buf->fb_id, mod_flags)) {
 
 		fprintf(stderr, "SetupFB: cannot create modifiers framebuffer (%d): %m\n", errno);
-		return -errno;
+		Fatal(_("SetupFB: cannot create modifiers framebuffer (%d): %m\n"), errno);
 	}
 
 	if (primedata)
@@ -823,8 +821,7 @@ dequeue:
 		buf->height = (uint32_t)frame->height;
 		buf->fd_prime = primedata->objects[0].fd;
 
-		if (SetupFB(render, buf, primedata))
-			fprintf(stderr, "Frame2Display: SetupFB FB %i x %i failed\n", buf->width, buf->height);
+		SetupFB(render, buf, primedata);
 		if (render->buffers == 0) {
 			SetBuf(render, buf, render->video_plane);
 		}
@@ -1203,22 +1200,16 @@ enum AVPixelFormat Video_get_format(__attribute__ ((unused))VideoRender * render
 {
 	while (*fmt != AV_PIX_FMT_NONE) {
 #ifdef CODEC_DEBUG
-		fprintf(stderr, "Video_get_format: PixelFormat %s sw_pix_fmt %s Codecname: %s\n",
-			av_get_pix_fmt_name(*fmt), av_get_pix_fmt_name(video_ctx->sw_pix_fmt),
-			video_ctx->codec->name);
+		fprintf(stderr, "Video_get_format: PixelFormat %s ctx_fmt %s sw_pix_fmt %s Codecname: %s\n",
+			av_get_pix_fmt_name(*fmt), av_get_pix_fmt_name(video_ctx->pix_fmt),
+			av_get_pix_fmt_name(video_ctx->sw_pix_fmt), video_ctx->codec->name);
 #endif
 		if (*fmt == AV_PIX_FMT_DRM_PRIME) {
 			return AV_PIX_FMT_DRM_PRIME;
 		}
 
-		if (*fmt == AV_PIX_FMT_YUV420P && video_ctx->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+		if (*fmt == AV_PIX_FMT_YUV420P) {
 			return AV_PIX_FMT_YUV420P;
-		}
-		if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_H264) {
-			return AV_PIX_FMT_NV12;
-		}
-		if (*fmt == AV_PIX_FMT_NV12 && video_ctx->codec_id == AV_CODEC_ID_HEVC) {
-			return AV_PIX_FMT_NV12;
 		}
 		fmt++;
 	}
@@ -1872,15 +1863,6 @@ void VideoExit(VideoRender * render)
 
 const char *VideoGetDecoderName(const char *codec_name)
 {
-	if (!(strcmp("mpeg2video", codec_name)))
-		return "mpeg2video";
-
-	if (!(strcmp("h264", codec_name)))
-		return "h264_rkmpp";
-
-	if (!(strcmp("hevc", codec_name)))
-		return "hevc_rkmpp";
-
 	return codec_name;
 }
 
