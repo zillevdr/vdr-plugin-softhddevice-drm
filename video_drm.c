@@ -130,7 +130,8 @@ struct _Drm_Render_
 	AVRational *timebase;		///< pointer to AVCodecContext pkts_timebase
 	int64_t pts;
 
-	int CodecMode;			/// 0: find codec by id, 1: set _rkmpp, 2: no mpeg hw
+	int CodecMode;			/// 0: find codec by id, 1: set _mmal, 2: no mpeg hw,
+							/// 3: set _v4l2m2m for H264
 	int HwDeint;			/// 0: use sw deinterlacer, 1: use hw deinterlacer
 
 	AVFilterGraph *filter_graph;
@@ -384,6 +385,15 @@ void ReadHWPlatform(VideoRender * render)
 			render->CodecMode = 2;	// no mpeg HW
 			break;
 		}
+
+		if (strstr(read_ptr, "bcm2711")) {
+#ifdef DEBUG
+			printf("ReadHWPlatform: bcm2711 found\n");
+#endif
+			render->CodecMode = 3;
+			break;
+		}
+
 		read_size -= (strlen(read_ptr) + 1);
 		read_ptr = (char *)&read_ptr[(strlen(read_ptr) + 1)];
 	}
@@ -1863,6 +1873,9 @@ void VideoExit(VideoRender * render)
 
 const char *VideoGetDecoderName(const char *codec_name)
 {
+	if (!(strcmp("h264", codec_name)))
+		return "h264_v4l2m2m";
+
 	return codec_name;
 }
 

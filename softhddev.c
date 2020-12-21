@@ -27,6 +27,7 @@
 #define __USE_GNU
 #endif
 
+#include <assert.h>
 #include <unistd.h>
 
 #include <libintl.h>
@@ -792,6 +793,152 @@ void PrintStreamData(const uint8_t *data, int size)
 		data[27], data[28], data[29], data[30], data[31], data[32], data[33], data[34], size);
 }
 
+// helper functions to parse resolution from stream
+const unsigned char * m_pStart;
+unsigned short m_nLength;
+int m_nCurrentBit;
+
+unsigned int ReadBit()
+{
+	assert(m_nCurrentBit <= m_nLength * 8);
+	int nIndex = m_nCurrentBit / 8;
+	int nOffset = m_nCurrentBit % 8 + 1;
+
+	m_nCurrentBit++;
+	return (m_pStart[nIndex] >> (8-nOffset)) & 0x01;
+}
+
+unsigned int ReadBits(int n)
+{
+	int r = 0;
+
+	for (int i = 0; i < n; i++) {
+		r |= ( ReadBit() << ( n - i - 1 ) );
+	}
+	return r;
+}
+
+unsigned int ReadExponentialGolombCode()
+{
+	int r = 0;
+	int i = 0;
+
+	while((ReadBit() == 0) && (i < 32)) {
+		i++;
+	}
+
+	r = ReadBits(i);
+	r += (1 << i) - 1;
+	return r;
+}
+
+unsigned int ReadSE()
+{
+	int r = ReadExponentialGolombCode();
+
+	if (r & 0x01) {
+		r = (r+1)/2;
+	} else {
+		r = -(r/2);
+	}
+	return r;
+}
+
+void ParseResolutionH264(int *width, int *height)
+{
+	AVPacket *avpkt;
+	const unsigned char * pStart;
+
+	avpkt = &MyVideoStream->PacketRb[MyVideoStream->PacketRead];
+
+	for (int i = 0; i < avpkt->size; i++) {
+		if (!avpkt->data[i] && !avpkt->data[i + 1] &&
+			avpkt->data[i + 2] == 0x01 && avpkt->data[i + 3] == 0x67) {
+
+			m_pStart = pStart = &avpkt->data[i + 4];
+			m_nLength = avpkt->size - i - 4;
+			break;
+		}
+	}
+	m_nCurrentBit = 0;
+
+	int frame_crop_left_offset=0;
+	int frame_crop_right_offset=0;
+	int frame_crop_top_offset=0;
+	int frame_crop_bottom_offset=0;
+
+	int profile_idc = ReadBits(8);
+	ReadBits(16);
+	ReadExponentialGolombCode();
+
+
+	if (profile_idc == 100 || profile_idc == 110 ||
+		profile_idc == 122 || profile_idc == 244 ||
+		profile_idc == 44 || profile_idc == 83 ||
+		profile_idc == 86 || profile_idc == 118) {
+
+		int chroma_format_idc = ReadExponentialGolombCode();
+		if (chroma_format_idc == 3) {
+			ReadBit();
+		}
+		ReadExponentialGolombCode();
+		ReadExponentialGolombCode();
+		ReadBit();
+		int seq_scaling_matrix_present_flag = ReadBit();
+		if (seq_scaling_matrix_present_flag) {
+			for (int i = 0; i < 8; i++) {
+				int seq_scaling_list_present_flag = ReadBit();
+				if (seq_scaling_list_present_flag) {
+					int sizeOfScalingList = (i < 6) ? 16 : 64;
+					int lastScale = 8;
+					int nextScale = 8;
+					for (int j = 0; j < sizeOfScalingList; j++) {
+						if (nextScale != 0) {
+							int delta_scale = ReadSE();
+							nextScale = (lastScale + delta_scale + 256) % 256;
+						}
+						lastScale = (nextScale == 0) ? lastScale : nextScale;
+					}
+				}
+			}
+		}
+	}
+	ReadExponentialGolombCode();
+	int pic_order_cnt_type = ReadExponentialGolombCode();
+	if (pic_order_cnt_type == 0) {
+		ReadExponentialGolombCode();
+	} else if (pic_order_cnt_type == 1) {
+		ReadBit();
+		ReadSE();
+		ReadSE();
+		int num_ref_frames_in_pic_order_cnt_cycle = ReadExponentialGolombCode();
+		for (int i = 0; i < num_ref_frames_in_pic_order_cnt_cycle; i++ ) {
+			ReadSE();
+		}
+	}
+	ReadExponentialGolombCode();
+	ReadBit();
+	int pic_width_in_mbs_minus1 = ReadExponentialGolombCode();
+	int pic_height_in_map_units_minus1 = ReadExponentialGolombCode();
+	int frame_mbs_only_flag = ReadBit();
+	if (!frame_mbs_only_flag) {
+		ReadBit();
+	}
+	ReadBit();
+	int frame_cropping_flag = ReadBit();
+	if (frame_cropping_flag) {
+		frame_crop_left_offset = ReadExponentialGolombCode();
+		frame_crop_right_offset = ReadExponentialGolombCode();
+		frame_crop_top_offset = ReadExponentialGolombCode();
+		frame_crop_bottom_offset = ReadExponentialGolombCode();
+	}
+
+	*width = ((pic_width_in_mbs_minus1 +1)*16) - frame_crop_bottom_offset*2 -
+		frame_crop_top_offset*2;
+	*height = ((2 - frame_mbs_only_flag)* (pic_height_in_map_units_minus1 +1) * 16) -
+		(frame_crop_right_offset * 2) - (frame_crop_left_offset * 2);
+}
+
 /**
 **	Initialize video packet ringbuffer.
 **
@@ -811,7 +958,7 @@ static void VideoPacketInit(VideoStream * stream)
 
 	atomic_set(&stream->PacketsFilled, 0);
 	stream->PacketRead = 0;
-	stream->PacketWrite = -1;
+	stream->PacketWrite = 0;
 }
 
 /**
@@ -848,8 +995,10 @@ static void VideoEnqueue(VideoStream * stream, int64_t pts, const void *data,
 	avpkt = &stream->PacketRb[stream->PacketWrite];
 
 	if (pts != AV_NOPTS_VALUE) {
-		stream->PacketWrite = (stream->PacketWrite + 1) % VIDEO_PACKET_MAX;
-		atomic_inc(&stream->PacketsFilled);
+		if (avpkt->size) {
+			stream->PacketWrite = (stream->PacketWrite + 1) % VIDEO_PACKET_MAX;
+			atomic_inc(&stream->PacketsFilled);
+		}
 		avpkt = &stream->PacketRb[stream->PacketWrite];
 		avpkt->size = 0;
 		avpkt->pts = pts;

@@ -101,6 +101,8 @@ extern "C"
 
     /// Get decoder statistics
     extern void GetStats(int *, int *, int *);
+    /// Get parsed width and height
+    extern void ParseResolutionH264(int *, int *);
 
 #ifdef __cplusplus
 }

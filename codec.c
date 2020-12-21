@@ -47,6 +47,7 @@
 #include "video.h"
 #include "audio.h"
 #include "codec.h"
+#include "softhddev.h"
 
 
 //----------------------------------------------------------------------------
@@ -137,7 +138,9 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 	enum AVHWDeviceType type = 0;
 	static AVBufferRef *hw_device_ctx = NULL;
 
-	if (VideoCodecMode(decoder->Render) == 1) {
+	if (VideoCodecMode(decoder->Render) == 1 ||
+		(VideoCodecMode(decoder->Render) == 3 && codec_id == AV_CODEC_ID_H264)) {
+
 		if (!(codec = avcodec_find_decoder_by_name(VideoGetDecoderName(
 			avcodec_get_name(codec_id)))))
 
@@ -152,8 +155,12 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 		if (!(VideoCodecMode(decoder->Render) == 2 && codec_id == AV_CODEC_ID_MPEG2VIDEO)) {
 			for (int n = 0; ; n++) {
 				const AVCodecHWConfig *cfg = avcodec_get_hw_config(codec, n);
-				if (!cfg)
+				if (!cfg) {
+#ifdef CODEC_DEBUG
+					fprintf(stderr, "CodecVideoOpen: no HW config found\n");
+#endif
 					break;
+				}
 				if (cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
 					cfg->device_type == AV_HWDEVICE_TYPE_DRM) {
 
@@ -167,8 +174,6 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 			}
 		}
 	}
-	if (!type)
-		Info(_("CodecVideoOpen: No HW codec found!\n"));
 #ifdef CODEC_DEBUG
 	fprintf(stderr, "CodecVideoOpen: Codec %s found\n", codec->long_name);
 #endif
@@ -180,6 +185,18 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 	decoder->VideoCtx->codec_id = codec_id;
 	decoder->VideoCtx->get_format = Codec_get_format;
 	decoder->VideoCtx->opaque = decoder;
+
+	if (strstr(codec->name, "_v4l2")) {
+		int width;
+		int height;
+
+		ParseResolutionH264(&width, &height);
+#ifdef CODEC_DEBUG
+		fprintf(stderr, "CodecVideoOpen: Parsed width %d height %d\n", width, height);
+#endif
+		decoder->VideoCtx->coded_width = width;
+		decoder->VideoCtx->coded_height = height;
+	}
 
 //	decoder->VideoCtx->flags |= AV_CODEC_FLAG_BITEXACT;
 //	decoder->VideoCtx->flags2 |= AV_CODEC_FLAG2_FAST;
@@ -217,8 +234,10 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 		decoder->VideoCtx->pkt_timebase.den = timebase->den;
 	}
 
-	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0)
+	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0) {
 		fprintf(stderr, "CodecVideoOpen: Error opening the decoder\n");
+		Fatal(_("CodecVideoOpen: Error opening the decoder\n"));
+	}
 }
 
 /**
