@@ -132,7 +132,7 @@ struct _Drm_Render_
 
 	int CodecMode;			/// 0: find codec by id, 1: set _mmal, 2: no mpeg hw,
 							/// 3: set _v4l2m2m for H264
-	int HwDeint;			/// 0: use sw deinterlacer, 1: use hw deinterlacer
+	int NoHwDeint;			/// set if no hw deinterlacer
 
 	AVFilterGraph *filter_graph;
 	AVFilterContext *buffersrc_ctx, *buffersink_ctx;
@@ -361,28 +361,12 @@ void ReadHWPlatform(VideoRender * render)
 
 	while(read_size) {
 
-		if (strstr(read_ptr, "sun8i-h3")) {
-#ifdef DEBUG
-			printf("ReadHWPlatform: sun8i-h3 found\n");
-#endif
-			render->HwDeint = 1;
-			break;
-		}
-
-		if (strstr(read_ptr, "sun50i-h5")) {
-#ifdef DEBUG
-			printf("ReadHWPlatform: sun50i-h5 found\n");
-#endif
-//			render->HwDeint = 1;	// This doesn't run yet.
-			render->CodecMode = 2;	// no mpeg HW
-			break;
-		}
-
 		if (strstr(read_ptr, "rockchip")) {
 #ifdef DEBUG
 			printf("ReadHWPlatform: rockchip with mainline kernel found\n");
 #endif
 			render->CodecMode = 2;	// no mpeg HW
+			render->NoHwDeint = 1;
 			break;
 		}
 
@@ -390,7 +374,8 @@ void ReadHWPlatform(VideoRender * render)
 #ifdef DEBUG
 			printf("ReadHWPlatform: bcm2711 found\n");
 #endif
-			render->CodecMode = 3;
+			render->CodecMode = 3;	// set _v4l2m2m for H264
+			render->NoHwDeint = 1;
 			break;
 		}
 
@@ -1370,7 +1355,6 @@ getoutframe:
 				break;
 			}
 
-			filt_frame->pts = filt_frame->pts / 2;
 fillframe:
 			if (render->Deint_Close) {
 				av_frame_free(&filt_frame);
@@ -1378,6 +1362,7 @@ fillframe:
 			}
 			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
 				if (filt_frame->format == AV_PIX_FMT_YUV420P) {
+					filt_frame->pts = filt_frame->pts / 2;	// ffmpeg bug
 					EnqueueFB(render, filt_frame);
 				} else {
 					render->FramesRb[render->FramesWrite] = filt_frame;
@@ -1403,8 +1388,11 @@ closing:
 
 /**
 **	Filter init.
+**
+**	@retval 0	filter initialised
+**	@retval	-1	filter initialise failed
 */
-void VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
+int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 		AVFrame * frame)
 {
 	char args[512];
@@ -1416,7 +1404,7 @@ void VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 	render->filter_graph = avfilter_graph_alloc();
 
 //	const char *filter_descr = "yadif=1:-1:0";
-	if (render->HwDeint)
+	if (!render->NoHwDeint)
 		filter_descr = "deinterlace_v4l2m2m";
 	else
 		filter_descr = "bwdif=1:-1:0";
@@ -1447,7 +1435,7 @@ void VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 		fprintf(stderr, "VideoFilterInit: Cannot av_buffersrc_parameters_set\n");
 	av_free(par);
 
-	AVBufferSinkParams *params = av_buffersink_params_alloc();
+	AVBufferSinkParams *params = av_malloc(sizeof(AVBufferSinkParams));
 	enum AVPixelFormat pix_fmts[] = { frame->format, AV_PIX_FMT_NONE };
 	params->pixel_fmts = pix_fmts;
 
@@ -1467,14 +1455,41 @@ void VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 	inputs->next       = NULL;
 
 	if ((avfilter_graph_parse_ptr(render->filter_graph, filter_descr,
-		&inputs, &outputs, NULL)) < 0)
-			fprintf(stderr, "VideoFilterInit: avfilter_graph_parse_ptr failed\n");
+		&inputs, &outputs, NULL)) < 0) {
 
-	if ((avfilter_graph_config(render->filter_graph, NULL)) < 0)
-			fprintf(stderr, "VideoFilterInit: avfilter_graph_config failed\n");
+		fprintf(stderr, "VideoFilterInit: avfilter_graph_parse_ptr failed\n");
+		goto fail;
+	}
+
+	if ((avfilter_graph_config(render->filter_graph, NULL)) < 0) {
+		fprintf(stderr, "VideoFilterInit: avfilter_graph_config failed\n");
+		goto fail;
+	}
 
 	avfilter_inout_free(&inputs);
 	avfilter_inout_free(&outputs);
+
+	return 0;
+
+fail:
+	avfilter_inout_free(&inputs);
+	avfilter_inout_free(&outputs);
+
+	if (!render->NoHwDeint) {
+#ifdef DEBUG
+		fprintf(stderr, "VideoFilterInit: can't config HW Deinterlacer!\n");
+#endif
+		render->NoHwDeint = 1;
+	} else {
+#ifdef DEBUG
+		fprintf(stderr, "VideoFilterInit: can't config SW Deinterlacer!\n");
+#endif
+		SWDeinterlacer = 0;
+	}
+
+	avfilter_graph_free(&render->filter_graph);
+
+	return -1;
 }
 
 ///
@@ -1501,13 +1516,17 @@ void VideoRenderFrame(VideoRender * render,
 	}
 
 	if ((frame->interlaced_frame && SWDeinterlacer &&
-		frame->format == AV_PIX_FMT_YUV420P) || 
-		(frame->interlaced_frame && render->HwDeint)) {
+		frame->format == AV_PIX_FMT_YUV420P) ||
+		(frame->interlaced_frame && !render->NoHwDeint)) {
 
 		if (!FilterThread) {
-			VideoFilterInit(render, video_ctx, frame);
-			pthread_create(&FilterThread, NULL, FilterHandlerThread, render);
-			pthread_setname_np(FilterThread, "softhddev deint");
+			if (VideoFilterInit(render, video_ctx, frame)) {
+				av_frame_free(&frame);
+				return;
+			} else {
+				pthread_create(&FilterThread, NULL, FilterHandlerThread, render);
+				pthread_setname_np(FilterThread, "softhddev deint");
+			}
 		}
 
 		render->FramesDeintRb[render->FramesDeintWrite] = frame;
