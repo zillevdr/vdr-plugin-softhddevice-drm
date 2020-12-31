@@ -715,11 +715,7 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 			AudioAvPkt->pts = AV_NOPTS_VALUE;
 			AudioAvPkt->dts = AV_NOPTS_VALUE;
 			if (err) {
-				if (err == 1) {
-//					fprintf(stderr, "PlayAudio: CodecAudioDecode ended with error! "
-//						"send pkt again with new configuration.\n");
-					NewAudioStream = 1;
-				}
+				NewAudioStream = 1;
 				return 0;
 			}
 			p += r;

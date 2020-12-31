@@ -580,67 +580,50 @@ void CodecSetAudioDownmix(int onoff)
 **	@param audio_decoder	audio decoder data
 **	@param avpkt		audio packet
 **
-**	@retval	-1	error, send packet again
-**	@retval	1	error, send packet again with new configuration
+**	@retval	1	error, send packet again
 */
 int CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 {
-    AVCodecContext *audio_ctx;
-    AVFrame *frame;
-    int got_frame;
-    int n;
+	AVFrame *frame;
+	int ret_send, ret_rec;
 
-    audio_ctx = audio_decoder->AudioCtx;
+	// FIXME: don't need to decode pass-through codecs
+	frame = audio_decoder->Frame;
+	av_frame_unref(frame);
 
-    // FIXME: don't need to decode pass-through codecs
-    frame = audio_decoder->Frame;
-    av_frame_unref(frame);
+send:
+	ret_send = avcodec_send_packet(audio_decoder->AudioCtx, avpkt);
+	if (ret_send < 0)
+		fprintf(stderr, "CodecAudioDecode: avcodec_send_packet error: %s\n",
+			av_err2str(ret_send));
 
-    got_frame = 0;
-    n = avcodec_decode_audio4(audio_ctx, frame, &got_frame,
-	(AVPacket *) avpkt);
-
-    if (n != avpkt->size) {
-		if (n == AVERROR(EAGAIN)) {
-			Error(_("codec/audio: latm\n"));
-			return -1;
+	ret_rec = avcodec_receive_frame(audio_decoder->AudioCtx, frame);
+	if (ret_rec < 0) {
+		fprintf(stderr, "CodecAudioDecode: avcodec_receive_frame error: %s\n",
+			av_err2str(ret_rec));
+	} else {
+		// Control PTS is valid
+		if (audio_decoder->last_pts == (int64_t) AV_NOPTS_VALUE &&
+			frame->pts == (int64_t) AV_NOPTS_VALUE) {
+			fprintf(stderr, "CodecAudioDecode: NO VALID PTS\n");
 		}
-		if (n < 0) {			// no audio frame could be decompressed
-			Error(_("codec/audio: bad audio frame\n"));
-			return 0;	// ???
+		// update audio clock
+		if (frame->pts != (int64_t) AV_NOPTS_VALUE) {
+			audio_decoder->last_pts = frame->pts;
+		} else if (audio_decoder->last_pts != (int64_t) AV_NOPTS_VALUE) {
+			frame->pts = audio_decoder->last_pts + 
+				(int64_t)(frame->nb_samples * audio_decoder->AudioCtx->pkt_timebase.den /
+				frame->sample_rate);
+			audio_decoder->last_pts = frame->pts;
 		}
-		Error(_("codec/audio: error more than one frame data\n"));
-	}
-	if (!got_frame) {
-		Error(_("codec/audio: no frame\n"));
-		return 0;	// ???
+
+		if (AudioFilter(frame, audio_decoder->AudioCtx))
+			return 1;
 	}
 
-#ifdef AV_SYNC_DEBUG
-	// Control PTS is possible
-	if (audio_decoder->last_pts == (int64_t) AV_NOPTS_VALUE &&
-		frame->pts == (int64_t) AV_NOPTS_VALUE) {
-		fprintf(stderr, "CodecAudioDecode: NO VALID PTS\n");
-	}
-	if (frame->pts != (int64_t) AV_NOPTS_VALUE &&
-		frame->pts != audio_decoder->last_pts + 
-			(int64_t)(frame->nb_samples * audio_ctx->pkt_timebase.den / frame->sample_rate)) {
-//		fprintf(stderr, "CodecAudioDecode: frame->pts %s last_pts + samples %s\n",
-//			PtsTimestamp2String(frame->pts), PtsTimestamp2String(audio_decoder->last_pts + 
-//			(int64_t)(frame->nb_samples * audio_ctx->pkt_timebase.den / frame->sample_rate)));
-	}
-#endif
-	// update audio clock
-	if (frame->pts != (int64_t) AV_NOPTS_VALUE) {
-		audio_decoder->last_pts = frame->pts;
-	} else if (audio_decoder->last_pts != (int64_t) AV_NOPTS_VALUE) {
-		frame->pts = audio_decoder->last_pts + 
-			(int64_t)(frame->nb_samples * audio_ctx->pkt_timebase.den / frame->sample_rate);
-		audio_decoder->last_pts = frame->pts;
-	}
+	if (ret_send == AVERROR(EAGAIN))
+		goto send;
 
-	if (AudioFilter(frame, audio_decoder->AudioCtx))
-		return 1;
 	return 0;
 }
 
