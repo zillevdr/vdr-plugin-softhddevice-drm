@@ -1,5 +1,5 @@
 Copyright (c) 2011 - 2013 by Johns.  All Rights Reserved.
-Copyright (c) 2018 - 2020 by zillevdr.  All Rights Reserved.
+Copyright (c) 2018 - 2021 by zillevdr.  All Rights Reserved.
 
 License: AGPLv3
 
@@ -33,7 +33,6 @@ Requirement:
 
 	media-video/ffmpeg
 		MMAL (RaspberryPi) 	version >=3.2
-		rkmpp (Rockchip)	version >=4.0
 		v4l2-request (Rockchip, Allwinner)	WIP LE version
 
 	media-libs/alsa-lib
@@ -114,7 +113,6 @@ Commandline:
     -a audio_device
     -p device for pass-through
     -c audio mixer channel name
-    -s set screen size  (hdr for 1280 x 720 else 1920 x 1080)
 
 SVDRP:
 ------

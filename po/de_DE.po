@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2020-12-31 18:42+0100\n"
+"POT-Creation-Date: 2021-01-01 18:59+0100\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -312,16 +312,37 @@ msgstr ""
 msgid "  17200 Hz band gain"
 msgstr ""
 
+#, c-format
+msgid "FindDevice: DRM have %i connectors, %i crtcs, %i encoders\n"
+msgstr ""
+
+msgid "FindDevice: No Monitor Mode found! Give up!\n"
+msgstr ""
+
+#, c-format
+msgid "FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n"
+msgstr ""
+
+#, c-format
+msgid "SetupFB: cannot create modifiers framebuffer (%d): %m\n"
+msgstr ""
+
 msgid "video: can't queue cancel video display thread\n"
 msgstr ""
 
 msgid "video: can't cancel video display thread\n"
 msgstr ""
 
-msgid "video/MMAL: out of memory\n"
+msgid "video: can't cancel DisplayHandlerThread thread\n"
+msgstr ""
+
+msgid "video/DRM: out of memory\n"
 msgstr ""
 
 msgid "softhddev: grab unsupported\n"
+msgstr ""
+
+msgid "VideoOsdInit: SetupFB FB OSD failed!\n"
 msgstr ""
 
 #~ msgid " Frames missed(%d) duped(%d) dropped(%d) total(%d)"

@@ -66,7 +66,6 @@
 //	Variables
 //----------------------------------------------------------------------------
 int VideoAudioDelay;
-int hdr;
 
 static pthread_t VideoThread;		///< video decode thread
 
@@ -1033,17 +1032,6 @@ void VideoGetScreenSize(__attribute__ ((unused)) VideoRender * render,
 //----------------------------------------------------------------------------
 //	Setup
 //----------------------------------------------------------------------------
-///
-///	Set screen size.
-///
-///	@param width	screen width
-///
-void VideoSetScreenSize(char *size)
-{
-	if (!strcasecmp("hdr", size))
-		hdr = 1;
-}
-
 ///
 ///	Set audio delay.
 ///

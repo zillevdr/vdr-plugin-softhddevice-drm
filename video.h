@@ -102,9 +102,6 @@ extern void VideoGetScreenSize(VideoRender *, int *, int *, double *);
     /// Get video clock.
 extern int64_t VideoGetClock(const VideoRender *);
 
-    /// Set screen size
-extern void VideoSetScreenSize(char *);
-
     /// Display handler.
 extern void VideoThreadWakeup(VideoRender *);
 extern void VideoThreadExit(void);

@@ -75,7 +75,6 @@
 //----------------------------------------------------------------------------
 int VideoAudioDelay;
 int SWDeinterlacer;
-int hdr;
 
 static pthread_cond_t PauseCondition;
 static pthread_mutex_t PauseMutex;
@@ -138,6 +137,8 @@ struct _Drm_Render_
 	AVFilterContext *buffersrc_ctx, *buffersink_ctx;
 
 	int fd_drm;
+	int hdr;
+	uint32_t vrefresh;
 	drmModeModeInfo mode;
 	drmModeCrtc *saved_crtc;
 	drmEventContext ev;
@@ -471,23 +472,39 @@ static int FindDevice(VideoRender * render)
 			}
 			render->crtc_id = encoder->crtc_id;
 		}
-		    // search Modes for HD, HDready and SD
+		// search Modes
+		render->vrefresh = 50;
+search_mode:
 		for (i = 0; i < connector->count_modes; i++) {
 			mode = &connector->modes[i];
 			// Mode HD
-			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 && mode->vrefresh == 50
-				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE) && !hdr) {
+			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 &&
+				mode->vrefresh == render->vrefresh &&
+				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && !render->hdr) {
 				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
 			}
 			// Mode HDready
-			if(mode->hdisplay == 1280 && mode->vdisplay == 720 && mode->vrefresh == 50
-				&& !(mode->flags & DRM_MODE_FLAG_INTERLACE) && hdr) {
+			if(mode->hdisplay == 1280 && mode->vdisplay == 720 &&
+				mode->vrefresh == render->vrefresh &&
+				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && render->hdr) {
 				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
+			}
+		}
+		if (!render->mode.hdisplay || !render->mode.vdisplay) {
+			if (!render->hdr) {
+				render->hdr = 1;
+				fprintf(stderr, "FindDevice: No Monitor Mode found! Set HD Ready\n");
+				goto search_mode;
+			}
+			if (render->vrefresh == 50) {
+				render->vrefresh = 60;
+				fprintf(stderr, "FindDevice: No Monitor Mode found! Set 60Hz Mode\n");
+				goto search_mode;
 			}
 		}
 		drmModeFreeConnector(connector);
 		if (!render->mode.hdisplay || !render->mode.vdisplay)
-			Fatal(_("FindDevice: No Monitor Mode found!\n"));
+			Fatal(_("FindDevice: No Monitor Mode found! Give up!\n"));
 	}
 
 	// find first plane
@@ -1727,17 +1744,6 @@ void VideoGetScreenSize(VideoRender * render, int *width, int *height,
 	*width = render->mode.hdisplay;
 	*height = render->mode.vdisplay;
 	*pixel_aspect = (double)16 / (double)9;
-}
-
-///
-///	Set screen size.
-///
-///	@param width	screen width
-///
-void VideoSetScreenSize(char *size)
-{
-	if (!strcasecmp("hdr", size))
-		hdr = 1;
 }
 
 ///
