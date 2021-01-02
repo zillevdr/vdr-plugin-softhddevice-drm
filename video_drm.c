@@ -137,8 +137,6 @@ struct _Drm_Render_
 	AVFilterContext *buffersrc_ctx, *buffersink_ctx;
 
 	int fd_drm;
-	int hdr;
-	uint32_t vrefresh;
 	drmModeModeInfo mode;
 	drmModeCrtc *saved_crtc;
 	drmEventContext ev;
@@ -419,6 +417,8 @@ static int FindDevice(VideoRender * render)
 	drmModeModeInfo *mode;
 	drmModePlane *plane;
 	drmModePlaneRes *plane_res;
+	int hdr = 0;
+	uint32_t vrefresh = 50;
 	uint32_t j, k;
 	int i;
 
@@ -473,31 +473,30 @@ static int FindDevice(VideoRender * render)
 			render->crtc_id = encoder->crtc_id;
 		}
 		// search Modes
-		render->vrefresh = 50;
 search_mode:
 		for (i = 0; i < connector->count_modes; i++) {
 			mode = &connector->modes[i];
 			// Mode HD
 			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 &&
-				mode->vrefresh == render->vrefresh &&
-				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && !render->hdr) {
+				mode->vrefresh == vrefresh &&
+				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && !hdr) {
 				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
 			}
 			// Mode HDready
 			if(mode->hdisplay == 1280 && mode->vdisplay == 720 &&
-				mode->vrefresh == render->vrefresh &&
-				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && render->hdr) {
+				mode->vrefresh == vrefresh &&
+				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && hdr) {
 				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
 			}
 		}
 		if (!render->mode.hdisplay || !render->mode.vdisplay) {
-			if (!render->hdr) {
-				render->hdr = 1;
+			if (!hdr) {
+				hdr = 1;
 				fprintf(stderr, "FindDevice: No Monitor Mode found! Set HD Ready\n");
 				goto search_mode;
 			}
-			if (render->vrefresh == 50) {
-				render->vrefresh = 60;
+			if (vrefresh == 50) {
+				vrefresh = 60;
 				fprintf(stderr, "FindDevice: No Monitor Mode found! Set 60Hz Mode\n");
 				goto search_mode;
 			}
