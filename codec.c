@@ -319,12 +319,11 @@ int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 		return 1;
 	}
 	pthread_mutex_unlock(&CodecLockMutex);
-
-	if (ret == AVERROR(ENOMEM))
-		fprintf(stderr, "CodecVideoSendPacket: Error sending a packet for decoding AVERROR(ENOMEM)\n");
-	if (ret == AVERROR(EINVAL))
-		fprintf(stderr, "CodecVideoSendPacket: Error sending a packet for decoding AVERROR(EINVAL)\n");
-
+#ifdef DEBUG
+	if (ret < 0)
+		fprintf(stderr, "CodecVideoSendPacket: send_packet ret: %s\n",
+			av_err2str(ret));
+#endif
 	if (ret == AVERROR(EAGAIN))
 		return 1;
 	return 0;
@@ -367,15 +366,10 @@ int CodecVideoReceiveFrame(VideoDecoder * decoder, int no_deint)
 	} else {
 		av_frame_free(&decoder->Frame);
 #ifdef DEBUG
-		fprintf(stderr, "CodecVideoReceiveFrame: av_frame_free ret: %s\n",
+		fprintf(stderr, "CodecVideoReceiveFrame: receive_frame ret: %s\n",
 			av_err2str(ret));
 #endif
 	}
-
-#ifdef DEBUG
-	if (ret == AVERROR(EINVAL))
-		fprintf(stderr, "CodecVideoReceiveFrame: Error receive frame AVERROR(EINVAL)\n");
-#endif
 
 	if (ret == AVERROR(EAGAIN))
 		return 1;
