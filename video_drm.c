@@ -417,8 +417,8 @@ static int FindDevice(VideoRender * render)
 	drmModeModeInfo *mode;
 	drmModePlane *plane;
 	drmModePlaneRes *plane_res;
-	int hdr = 0;
-	uint32_t vrefresh = 50;
+	int hdr;
+	uint32_t vrefresh;
 	uint32_t j, k;
 	int i;
 
@@ -456,6 +456,8 @@ static int FindDevice(VideoRender * render)
 
 	// find all available connectors
 	for (i = 0; i < resources->count_connectors; i++) {
+		hdr = 0;
+		vrefresh = 50;
 		connector = drmModeGetConnector(render->fd_drm, resources->connectors[i]);
 		if (!connector) {
 			fprintf(stderr, "FindDevice: cannot retrieve DRM connector (%d): %m\n", errno);
@@ -492,19 +494,21 @@ search_mode:
 		if (!render->mode.hdisplay || !render->mode.vdisplay) {
 			if (!hdr) {
 				hdr = 1;
-				fprintf(stderr, "FindDevice: No Monitor Mode found! Set HD Ready\n");
 				goto search_mode;
 			}
 			if (vrefresh == 50) {
 				vrefresh = 60;
-				fprintf(stderr, "FindDevice: No Monitor Mode found! Set 60Hz Mode\n");
+				hdr = 0;
 				goto search_mode;
 			}
 		}
 		drmModeFreeConnector(connector);
-		if (!render->mode.hdisplay || !render->mode.vdisplay)
-			Fatal(_("FindDevice: No Monitor Mode found! Give up!\n"));
 	}
+
+	if (!render->mode.hdisplay || !render->mode.vdisplay)
+		Fatal(_("FindDevice: No Monitor Mode found! Give up!\n"));
+	Info(_("FindDevice: Found Monitor Mode %dx%d@%d\n"),
+		render->mode.hdisplay, render->mode.vdisplay, render->mode.vrefresh);
 
 	// find first plane
 	if ((plane_res = drmModeGetPlaneResources(render->fd_drm)) == NULL)
