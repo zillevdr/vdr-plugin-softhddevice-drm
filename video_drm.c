@@ -56,6 +56,7 @@
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
+#include <libavutil/opt.h>
 
 #include "iatomic.h"			// portable atomic_t
 #include "misc.h"
@@ -1238,7 +1239,7 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 	struct drm_buf *buf = 0;
 	AVDRMFrameDescriptor * primedata;
 	AVFrame *frame;
-	int i, j;
+	int i;
 
 	if (!render->buffers) {
 		for (int i = 0; i < VIDEO_SURFACES_MAX + 2; i++) {
@@ -1265,19 +1266,13 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 
 	buf = &render->bufs[render->enqueue_buffer];
 
-	// Copy YUV420 to NV12
 	for (i = 0; i < inframe->height; ++i) {
 		memcpy(buf->plane[0] + i * inframe->width,
 			inframe->data[0] + i * inframe->linesize[0], inframe->width);
 	}
 	for (i = 0; i < inframe->height / 2; ++i) {
-		for (j = 0; j < inframe->width; ++j) {
-			if (j % 2 == 0)
-				memcpy(buf->plane[1] + i * inframe->width + j,
-					inframe->data[1] + i * inframe->linesize[2] + j / 2, 1 );
-			else memcpy(buf->plane[1] + i * inframe->width + j,
-					inframe->data[2] + i * inframe->linesize[1] + (j +1) / 2, 1 );
-		}
+		memcpy(buf->plane[1] + i * inframe->width,
+			inframe->data[1] + i * inframe->linesize[1], inframe->width);
 	}
 
 	frame = av_frame_alloc();
@@ -1381,7 +1376,7 @@ fillframe:
 				break;
 			}
 			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
-				if (filt_frame->format == AV_PIX_FMT_YUV420P) {
+				if (filt_frame->format == AV_PIX_FMT_NV12) {
 					filt_frame->pts = filt_frame->pts / 2;	// ffmpeg bug
 					EnqueueFB(render, filt_frame);
 				} else {
@@ -1455,14 +1450,18 @@ int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 		fprintf(stderr, "VideoFilterInit: Cannot av_buffersrc_parameters_set\n");
 	av_free(par);
 
-	AVBufferSinkParams *params = av_malloc(sizeof(AVBufferSinkParams));
-	enum AVPixelFormat pix_fmts[] = { frame->format, AV_PIX_FMT_NONE };
-	params->pixel_fmts = pix_fmts;
-
 	if (avfilter_graph_create_filter(&render->buffersink_ctx, buffersink, "out",
-		NULL, params, render->filter_graph) < 0)
+		NULL, NULL, render->filter_graph) < 0)
 			fprintf(stderr, "VideoFilterInit: Cannot create buffer sink\n");
-	av_free(params);
+
+	if (frame->format != AV_PIX_FMT_DRM_PRIME) {
+		enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_NV12, AV_PIX_FMT_NONE };
+		if (av_opt_set_int_list(render->buffersink_ctx, "pix_fmts", pix_fmts,
+				AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN) < 0) {
+			fprintf(stderr, "VideoFilterInit: Cannot set output pixel format\n");
+			goto fail;
+		}
+	}
 
 	outputs->name       = av_strdup("in");
 	outputs->filter_ctx = render->buffersrc_ctx;
