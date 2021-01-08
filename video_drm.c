@@ -210,7 +210,7 @@ static uint64_t GetPropertyValue(int fd_drm, uint32_t objectID,
 
 static int SetPropertyRequest(drmModeAtomicReqPtr ModeReq, int fd_drm,
 					uint32_t objectID, uint32_t objectType,
-					const char *propName, uint32_t value)
+					const char *propName, uint64_t value)
 {
 	uint32_t i;
 	uint64_t id = 0;
@@ -275,14 +275,14 @@ void ChangePlanes(VideoRender * render, int back)
 }
 
 void SetCrtc(VideoRender * render, drmModeAtomicReqPtr ModeReq,
-				uint32_t plane_id)
+				uint32_t plane_id, int x, int width)
 {
 	SetPropertyRequest(ModeReq, render->fd_drm, plane_id,
-						DRM_MODE_OBJECT_PLANE, "CRTC_X", 0);
+						DRM_MODE_OBJECT_PLANE, "CRTC_X", x);
 	SetPropertyRequest(ModeReq, render->fd_drm, plane_id,
 						DRM_MODE_OBJECT_PLANE, "CRTC_Y", 0);
 	SetPropertyRequest(ModeReq, render->fd_drm, plane_id,
-						DRM_MODE_OBJECT_PLANE, "CRTC_W", render->mode.hdisplay);
+						DRM_MODE_OBJECT_PLANE, "CRTC_W", width);
 	SetPropertyRequest(ModeReq, render->fd_drm, plane_id,
 						DRM_MODE_OBJECT_PLANE, "CRTC_H", render->mode.vdisplay);
 }
@@ -298,28 +298,6 @@ void SetSrc(VideoRender * render, drmModeAtomicReqPtr ModeReq,
 						DRM_MODE_OBJECT_PLANE, "SRC_W", buf->width << 16);
 	SetPropertyRequest(ModeReq, render->fd_drm, plane_id,
 						DRM_MODE_OBJECT_PLANE, "SRC_H", buf->height << 16);
-}
-
-void SetBuf(VideoRender * render, struct drm_buf *buf, uint32_t plane_id)
-{
-	drmModeAtomicReqPtr ModeReq;
-	const uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
-
-//	fprintf(stderr, "Set atomic buffers %2i fd_prime %"PRIu32" Handle %"PRIu32" fb_id %3i %i x %i\n",
-//		render->buffers, buf->fd_prime, buf->handle[0], buf->fb_id, buf->width, buf->height);
-
-	if (!(ModeReq = drmModeAtomicAlloc()))
-		fprintf(stderr, "SetBuf: cannot allocate atomic request (%d): %m\n", errno);
-
-	SetSrc(render, ModeReq, plane_id, buf);
-	SetPropertyRequest(ModeReq, render->fd_drm, plane_id,
-						DRM_MODE_OBJECT_PLANE, "FB_ID", buf->fb_id);
-
-	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0)
-		fprintf(stderr, "SetBuf: cannot set atomic buf %i width %i height %i fb_id %i (%d): %m\n",
-			render->buffers, buf->width, buf->height, buf->fb_id, errno);
-
-	drmModeAtomicFree(ModeReq);
 }
 
 size_t ReadLineFromFile(char *buf, size_t size, char * file)
@@ -809,7 +787,6 @@ closing:
 #ifdef DEBUG
 	fprintf(stderr, "Frame2Display: set a black FB\n");
 #endif
-		SetBuf(render, &render->buf_black, render->video_plane);
 		buf = &render->buf_black;
 		goto page_flip;
 	}
@@ -838,9 +815,6 @@ dequeue:
 		buf->fd_prime = primedata->objects[0].fd;
 
 		SetupFB(render, buf, primedata);
-		if (render->buffers == 0) {
-			SetBuf(render, buf, render->video_plane);
-		}
 		render->buffers++;
 	}
 
@@ -928,8 +902,23 @@ page_flip:
 	if (!(ModeReq = drmModeAtomicAlloc()))
 		fprintf(stderr, "Frame2Display: cannot allocate atomic request (%d): %m\n", errno);
 
+	uint64_t PicWidth = render->mode.vdisplay * av_q2d(frame->sample_aspect_ratio) *
+		frame->width / frame->height;
+	if (!PicWidth)
+		PicWidth = render->mode.hdisplay;
+
+	if (buf->width != (GetPropertyValue(render->fd_drm, render->video_plane,
+		DRM_MODE_OBJECT_PLANE, "SRC_W") >> 16))
+			SetSrc(render, ModeReq, render->video_plane, buf);
+
+	if (PicWidth != GetPropertyValue(render->fd_drm, render->video_plane,
+		DRM_MODE_OBJECT_PLANE, "CRTC_W"))
+			SetCrtc(render, ModeReq, render->video_plane,
+				(render->mode.hdisplay - PicWidth) / 2, PicWidth);
+
 	SetPropertyRequest(ModeReq, render->fd_drm, render->video_plane,
 					DRM_MODE_OBJECT_PLANE, "FB_ID", buf->fb_id);
+
 	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0)
 		fprintf(stderr, "Frame2Display: cannot page flip to FB %i (%d): %m\n",
 			buf->fb_id, errno);
@@ -1252,8 +1241,6 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 				fprintf(stderr, "EnqueueFB: SetupFB FB %i x %i failed\n",
 					buf->width, buf->height);
 			else {
-				if (render->buffers == 0)
-					SetBuf(render, buf, render->video_plane);
 				render->buffers++;
 			}
 
@@ -1280,6 +1267,8 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 	frame->width = inframe->width;
 	frame->height = inframe->height;
 	frame->format = AV_PIX_FMT_DRM_PRIME;
+	frame->sample_aspect_ratio.num = inframe->sample_aspect_ratio.num;
+	frame->sample_aspect_ratio.den = inframe->sample_aspect_ratio.den;
 
 	primedata = av_mallocz(sizeof(AVDRMFrameDescriptor));
 	primedata->objects[0].fd = buf->fd_prime;
@@ -1833,7 +1822,7 @@ void VideoInit(VideoRender * render)
 	}
 
 	if (drmModeCreatePropertyBlob(render->fd_drm, &render->mode, sizeof(render->mode), &modeID) != 0)
-		fprintf(stderr, "Failed to create mode property.\n");
+		fprintf(stderr, "Failed to create mode property blob.\n");
 	if (!(ModeReq = drmModeAtomicAlloc()))
 		fprintf(stderr, "cannot allocate atomic request (%d): %m\n", errno);
 
@@ -1843,7 +1832,7 @@ void VideoInit(VideoRender * render)
 						DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID", render->crtc_id);
 	SetPropertyRequest(ModeReq, render->fd_drm, render->crtc_id,
 						DRM_MODE_OBJECT_CRTC, "ACTIVE", 1);
-	SetCrtc(render, ModeReq, prime_plane);
+	SetCrtc(render, ModeReq, prime_plane, 0, render->mode.hdisplay);
 
 	if (render->use_zpos) {
 		// Primary plane
@@ -1851,18 +1840,14 @@ void VideoInit(VideoRender * render)
 		SetPropertyRequest(ModeReq, render->fd_drm, prime_plane,
 						DRM_MODE_OBJECT_PLANE, "FB_ID", render->buf_osd.fb_id);
 		// Black Buffer
-		SetCrtc(render, ModeReq, overlay_plane);
+		SetCrtc(render, ModeReq, overlay_plane, 0, render->mode.hdisplay);
 		SetPropertyRequest(ModeReq, render->fd_drm, overlay_plane,
 						DRM_MODE_OBJECT_PLANE, "CRTC_ID", render->crtc_id);
 		SetSrc(render, ModeReq, overlay_plane, &render->buf_black);
 		SetPropertyRequest(ModeReq, render->fd_drm, overlay_plane,
 						DRM_MODE_OBJECT_PLANE, "FB_ID", render->buf_black.fb_id);
-	} else {
-		// Black Buffer
-		SetSrc(render, ModeReq, prime_plane, &render->buf_black);
-		SetPropertyRequest(ModeReq, render->fd_drm, prime_plane,
-						DRM_MODE_OBJECT_PLANE, "FB_ID", render->buf_black.fb_id);
 	}
+
 	if (drmModeAtomicCommit(render->fd_drm, ModeReq, flags, NULL) != 0)
 		fprintf(stderr, "cannot set atomic mode (%d): %m\n", errno);
 
