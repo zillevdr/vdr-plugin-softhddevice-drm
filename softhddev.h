@@ -84,8 +84,6 @@ extern "C"
     extern int64_t GetSTC(void);
     /// C plugin get video stream size and aspect
     extern void GetScreenSize(int *, int *, double *);
-    /// C plugin set sw deinterlacer
-    extern void SetSWDeinterlacer(int);
     /// C plugin command line help
     extern const char *CommandLineHelp(void);
     /// C plugin process the command line arguments

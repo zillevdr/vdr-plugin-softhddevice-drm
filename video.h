@@ -64,10 +64,6 @@ extern void VideoRenderFrame(VideoRender *, AVCodecContext *,
     /// Set audio delay.
 extern void VideoSetAudioDelay(int);
 
-#ifndef MMAL
-    /// Set use sw deinterlacer.
-extern void VideoSetSWDeinterlacer(VideoRender * ,int);
-#endif
     /// Clear OSD.
 extern void VideoOsdClear(VideoRender *);
 

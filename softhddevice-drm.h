@@ -44,9 +44,6 @@ static class cSoftHdDevice *MyDevice;
 
 static char ConfigMakePrimary;		///< config primary wanted
 static char ConfigHideMainMenuEntry;	///< config hide main menu entry
-
-char ConfigSWDeinterlacer;			///< config use sw deinterlacer
-
 static int ConfigVideoAudioDelay;	///< config audio delay
 static char ConfigAudioPassthrough;	///< config audio pass-through mask
 static char AudioPassthroughState;	///< flag audio pass-through on/off
@@ -128,9 +125,6 @@ class cMenuSetupSoft:public cMenuSetupPage
     int MakePrimary;
     int HideMainMenuEntry;
 
-    int Video;
-    int SWDeinterlacer;
-
     int Audio;
     int AudioDelay;
     int AudioPassthroughDefault;
@@ -146,6 +140,7 @@ class cMenuSetupSoft:public cMenuSetupPage
     int AudioStereoDescent;
     int AudioBufferTime;
     int AudioAutoAES;
+
     int AudioFilter;
     int AudioEq;
     int AudioEqBand[18];

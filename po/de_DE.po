@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2021-01-03 10:46+0100\n"
+"POT-Creation-Date: 2021-01-11 17:48+0100\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -195,12 +195,6 @@ msgstr "Erzeuge primäres Gerät"
 msgid "Hide main menu entry"
 msgstr "Verstecke Hauptmenüeintrag"
 
-msgid "Video"
-msgstr "Video"
-
-msgid "Use SW Deinterlacer"
-msgstr ""
-
 msgid "Audio"
 msgstr "Audio"
 
@@ -348,6 +342,9 @@ msgstr ""
 
 msgid "VideoOsdInit: SetupFB FB OSD failed!\n"
 msgstr ""
+
+#~ msgid "Video"
+#~ msgstr "Video"
 
 #~ msgid " Frames missed(%d) duped(%d) dropped(%d) total(%d)"
 #~ msgstr " Frames verloren(%d) verdoppelt(%d) übersprungen(%d) Gesamt(%d)"

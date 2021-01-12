@@ -462,14 +462,6 @@ void cMenuSetupSoft::Create(void)
 	//
     }
     //
-    //	video
-    //
-    Add(CollapsedItem(tr("Video"), Video));
-    if (Video) {
-	Add(new cMenuEditBoolItem(tr("Use SW Deinterlacer"),
-		&SWDeinterlacer, trVDR("no"), trVDR("yes")));
-	}
-    //
     //	audio
     //
     Add(CollapsedItem(tr("Audio"), Audio));
@@ -562,7 +554,6 @@ void cMenuSetupSoft::Create(void)
 eOSState cMenuSetupSoft::ProcessKey(eKeys key)
 {
     int old_General = General;
-    int old_Video = Video;
     int old_Audio = Audio;
     int old_AudioFilter = AudioFilter;
     int old_AudioEq = AudioEq;
@@ -574,7 +565,7 @@ eOSState cMenuSetupSoft::ProcessKey(eKeys key)
     if (key != kNone) {
 		// update menu only, if something on the structure has changed
 		// this is needed because VDR menus are evil slow
-		if (old_General != General || old_Video != Video ||
+		if (old_General != General ||
 			old_Audio != Audio || old_AudioFilter != AudioFilter ||
 			old_AudioEq != AudioEq || old_AudioNormalize != AudioNormalize ||
 			old_AudioCompression != AudioCompression ||
@@ -599,13 +590,6 @@ cMenuSetupSoft::cMenuSetupSoft(void)
     General = 0;
     MakePrimary = ConfigMakePrimary;
     HideMainMenuEntry = ConfigHideMainMenuEntry;
-
-    //
-    //	video
-    //
-    Video = 0;
-    SWDeinterlacer = ConfigSWDeinterlacer;
-
     //
     //	audio
     //
@@ -643,11 +627,6 @@ void cMenuSetupSoft::Store(void)
 {
     SetupStore("MakePrimary", ConfigMakePrimary = MakePrimary);
     SetupStore("HideMainMenuEntry", ConfigHideMainMenuEntry = HideMainMenuEntry);
-
-#ifndef MMAL
-    SetupStore("SWDeinterlacer", ConfigSWDeinterlacer = SWDeinterlacer);
-	SetSWDeinterlacer(ConfigSWDeinterlacer);
-#endif
     SetupStore("AudioDelay", ConfigVideoAudioDelay = AudioDelay);
     VideoSetAudioDelay(ConfigVideoAudioDelay);
 
@@ -1257,13 +1236,6 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 	ConfigHideMainMenuEntry = atoi(value);
 	return true;
     }
-
-#ifndef MMAL
-    if (!strcasecmp(name, "SWDeinterlacer")) {
-	SetSWDeinterlacer(ConfigSWDeinterlacer = atoi(value));
-	return true;
-    }
-#endif
     if (!strcasecmp(name, "AudioDelay")) {
 	VideoSetAudioDelay(ConfigVideoAudioDelay = atoi(value));
 	return true;

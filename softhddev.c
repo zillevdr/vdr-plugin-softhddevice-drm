@@ -1268,11 +1268,7 @@ void StillPicture(const uint8_t * data, int size)
 	pos = data;
 	size_rest = size;
 
-	// PTS
-	if (data[7] & 0x80) {
-		avpkt.pts = (int64_t) (data[9] & 0x0E) << 29 | data[10] << 22 | (data[11] &
-			0xFE) << 14 | data[12] << 7 | (data[13] & 0xFE) >> 1;
-	}
+	avpkt.pts = AV_NOPTS_VALUE;
 
 	while (size_rest >= 6 ) {
 		int pes_length = PesHasLength(pos) ? PesLength(pos) : size;
@@ -1306,7 +1302,6 @@ void StillPicture(const uint8_t * data, int size)
 #ifdef STILL_DEBUG
 		fprintf(stderr, "StillPicture: memcpy avpkt.size %d size %d size_rest %d peslength %d headlength %d I %d\n",
 			avpkt.size, size, size_rest, pes_length, head_length, i);
-//		PrintStreamData(pos, size_rest);
 #endif
 
 		memcpy(pes + avpkt.size, pos + head_length + i, pes_length - head_length - i);
@@ -1314,19 +1309,10 @@ void StillPicture(const uint8_t * data, int size)
 		size_rest -= pes_length;
 		pos += pes_length;
 		i = 0;
-
-//#ifdef STILL_DEBUG
-//		if (size_rest)
-//			PrintStreamData(pos, size_rest);
-//#endif
 	}
 
 	avpkt.data = pes;
 
-#ifdef STILL_DEBUG
-	if (MyVideoStream->CodecID != AV_CODEC_ID_NONE)
-		fprintf(stderr, "StillPicture: CodecID != AV_CODEC_ID_NONE\n");
-#endif
 	CodecVideoOpen(MyVideoStream->Decoder, codec, NULL, NULL);
 	VideoSetTrickSpeed(MyVideoStream->Render, 1);
 
@@ -1344,7 +1330,7 @@ send:
 	av_packet_unref(&avpkt);
 	free(pes);
 
-	usleep(20000);
+	usleep(100000);
 	VideoSetTrickSpeed(MyVideoStream->Render, 0);
 }
 
@@ -1634,13 +1620,6 @@ int Flush(int timeout)
 	}
 	return 1;
 }
-
-#ifndef MMAL
-void SetSWDeinterlacer(int deint)
-{
-	VideoSetSWDeinterlacer(MyVideoStream->Render ,deint);
-}
-#endif
 
 void GetScreenSize(int *width, int *height, double *pixel_aspect)
 {

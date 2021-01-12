@@ -75,7 +75,6 @@
 //	Variables
 //----------------------------------------------------------------------------
 int VideoAudioDelay;
-int SWDeinterlacer;
 
 static pthread_cond_t PauseCondition;
 static pthread_mutex_t PauseMutex;
@@ -122,7 +121,7 @@ struct _Drm_Render_
 //	int TrickCounter;			///< current trick speed counter
 	int VideoPaused;
 	int Closing;			///< flag about closing current stream
-	int Deint_Close;
+	int Filter_Close;
 
 	int StartCounter;			///< counter for video start
 	int FramesDuped;			///< number of frames duplicated
@@ -1295,10 +1294,9 @@ static void *FilterHandlerThread(void * arg)
 	VideoRender * render = (VideoRender *)arg;
 	AVFrame *frame = 0;
 	int ret = 0;
-	int thread_close = 0;
 
 	while (1) {
-		while (!atomic_read(&render->FramesDeintFilled) && !render->Deint_Close) {
+		while (!atomic_read(&render->FramesDeintFilled) && !render->Filter_Close) {
 			usleep(10000);
 		}
 
@@ -1315,8 +1313,7 @@ getinframe:
 #endif
 		}
 
-		if (render->Deint_Close) {
-			thread_close = 1;
+		if (render->Filter_Close) {
 			if (frame)
 				av_frame_free(&frame);
 			if (atomic_read(&render->FramesDeintFilled)) {
@@ -1348,7 +1345,7 @@ getoutframe:
 			if (ret < 0)
 				fprintf(stderr, "FilterHandlerThread: ret %i %s\n", ret, av_err2str(ret));
 
-			if (thread_close) {
+			if (render->Filter_Close) {
 				goto getoutframe;
 			}
 
@@ -1360,7 +1357,7 @@ getoutframe:
 			}
 
 fillframe:
-			if (render->Deint_Close) {
+			if (render->Filter_Close) {
 				av_frame_free(&filt_frame);
 				break;
 			}
@@ -1381,7 +1378,7 @@ fillframe:
 	}
 closing:
 	avfilter_graph_free(&render->filter_graph);
-	render->Deint_Close = 0;
+	render->Filter_Close = 0;
 #ifdef DEBUG
 	fprintf(stderr, "FilterHandlerThread: Thread Exit.\n");
 #endif
@@ -1400,18 +1397,20 @@ int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 		AVFrame * frame)
 {
 	char args[512];
-	const char *filter_descr;
+	const char *filter_descr = NULL;
 	const AVFilter *buffersrc  = avfilter_get_by_name("buffer");
 	const AVFilter *buffersink = avfilter_get_by_name("buffersink");
 	AVFilterInOut *outputs = avfilter_inout_alloc();
 	AVFilterInOut *inputs  = avfilter_inout_alloc();
 	render->filter_graph = avfilter_graph_alloc();
 
-//	const char *filter_descr = "yadif=1:-1:0";
-	if (!render->NoHwDeint)
-		filter_descr = "deinterlace_v4l2m2m";
-	else
-		filter_descr = "bwdif=1:-1:0";
+	if (frame->interlaced_frame) {
+		if (frame->format == AV_PIX_FMT_DRM_PRIME)
+			filter_descr = "deinterlace_v4l2m2m";
+		else if (frame->format == AV_PIX_FMT_YUV420P)
+			filter_descr = "bwdif=1:-1:0";
+	} else if (frame->format == AV_PIX_FMT_YUV420P)
+		filter_descr = "scale";
 #ifdef DEBUG
 	fprintf(stderr, "VideoFilterInit: filter %s\n",
 		filter_descr);
@@ -1422,7 +1421,6 @@ int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 #endif
 
 	snprintf(args, sizeof(args),
-//		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:sws_param=flags=2",
 		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
 		video_ctx->width, video_ctx->height, frame->format,
 		video_ctx->time_base.num, video_ctx->time_base.den,
@@ -1488,11 +1486,6 @@ fail:
 		fprintf(stderr, "VideoFilterInit: can't config HW Deinterlacer!\n");
 #endif
 		render->NoHwDeint = 1;
-	} else {
-#ifdef DEBUG
-		fprintf(stderr, "VideoFilterInit: can't config SW Deinterlacer!\n");
-#endif
-		SWDeinterlacer = 0;
 	}
 
 	avfilter_graph_free(&render->filter_graph);
@@ -1523,9 +1516,8 @@ void VideoRenderFrame(VideoRender * render,
 		return;
 	}
 
-	if ((frame->interlaced_frame && SWDeinterlacer &&
-		frame->format == AV_PIX_FMT_YUV420P) ||
-		(frame->interlaced_frame && !render->NoHwDeint)) {
+	if (frame->format == AV_PIX_FMT_YUV420P || (frame->interlaced_frame &&
+		frame->format == AV_PIX_FMT_DRM_PRIME && !render->NoHwDeint)) {
 
 		if (!FilterThread) {
 			if (VideoFilterInit(render, video_ctx, frame)) {
@@ -1596,7 +1588,7 @@ void VideoSetClosing(VideoRender * render)
 		render->Closing = 1;
 
 		if (FilterThread)
-			render->Deint_Close = 1;
+			render->Filter_Close = 1;
 
 		if (render->VideoPaused) {
 			StartVideo(render);
@@ -1745,22 +1737,6 @@ void VideoGetScreenSize(VideoRender * render, int *width, int *height,
 void VideoSetAudioDelay(int ms)
 {
 	VideoAudioDelay = ms;
-}
-
-///
-///	Set use sw deinterlacer.
-///
-void VideoSetSWDeinterlacer(VideoRender * render, int deint)
-{
-	if (SWDeinterlacer != deint && render) {
-		SWDeinterlacer = deint;
-		render->Closing = 1;
-		render->Deint_Close = 1;
-		sleep(1);
-		render->Closing = 0;
-	} else {
-		SWDeinterlacer = deint;
-	}
 }
 
 ///
