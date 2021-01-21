@@ -18,7 +18,7 @@ Install:
 --------
 	git clone https://github.com/zillevdr/vdr-plugin-softhddevice-drm.git
 	cd vdr-plugin-softhddevice-drm
-	For mmal (Raspberry Pi) set MMAL to 1 in Makefile.
+	For mmal (Raspberry Pi 2) set MMAL to 1 in Makefile.
 	make
 	make install
 

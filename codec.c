@@ -190,12 +190,17 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 		int width;
 		int height;
 
-		ParseResolutionH264(&width, &height);
+		if (!Par) {
+			ParseResolutionH264(&width, &height);
 #ifdef CODEC_DEBUG
-		fprintf(stderr, "CodecVideoOpen: Parsed width %d height %d\n", width, height);
+			fprintf(stderr, "CodecVideoOpen: Parsed width %d height %d\n", width, height);
 #endif
-		decoder->VideoCtx->coded_width = width;
-		decoder->VideoCtx->coded_height = height;
+			decoder->VideoCtx->coded_width = width;
+			decoder->VideoCtx->coded_height = height;
+		} else {
+			decoder->VideoCtx->coded_width = Par->width;
+			decoder->VideoCtx->coded_height = Par->height;
+		}
 	}
 
 //	decoder->VideoCtx->flags |= AV_CODEC_FLAG_BITEXACT;

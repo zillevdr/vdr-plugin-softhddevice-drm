@@ -11,7 +11,7 @@ PLUGIN = softhddevice-drm
 
 ### Configuration (edit this for your needs)
 
-	# enable this for MMAL (RaspberryPi)
+	# enable this for MMAL (RaspberryPi 2)
 MMAL ?= 0
 
 CONFIG := #-DDEBUG 				# enable debug output+functions
