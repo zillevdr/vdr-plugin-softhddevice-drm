@@ -164,11 +164,8 @@ static void ReleaseFrame( __attribute__ ((unused)) void *opaque, uint8_t *data)
 	av_free(primedata);
 }
 
-static void ThreadExitHandler(void * arg)
+static void ThreadExitHandler( __attribute__ ((unused)) void * arg)
 {
-	VideoRender * render = (VideoRender *)arg;
-
-	avfilter_graph_free(&render->filter_graph);
 	FilterThread = 0;
 }
 
@@ -751,6 +748,9 @@ dequeue:
 		goto dequeue;
 	}
 
+	if (FilterThread)
+		render->Filter_Close = 1;
+
 	// Destroy FBs
 	if (render->buffers) {
 		for (i = 0; i < render->buffers; ++i) {
@@ -1299,20 +1299,12 @@ static void *FilterHandlerThread(void * arg)
 		while (!atomic_read(&render->FramesDeintFilled) && !render->Filter_Close) {
 			usleep(10000);
 		}
-
 getinframe:
 		if (atomic_read(&render->FramesDeintFilled)) {
 			frame = render->FramesDeintRb[render->FramesDeintRead];
 			render->FramesDeintRead = (render->FramesDeintRead + 1) % VIDEO_SURFACES_MAX;
 			atomic_dec(&render->FramesDeintFilled);
-		} else {
-			frame = NULL;
-#ifdef DEBUG
-			fprintf(stderr, "FilterHandlerThread: Deint queue %d frame = NULL\n",
-				atomic_read(&render->FramesDeintFilled));
-#endif
 		}
-
 		if (render->Filter_Close) {
 			if (frame)
 				av_frame_free(&frame);
@@ -1321,7 +1313,6 @@ getinframe:
 			}
 			frame = NULL;
 		}
-
 		if (av_buffersrc_add_frame_flags(render->buffersrc_ctx,
 			frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
 			fprintf(stderr, "FilterHandlerThread: can't add_frame.\n");
@@ -1331,7 +1322,6 @@ getinframe:
 
 		while (1) {
 			AVFrame *filt_frame = av_frame_alloc();
-getoutframe:
 			ret = av_buffersink_get_frame(render->buffersink_ctx, filt_frame);
 
 			if (ret == AVERROR(EAGAIN)) {
@@ -1342,26 +1332,18 @@ getoutframe:
 				av_frame_free(&filt_frame);
 				goto closing;
 			}
-			if (ret < 0)
-				fprintf(stderr, "FilterHandlerThread: ret %i %s\n", ret, av_err2str(ret));
-
-			if (render->Filter_Close) {
-				goto getoutframe;
-			}
-
-			if (!filt_frame->height || !filt_frame->width) {
-				fprintf(stderr, "FilterHandlerThread: width %d height%d\n",
-					filt_frame->width, filt_frame->height);
+			if (ret < 0) {
+				fprintf(stderr, "FilterHandlerThread: can't get filtered frame: %s\n",
+					av_err2str(ret));
 				av_frame_free(&filt_frame);
 				break;
 			}
-
 fillframe:
 			if (render->Filter_Close) {
 				av_frame_free(&filt_frame);
 				break;
 			}
-			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
+			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX && !render->Closing) {
 				if (filt_frame->format == AV_PIX_FMT_NV12) {
 					filt_frame->pts = filt_frame->pts / 2;	// ffmpeg bug
 					EnqueueFB(render, filt_frame);
@@ -1376,6 +1358,7 @@ fillframe:
 			}
 		}
 	}
+
 closing:
 	avfilter_graph_free(&render->filter_graph);
 	render->Filter_Close = 0;
@@ -1586,9 +1569,6 @@ void VideoSetClosing(VideoRender * render)
 
 	if (render->buffers){
 		render->Closing = 1;
-
-		if (FilterThread)
-			render->Filter_Close = 1;
 
 		if (render->VideoPaused) {
 			StartVideo(render);
