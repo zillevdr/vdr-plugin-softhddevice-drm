@@ -322,14 +322,13 @@ void ReadHWPlatform(VideoRender * render)
 	size_t read_size;
 
 	txt_buf = (char *) calloc(bufsize, sizeof(char));
-	if (!txt_buf)
-		printf("ReadHWPlatform: No memory!\n");
-
 	render->CodecMode = 0;
 
 	read_size = ReadLineFromFile(txt_buf, bufsize, "/sys/firmware/devicetree/base/compatible");
-	if (!read_size)
+	if (!read_size) {
+		free((void *)txt_buf);
 		return;
+	}
 
 	read_ptr = txt_buf;
 
@@ -671,6 +670,11 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 	}
 	buf->plane[1] = buf->plane[0] + buf->offset[1];
 	buf->plane[2] = buf->plane[0] + buf->offset[2];
+#ifdef DRM_DEBUG
+	if (!render->buffers)
+		fprintf(stderr, "SetupFB: fb_id %d width %d height %d pix_fmt %4.4s\n",
+			buf->fb_id, buf->width, buf->height, (char *)&buf->pix_fmt);
+#endif
 
 	return 0;
 }
@@ -1536,6 +1540,10 @@ void VideoRenderFrame(VideoRender * render,
 ///
 int64_t VideoGetClock(const VideoRender * render)
 {
+#ifdef DEBUG
+	fprintf(stderr, "VideoGetClock: %s\n",
+		Timestamp2String(render->pts * 1000 * av_q2d(*render->timebase)));
+#endif
 	return render->pts;
 }
 

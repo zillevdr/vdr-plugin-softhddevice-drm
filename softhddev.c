@@ -1716,21 +1716,23 @@ int Start(void)
 #ifdef DEBUG
 	fprintf(stderr, "Start(void):\n");
 #endif
-	AudioInit();
-	av_new_packet(AudioAvPkt, AUDIO_BUFFER_SIZE);
-	MyAudioDecoder = CodecAudioNewDecoder();
-	AudioCodecID = AV_CODEC_ID_NONE;
-	AudioChannelID = -1;
+	if (!MyAudioDecoder) {
+		AudioInit();
+		av_new_packet(AudioAvPkt, AUDIO_BUFFER_SIZE);
+		MyAudioDecoder = CodecAudioNewDecoder();
+		AudioCodecID = AV_CODEC_ID_NONE;
+		AudioChannelID = -1;
 
-	CodecInit();
-	if (!MyVideoStream->Decoder) {
-		MyVideoStream->CodecID = AV_CODEC_ID_NONE;
-	}
+		CodecInit();
+		if (!MyVideoStream->Decoder) {
+			MyVideoStream->CodecID = AV_CODEC_ID_NONE;
+		}
 
-	if ((MyVideoStream->Render = VideoNewRender(MyVideoStream))) {
-		VideoInit(MyVideoStream->Render);
-		MyVideoStream->Decoder = CodecVideoNewDecoder(MyVideoStream->Render);
-		VideoPacketInit(MyVideoStream);
+		if ((MyVideoStream->Render = VideoNewRender(MyVideoStream))) {
+			VideoInit(MyVideoStream->Render);
+			MyVideoStream->Decoder = CodecVideoNewDecoder(MyVideoStream->Render);
+			VideoPacketInit(MyVideoStream);
+		}
 	}
 
 	return 0;

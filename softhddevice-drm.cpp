@@ -94,6 +94,9 @@ void cSoftOsd::SetActive(bool on)
 cSoftOsd::cSoftOsd(int left, int top, uint level)
 :cOsd(left, top, level)
 {
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
 #ifdef OSD_DEBUG
     /* FIXME: OsdWidth/OsdHeight not correct!
      */
@@ -111,6 +114,9 @@ cSoftOsd::cSoftOsd(int left, int top, uint level)
 */
 cSoftOsd::~cSoftOsd(void)
 {
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
 #ifdef OSD_DEBUG
     dsyslog("[softhddev] OSD %s: level %d\n", __FUNCTION__, OsdLevel);
 #endif
@@ -363,6 +369,9 @@ void cSoftOsd::Flush(void)
 */
 cOsd *cSoftOsdProvider::CreateOsd(int left, int top, uint level)
 {
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
 #ifdef OSD_DEBUG
     dsyslog("[softhddev] OSD %s: %d, %d, %d\n", __FUNCTION__, left, top, level);
 #endif
@@ -386,6 +395,9 @@ bool cSoftOsdProvider::ProvidesTrueColor(void)
 cSoftOsdProvider::cSoftOsdProvider(void)
 :  cOsdProvider()
 {
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
 #ifdef OSD_DEBUG
     dsyslog("[softhddev] OSD %s:\n", __FUNCTION__);
 #endif
@@ -725,11 +737,16 @@ void cSoftHdDevice::MakePrimaryDevice(bool on)
 #ifdef DEBUG
 	fprintf(stderr, "[softhddev]%s: %d\n", __FUNCTION__, on);
 #endif
+	if (!on) {
+		::SoftHdDeviceExit();
+	} else {
+		::Start();
+	}
 
-    cDevice::MakePrimaryDevice(on);
-    if (on) {
-	new cSoftOsdProvider();
-    }
+	cDevice::MakePrimaryDevice(on);
+	if (on) {
+		new cSoftOsdProvider();
+	}
 }
 
 
@@ -1147,6 +1164,9 @@ bool cPluginSoftHdDevice::ProcessArgs(int argc, char *argv[])
 bool cPluginSoftHdDevice::Initialize(void)
 {
     //dsyslog("[softhddev]%s:\n", __FUNCTION__);
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
 
     MyDevice = new cSoftHdDevice();
 
@@ -1158,19 +1178,22 @@ bool cPluginSoftHdDevice::Initialize(void)
 */
 bool cPluginSoftHdDevice::Start(void)
 {
-    //dsyslog("[softhddev]%s:\n", __FUNCTION__);
+	//dsyslog("[softhddev]%s:\n", __FUNCTION__);
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
 
-    if (!MyDevice->IsPrimaryDevice()) {
-	isyslog("[softhddev] softhddevice %d is not the primary device!",
-	    MyDevice->DeviceNumber());
-	if (ConfigMakePrimary) {
-	    // Must be done in the main thread
-	    dsyslog("[softhddev] makeing softhddevice %d the primary device!",
-		MyDevice->DeviceNumber());
-	    DoMakePrimary = MyDevice->DeviceNumber() + 1;
+	if (!MyDevice->IsPrimaryDevice()) {
+		isyslog("[softhddev] softhddevice %d is not the primary device!",
+			MyDevice->DeviceNumber());
+		if (ConfigMakePrimary) {
+			// Must be done in the main thread
+			dsyslog("[softhddev] makeing softhddevice %d the primary device!",
+				MyDevice->DeviceNumber());
+			DoMakePrimary = MyDevice->DeviceNumber() + 1;
+		}
 	}
-    }
-    ::Start();
+	::Start();
 
     return true;
 }
@@ -1182,6 +1205,9 @@ bool cPluginSoftHdDevice::Start(void)
 void cPluginSoftHdDevice::Stop(void)
 {
     //dsyslog("[softhddev]%s:\n", __FUNCTION__);
+#ifdef DEBUG
+	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
+#endif
 
     ::Stop();
 }
