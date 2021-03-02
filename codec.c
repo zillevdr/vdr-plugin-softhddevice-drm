@@ -272,7 +272,7 @@ void CodecVideoClose(VideoDecoder * decoder)
 */
 int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 {
-	int ret;
+	int ret = AVERROR_DECODER_NOT_FOUND;
 
 #if 0
 	if (!decoder->VideoCtx->extradata_size) {
@@ -319,9 +319,6 @@ int CodecVideoSendPacket(VideoDecoder * decoder, const AVPacket * avpkt)
 	pthread_mutex_lock(&CodecLockMutex);
 	if (decoder->VideoCtx) {
 		ret = avcodec_send_packet(decoder->VideoCtx, avpkt);
-	} else {
-		pthread_mutex_unlock(&CodecLockMutex);
-		return 1;
 	}
 	pthread_mutex_unlock(&CodecLockMutex);
 #ifdef DEBUG
