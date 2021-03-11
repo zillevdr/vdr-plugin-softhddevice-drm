@@ -65,6 +65,12 @@
 
 
 //----------------------------------------------------------------------------
+//	Defines
+//----------------------------------------------------------------------------
+
+#define MIN_AUDIO_BUFFER	450	///< minimal output buffer in ms
+
+//----------------------------------------------------------------------------
 //	Variables
 //----------------------------------------------------------------------------
 
@@ -79,7 +85,7 @@ static volatile char AudioVideoIsReady;	///< video ready start early
 static int AudioSkip;			///< skip audio to sync to video
 
 static const int AudioBytesProSample = 2;	///< number of bytes per sample
-static int AudioBufferTime = 600;	///< audio buffer time in ms
+static int AudioBufferTime;	///< audio buffer time in ms
 
 static pthread_t AudioThread;		///< audio play thread
 static pthread_mutex_t AudioRbMutex;	///< audio condition mutex
@@ -1070,6 +1076,7 @@ static void AlsaInit(void)
     snd_lib_error_set_handler(AlsaNoopCallback);
 #endif
 
+	AudioBufferTime = MIN_AUDIO_BUFFER;
     AlsaInitPCM();
     AlsaInitMixer();
 }
@@ -1602,13 +1609,7 @@ void AudioPause(void)
 */
 void AudioSetBufferTime(int delay)
 {
-
-    if (!delay) {
-	delay = AudioBufferTime;
-    }
-    AudioBufferTime = delay;
-//	fprintf(stderr, "AudioSetBufferTime: delay %d AudioBufferTime %d\n",
-//		delay, AudioBufferTime);
+	AudioBufferTime = MIN_AUDIO_BUFFER + delay;
 }
 
 /**

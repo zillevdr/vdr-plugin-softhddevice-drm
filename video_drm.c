@@ -909,6 +909,8 @@ page_flip:
 	if (frame)
 		PicWidth = render->mode.vdisplay * av_q2d(frame->sample_aspect_ratio) *
 		frame->width / frame->height;
+	if (!PicWidth)
+		PicWidth = render->mode.hdisplay;
 
 	if (buf->width != (GetPropertyValue(render->fd_drm, render->video_plane,
 		DRM_MODE_OBJECT_PLANE, "SRC_W") >> 16))

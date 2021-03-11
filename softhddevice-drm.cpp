@@ -674,6 +674,7 @@ void cMenuSetupSoft::Store(void)
 	AudioStereoDescent);
     AudioSetStereoDescent(ConfigAudioStereoDescent);
     SetupStore("AudioBufferTime", ConfigAudioBufferTime = AudioBufferTime);
+    AudioSetBufferTime(ConfigAudioBufferTime);
     SetupStore("AudioAutoAES", ConfigAudioAutoAES = AudioAutoAES);
     AudioSetAutoAES(ConfigAudioAutoAES);
 	SetupStore("AudioEq", ConfigAudioEq = AudioEq);

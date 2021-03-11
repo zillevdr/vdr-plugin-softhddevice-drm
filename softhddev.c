@@ -535,7 +535,7 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 #endif
 		CodecAudioClose(MyAudioDecoder);
 //		AudioFlushBuffers();
-		AudioSetBufferTime(ConfigAudioBufferTime);		// ???
+//		AudioSetBufferTime(ConfigAudioBufferTime);		// ???
 		AudioCodecID = AV_CODEC_ID_NONE;
 		AudioChannelID = -1;
 		NewAudioStream = 0;
@@ -612,7 +612,7 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 	    channels = (p[5] & 0x7) + 1;
 
 	    // FIXME: ConfigAudioBufferTime + x
-	    AudioSetBufferTime(400);
+//	    AudioSetBufferTime(400);
 //	    AudioSetup(&samplerate, &channels, 0);
 	    if (samplerate != samplerates[p[5] >> 4]) {
 		Error(_("[softhddev] LPCM %d sample-rate is unsupported\n"),
@@ -641,10 +641,10 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
     if ((id & 0xF0) == 0x80 && (p[0] & 0xF0) == 0x80) {
 		p += 4;
 		n -= 4;				// skip track header
-		if (AudioCodecID == AV_CODEC_ID_NONE) {
-			// FIXME: ConfigAudioBufferTime + x
-			AudioSetBufferTime(400);
-		}
+//		if (AudioCodecID == AV_CODEC_ID_NONE) {
+//			// FIXME: ConfigAudioBufferTime + x
+//			AudioSetBufferTime(400);
+//		}
     }
     // append new packet, to partial old data
     memcpy(AudioAvPkt->data + AudioAvPkt->stream_index, p, n);
@@ -1718,6 +1718,7 @@ int Start(void)
 #endif
 	if (!MyAudioDecoder) {
 		AudioInit();
+		AudioSetBufferTime(ConfigAudioBufferTime);
 		av_new_packet(AudioAvPkt, AUDIO_BUFFER_SIZE);
 		MyAudioDecoder = CodecAudioNewDecoder();
 		AudioCodecID = AV_CODEC_ID_NONE;
