@@ -97,7 +97,7 @@ static pthread_t FilterThread;
 //----------------------------------------------------------------------------
 
 struct drm_buf {
-	uint32_t x, y, width, height, size, pitch[4], handle[4], offset[4], fb_id;
+	uint32_t width, height, size, pitch[4], handle[4], offset[4], fb_id;
 	uint8_t *plane[4];
 	uint32_t pix_fmt;
 	int fd_prime;
@@ -909,7 +909,7 @@ page_flip:
 	if (frame)
 		PicWidth = render->mode.vdisplay * av_q2d(frame->sample_aspect_ratio) *
 		frame->width / frame->height;
-	if (!PicWidth)
+	if (!PicWidth || PicWidth > render->mode.hdisplay)
 		PicWidth = render->mode.hdisplay;
 
 	if (buf->width != (GetPropertyValue(render->fd_drm, render->video_plane,
@@ -996,15 +996,16 @@ static void *DisplayHandlerThread(void * arg)
 void VideoOsdClear(VideoRender * render)
 {
 	if (render->use_zpos) {
-		ChangePlanes(render, 1);
-		memset((void *)render->buf_osd.plane[0], 0,
-			(size_t)(render->buf_osd.pitch[0] * render->buf_osd.height));
+		if (render->zpos_overlay == GetPropertyValue(render->fd_drm,
+				render->osd_plane, DRM_MODE_OBJECT_PLANE, "zpos"))
+			ChangePlanes(render, 1);
 	} else {
 		if (drmModeSetPlane(render->fd_drm, render->osd_plane, render->crtc_id, 0, 0,
 			0, 0, render->buf_osd.width, render->buf_osd.height, 0, 0, 0 << 16, 0 << 16))
 				fprintf(stderr, "VideoOsdClear: failed to clear plane: (%d): %m\n", (errno));
-		render->buf_osd.x = 0;
 	}
+	memset((void *)render->buf_osd.plane[0], 0,
+		(size_t)(render->buf_osd.pitch[0] * render->buf_osd.height));
 }
 
 ///
@@ -1020,29 +1021,31 @@ void VideoOsdClear(VideoRender * render)
 ///	@param y	y-coordinate on screen of argb image
 ///
 void VideoOsdDrawARGB(VideoRender * render, __attribute__ ((unused)) int xi,
-		__attribute__ ((unused)) int yi, int width, int height, int pitch,
-		const uint8_t * argb, int x, int y)
+		__attribute__ ((unused)) int yi, __attribute__ ((unused)) int width,
+		int height, int pitch, const uint8_t * argb, int x, int y)
 {
 	int i;
 
-	if (render->use_zpos) {
+	if (render->use_zpos && render->zpos_overlay != GetPropertyValue(render->fd_drm,
+			render->osd_plane, DRM_MODE_OBJECT_PLANE, "zpos")) {
 		ChangePlanes(render, 0);
-	} else {
-		if (render->buf_osd.x == 0){
-			if (drmModeSetPlane(render->fd_drm, render->osd_plane, render->crtc_id, render->buf_osd.fb_id,
-				0, x, y, width, height, 0, 0, width << 16, height << 16))
-					fprintf(stderr, "VideoOsdDrawARGB: failed to enable plane: (%d): %m\n", (errno));
-			render->buf_osd.x = x;
-			render->buf_osd.y = y;
-		}
+	}
+	if (!GetPropertyValue(render->fd_drm, render->osd_plane,
+		DRM_MODE_OBJECT_PLANE, "FB_ID")){
+
+		if (drmModeSetPlane(render->fd_drm, render->osd_plane,
+			render->crtc_id, render->buf_osd.fb_id, 0,
+			0, 0, render->buf_osd.width, render->buf_osd.height,
+			0, 0, render->buf_osd.width << 16, render->buf_osd.height << 16))
+
+			fprintf(stderr, "VideoOsdDrawARGB: failed to enable plane: (%d): %m\n",
+				(errno));
 	}
 
 	for (i = 0; i < height; ++i) {
-		memcpy(render->buf_osd.plane[0] + (x - render->buf_osd.x) * 4 + (i + y - render->buf_osd.y)
-		   * render->buf_osd.pitch[0], argb + i * pitch, (size_t)pitch);
+		memcpy(render->buf_osd.plane[0] + x * 4 + (i + y) * render->buf_osd.pitch[0],
+			argb + i * pitch, (size_t)pitch);
 	}
-//	fprintf(stderr, "DrmOsdDrawARGB width: %i height: %i pitch: %i x: %i y: %i xi: %i yi: %i diff_y: %i diff_x: %i\n",
-//	   width, height, pitch, x, y, xi, yi, y - render->buf_osd.y, x - render->buf_osd.x);
 }
 
 //----------------------------------------------------------------------------
@@ -1748,7 +1751,6 @@ void VideoInit(VideoRender * render)
 
 	// osd FB
 	render->buf_osd.pix_fmt = DRM_FORMAT_ARGB8888;
-	render->buf_osd.x = 0;
 	render->buf_osd.width = render->mode.hdisplay;
 	render->buf_osd.height = render->mode.vdisplay;
 	if (SetupFB(render, &render->buf_osd, NULL)){
