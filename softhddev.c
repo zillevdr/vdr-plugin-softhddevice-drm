@@ -1153,18 +1153,12 @@ int PlayVideo(const uint8_t * data, int size)
 		return 0;
 	}
 
-	// must be a PES start code
-	if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01) {
+	// must be a PES video start code
+	if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01 || data[3] >> 4 != 0x0e) {
 #ifdef DEBUG
-		fprintf(stderr, "PlayVideo: No PES start code!!! %02x %02x %02x\n",
-			data[0], data[1], data[2]);
+		fprintf(stderr, "PlayVideo: No PES video start code!!! %02x %02x %02x %02x\n",
+			data[0], data[1], data[2], data[3]);
 #endif
-		return size;
-	}
-
-	// 0xBE, filler, padding stream
-	if (data[3] == 0xBE) {
-		fprintf(stderr, "PlayVideo: padding stream!!!\n");
 		return size;
 	}
 
@@ -1261,18 +1255,24 @@ void StillPicture(const uint8_t * data, int size)
 	int size_rest;
 	int codec = AV_CODEC_ID_NONE;
 	int i;
+	int pes_length;
+	int head_length;
 
 	pes = malloc(size);
 	av_init_packet(&avpkt);
 	avpkt.size = 0;
+	avpkt.pts = AV_NOPTS_VALUE;
 	pos = data;
 	size_rest = size;
 
-	avpkt.pts = AV_NOPTS_VALUE;
-
 	while (size_rest >= 6 ) {
-		int pes_length = PesHasLength(pos) ? PesLength(pos) : size;
-		int head_length = PesHeadLength(pos);
+		if (pos[3] >> 4 == 0x0e) {	// PES video start code
+			pes_length = PesHasLength(pos) ? PesLength(pos) : size;
+			head_length = PesHeadLength(pos);
+		} else {	// ES video start code
+			pes_length = size;
+			head_length = 0;
+		}
 
 		if (codec == AV_CODEC_ID_NONE) {
 			for (i = 0; (i < 2); i++) {
