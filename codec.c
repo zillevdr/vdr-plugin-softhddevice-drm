@@ -137,6 +137,7 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 	AVCodec * codec;
 	enum AVHWDeviceType type = 0;
 	static AVBufferRef *hw_device_ctx = NULL;
+	int err;
 
 	if (VideoCodecMode(decoder->Render) == 1 ||
 		(VideoCodecMode(decoder->Render) == 3 && codec_id == AV_CODEC_ID_H264)) {
@@ -239,9 +240,12 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 		decoder->VideoCtx->pkt_timebase.den = timebase->den;
 	}
 
-	if (avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL) < 0) {
-		fprintf(stderr, "CodecVideoOpen: Error opening the decoder\n");
-		Fatal(_("CodecVideoOpen: Error opening the decoder\n"));
+	err = avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL);
+	if (err < 0) {
+		fprintf(stderr, "CodecVideoOpen: Error opening the decoder: %s\n",
+			av_err2str(err));
+		Fatal(_("CodecVideoOpen: Error opening the decoder: %s\n"),
+			av_err2str(err));
 	}
 }
 
