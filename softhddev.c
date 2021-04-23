@@ -843,25 +843,31 @@ unsigned int ReadSE()
 void ParseResolutionH264(int *width, int *height)
 {
 	AVPacket *avpkt;
-	const unsigned char * pStart;
+	m_pStart = NULL;
 
 	avpkt = &MyVideoStream->PacketRb[MyVideoStream->PacketRead];
 
 	for (int i = 0; i < avpkt->size; i++) {
-		if (!avpkt->data[i] && !avpkt->data[i + 1] &&
-			avpkt->data[i + 2] == 0x01 && avpkt->data[i + 3] == 0x67) {
+		if (!avpkt->data[i] && !avpkt->data[i + 1] && avpkt->data[i + 2] == 0x01 && 
+			(avpkt->data[i + 3] == 0x67 || avpkt->data[i + 3] == 0x27)) {
 
-			m_pStart = pStart = &avpkt->data[i + 4];
+			m_pStart = &avpkt->data[i + 4];
 			m_nLength = avpkt->size - i - 4;
 			break;
 		}
 	}
-	m_nCurrentBit = 0;
+	if (!m_pStart) {
+		fprintf(stderr, "ParseResolutionH264: No m_pStart %p\n", m_pStart);
+		return;
+	}
 
-	int frame_crop_left_offset=0;
-	int frame_crop_right_offset=0;
-	int frame_crop_top_offset=0;
-	int frame_crop_bottom_offset=0;
+	m_nCurrentBit = 0;
+	int frame_crop_left_offset = 0;
+	int frame_crop_right_offset = 0;
+	int frame_crop_top_offset = 0;
+	int frame_crop_bottom_offset = 0;
+	int chroma_format_idc = 0;
+	int separate_colour_plane_flag = 0;
 
 	int profile_idc = ReadBits(8);
 	ReadBits(16);
@@ -873,9 +879,9 @@ void ParseResolutionH264(int *width, int *height)
 		profile_idc == 44 || profile_idc == 83 ||
 		profile_idc == 86 || profile_idc == 118) {
 
-		int chroma_format_idc = ReadExponentialGolombCode();
+		chroma_format_idc = ReadExponentialGolombCode();
 		if (chroma_format_idc == 3) {
-			ReadBit();
+			separate_colour_plane_flag = ReadBit();
 		}
 		ReadExponentialGolombCode();
 		ReadExponentialGolombCode();
@@ -929,10 +935,30 @@ void ParseResolutionH264(int *width, int *height)
 		frame_crop_bottom_offset = ReadExponentialGolombCode();
 	}
 
-	*width = ((pic_width_in_mbs_minus1 +1)*16) - frame_crop_bottom_offset*2 -
-		frame_crop_top_offset*2;
+	int SubWidthC = 0;
+	int SubHeightC = 0;
+
+	if (chroma_format_idc == 0 && separate_colour_plane_flag == 0) { //monochrome
+		SubWidthC = SubHeightC = 0;
+	} else if (chroma_format_idc == 1 && separate_colour_plane_flag == 0) { //4:2:0 
+		SubWidthC = SubHeightC = 2;
+	} else if (chroma_format_idc == 2 && separate_colour_plane_flag == 0) { //4:2:2 
+		SubWidthC = 2;
+		SubHeightC = 1;
+	} else if (chroma_format_idc == 3) { //4:4:4
+		if (separate_colour_plane_flag == 0) {
+		SubWidthC = SubHeightC = 1;
+		} else if (separate_colour_plane_flag == 1) {
+			SubWidthC = SubHeightC = 0;
+		}
+	}
+
+	*width = ((pic_width_in_mbs_minus1 + 1) * 16) -
+		SubWidthC * (frame_crop_right_offset + frame_crop_left_offset);
+
 	*height = ((2 - frame_mbs_only_flag)* (pic_height_in_map_units_minus1 +1) * 16) -
-		(frame_crop_right_offset * 2) - (frame_crop_left_offset * 2);
+		SubHeightC * ((frame_crop_bottom_offset * 2) + (frame_crop_top_offset * 2));
+
 }
 
 /**
