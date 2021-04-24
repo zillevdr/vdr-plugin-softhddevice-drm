@@ -122,6 +122,7 @@ struct _Drm_Render_
 	int VideoPaused;
 	int Closing;			///< flag about closing current stream
 	int Filter_Close;
+	int Filter_Bug;
 
 	int StartCounter;			///< counter for video start
 	int FramesDuped;			///< number of frames duplicated
@@ -1354,7 +1355,8 @@ fillframe:
 			}
 			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX && !render->Closing) {
 				if (filt_frame->format == AV_PIX_FMT_NV12) {
-					filt_frame->pts = filt_frame->pts / 2;	// ffmpeg bug
+					if (render->Filter_Bug)
+						filt_frame->pts = filt_frame->pts / 2;	// ffmpeg bug
 					EnqueueFB(render, filt_frame);
 				} else {
 					render->FramesRb[render->FramesWrite] = filt_frame;
@@ -1395,12 +1397,15 @@ int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 	AVFilterInOut *outputs = avfilter_inout_alloc();
 	AVFilterInOut *inputs  = avfilter_inout_alloc();
 	render->filter_graph = avfilter_graph_alloc();
+	render->Filter_Bug = 0;
 
 	if (frame->interlaced_frame) {
 		if (frame->format == AV_PIX_FMT_DRM_PRIME)
 			filter_descr = "deinterlace_v4l2m2m";
-		else if (frame->format == AV_PIX_FMT_YUV420P)
+		else if (frame->format == AV_PIX_FMT_YUV420P) {
 			filter_descr = "bwdif=1:-1:0";
+			render->Filter_Bug = 1;
+		}
 	} else if (frame->format == AV_PIX_FMT_YUV420P)
 		filter_descr = "scale";
 #ifdef DEBUG

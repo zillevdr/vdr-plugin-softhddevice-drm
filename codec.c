@@ -612,7 +612,8 @@ send:
 			audio_decoder->last_pts = frame->pts;
 		} else if (audio_decoder->last_pts != (int64_t) AV_NOPTS_VALUE) {
 			frame->pts = audio_decoder->last_pts + 
-				(int64_t)(frame->nb_samples * audio_decoder->AudioCtx->pkt_timebase.den /
+				(int64_t)(frame->nb_samples /
+				av_q2d(audio_decoder->AudioCtx->pkt_timebase) /
 				frame->sample_rate);
 			audio_decoder->last_pts = frame->pts;
 		}

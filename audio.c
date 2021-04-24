@@ -1242,8 +1242,7 @@ void AudioEnqueue(AVFrame *frame)
 		Error(_("audio: can't place %d samples in ring buffer\n"), count);
 		fprintf(stderr, "AudioEnqueue: can't place %d samples in ring buffer\n", count);
 	}
-	PTS = frame->pts + frame->nb_samples * timebase->den /
-			timebase->num / frame->sample_rate;
+	PTS = frame->pts + frame->nb_samples / av_q2d(*timebase) / frame->sample_rate;
 	pthread_mutex_unlock(&AudioRbMutex);
 
 	if (!AudioRunning && !AudioPaused) {		// check, if we can start the thread

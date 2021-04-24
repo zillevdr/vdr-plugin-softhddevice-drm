@@ -246,8 +246,7 @@ repeat:
 			if (audio_stream_index == packet.stream_index) {
 				if (!PlayAudioPkts(&packet)) {
 					usleep(packet.duration * AV_TIME_BASE *
-						format->streams[audio_stream_index]->time_base.num
-						/ format->streams[audio_stream_index]->time_base.den);
+						av_q2d(format->streams[audio_stream_index]->time_base));
 					goto repeat;
 				}
 				CurrentTime = AudioGetClock() / 1000 - start_time;
@@ -256,8 +255,7 @@ repeat:
 			if (video_stream_index == packet.stream_index) {
 				if (!PlayVideoPkts(&packet)) {
 					usleep(packet.duration * AV_TIME_BASE *
-						format->streams[video_stream_index]->time_base.num
-						/ format->streams[video_stream_index]->time_base.den);
+						av_q2d(format->streams[video_stream_index]->time_base));
 					goto repeat;
 				}
 			}
@@ -276,9 +274,8 @@ repeat:
 
 		if (Jump && format->pb->seekable) {
 			av_seek_frame(format, format->streams[jump_stream_index]->index,
-				packet.pts + (int64_t)(Jump *		// - BufferOffset
-				format->streams[jump_stream_index]->time_base.den /
-				format->streams[jump_stream_index]->time_base.num), 0);
+				packet.pts + (int64_t)(Jump /		// - BufferOffset
+				av_q2d(format->streams[jump_stream_index]->time_base)), 0);
 			Clear();
 			Jump = 0;
 		}
