@@ -844,10 +844,15 @@ void ParseResolutionH264(int *width, int *height)
 {
 	AVPacket *avpkt;
 	m_pStart = NULL;
+	int i;
+
+	while (!VideoGetPackets(MyVideoStream)) {
+		usleep(10000);
+	}
 
 	avpkt = &MyVideoStream->PacketRb[MyVideoStream->PacketRead];
 
-	for (int i = 0; i < avpkt->size; i++) {
+	for (i = 0; i < avpkt->size; i++) {
 		if (!avpkt->data[i] && !avpkt->data[i + 1] && avpkt->data[i + 2] == 0x01 && 
 			(avpkt->data[i + 3] == 0x67 || avpkt->data[i + 3] == 0x27)) {
 
@@ -857,7 +862,9 @@ void ParseResolutionH264(int *width, int *height)
 		}
 	}
 	if (!m_pStart) {
-		fprintf(stderr, "ParseResolutionH264: No m_pStart %p\n", m_pStart);
+		fprintf(stderr, "ParseResolutionH264: No m_pStart %p Pkt %p Packets %d i %d\n",
+			m_pStart, avpkt, VideoGetPackets(MyVideoStream), i);
+		PrintStreamData(avpkt->data, avpkt->size);
 		return;
 	}
 
@@ -1103,13 +1110,7 @@ int VideoDecodeInput(VideoStream * stream)
 	}
 
 	if (stream->ClosingStream && stream->CodecID != AV_CODEC_ID_NONE) {
-
-		if (atomic_read(&stream->PacketsFilled)) {
-#ifdef DEBUG
-			fprintf(stderr, "VideoDecodeInput: ClearVideo(stream)\n");
-#endif
-			ClearVideo(stream);
-		}
+		ClearVideo(stream);
 		CodecVideoClose(stream->Decoder);
 		stream->CodecID = AV_CODEC_ID_NONE;
 		stream->ClosingStream = 0;
@@ -1487,9 +1488,9 @@ int PlayVideoPkts(AVPacket * pkt)
 		return 0;
 	}
 
+	avpkt = &MyVideoStream->PacketRb[MyVideoStream->PacketWrite];
 	MyVideoStream->PacketWrite = (MyVideoStream->PacketWrite + 1) % VIDEO_PACKET_MAX;
 	atomic_inc(&MyVideoStream->PacketsFilled);
-	avpkt = &MyVideoStream->PacketRb[MyVideoStream->PacketWrite];
 
 	if (pkt->size > avpkt->buf->size) {
 		fprintf(stderr, "PlayVideoPkts: grow packet buffer size by %d\n",
