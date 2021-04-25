@@ -1276,8 +1276,7 @@ int PlayVideo(const uint8_t * data, int size)
 */
 void StillPicture(const uint8_t * data, int size)
 {
-	AVPacket avpkt;
-	uint8_t * pes;
+	AVPacket *avpkt;
 	const uint8_t * pos;
 	int size_rest;
 	int codec = AV_CODEC_ID_NONE;
@@ -1285,10 +1284,9 @@ void StillPicture(const uint8_t * data, int size)
 	int pes_length;
 	int head_length;
 
-	pes = malloc(size);
-	av_init_packet(&avpkt);
-	avpkt.size = 0;
-	avpkt.pts = AV_NOPTS_VALUE;
+	avpkt = &MyVideoStream->PacketRb[MyVideoStream->PacketWrite];
+	avpkt->size = 0;
+	avpkt->pts = AV_NOPTS_VALUE;
 	pos = data;
 	size_rest = size;
 
@@ -1328,23 +1326,29 @@ void StillPicture(const uint8_t * data, int size)
 
 #ifdef STILL_DEBUG
 		fprintf(stderr, "StillPicture: memcpy avpkt.size %d size %d size_rest %d peslength %d headlength %d I %d\n",
-			avpkt.size, size, size_rest, pes_length, head_length, i);
+			avpkt->size, size, size_rest, pes_length, head_length, i);
 #endif
+		if (avpkt->size + pes_length - head_length - i >= avpkt->buf->size) {
+			int pkt_size = avpkt->size;
+			Warning(_("video: packet buffer too small for %d\n"),
+				avpkt->size + pes_length - head_length - i);
+			av_grow_packet(avpkt, pes_length - head_length - i);
+			avpkt->size = pkt_size;
+		}
 
-		memcpy(pes + avpkt.size, pos + head_length + i, pes_length - head_length - i);
-		avpkt.size += pes_length - head_length - i;
+		memcpy(avpkt->data + avpkt->size, pos + head_length + i, pes_length - head_length - i);
+		avpkt->size += pes_length - head_length - i;
 		size_rest -= pes_length;
 		pos += pes_length;
 		i = 0;
 	}
-
-	avpkt.data = pes;
+	atomic_inc(&MyVideoStream->PacketsFilled);
 
 	CodecVideoOpen(MyVideoStream->Decoder, codec, NULL, NULL);
 	VideoSetTrickSpeed(MyVideoStream->Render, 1);
 
 send:
-	CodecVideoSendPacket(MyVideoStream->Decoder, &avpkt);
+	CodecVideoSendPacket(MyVideoStream->Decoder, avpkt);
 	usleep(20000);
 	if (CodecVideoReceiveFrame(MyVideoStream->Decoder, 1))
 		goto send;
@@ -1353,9 +1357,8 @@ send:
 #endif
 	CodecVideoFlushBuffers(MyVideoStream->Decoder);
 	CodecVideoClose(MyVideoStream->Decoder);
+	ClearVideo(MyVideoStream);
 	MyVideoStream->CodecID = AV_CODEC_ID_NONE;
-	av_packet_unref(&avpkt);
-	free(pes);
 
 	usleep(100000);
 	VideoSetTrickSpeed(MyVideoStream->Render, 0);
