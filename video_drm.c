@@ -1606,6 +1606,7 @@ void VideoSetClosing(VideoRender * render)
 	render->StartCounter = 0;
 	render->FramesDuped = 0;
 	render->FramesDropped = 0;
+	render->TrickSpeed = 0;
 }
 
 /**
