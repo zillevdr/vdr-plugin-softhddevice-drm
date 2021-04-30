@@ -946,7 +946,7 @@ void ParseResolutionH264(int *width, int *height)
 	int SubHeightC = 0;
 
 	if (chroma_format_idc == 0 && separate_colour_plane_flag == 0) { //monochrome
-		SubWidthC = SubHeightC = 0;
+		SubWidthC = SubHeightC = 2;
 	} else if (chroma_format_idc == 1 && separate_colour_plane_flag == 0) { //4:2:0 
 		SubWidthC = SubHeightC = 2;
 	} else if (chroma_format_idc == 2 && separate_colour_plane_flag == 0) { //4:2:2 
