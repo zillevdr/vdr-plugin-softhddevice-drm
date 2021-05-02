@@ -88,11 +88,8 @@ extern void CodecAudioClose(AudioDecoder *);
     /// Set audio pass-through.
 extern void CodecSetAudioPassthrough(int);
 
-    /// Set audio downmix.
-extern void CodecSetAudioDownmix(int);
-
     /// Decode an audio packet.
-extern int CodecAudioDecode(AudioDecoder *, const AVPacket *);
+extern void CodecAudioDecode(AudioDecoder *, const AVPacket *);
 
     /// Flush audio buffers.
 extern void CodecAudioFlushBuffers(AudioDecoder *);

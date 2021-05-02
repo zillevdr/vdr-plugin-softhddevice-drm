@@ -106,6 +106,7 @@ static int AudioCompressionFactor;	///< current compression factor
 static int AudioMaxCompression;		///< max. compression factor
 static int AudioStereoDescent;		///< volume descent for stereo
 static int AudioVolume;			///< current volume (0 .. 1000)
+static int AudioDownMix;
 
 extern int VideoAudioDelay;		///< import audio/video delay
 
@@ -154,7 +155,7 @@ static unsigned AudioStartThreshold;	///< start play, if filled
 
 
 
-static int AlsaSetup(AVCodecContext *AudioCtx, int passthrough);
+static int AlsaSetup(int channels, int sample_rate, int passthrough);
 
 
 //----------------------------------------------------------------------------
@@ -451,9 +452,13 @@ static int AudioFilterInit(AVCodecContext *AudioCtx)
 
 	// Before filter init set HW parameter.
 	if (AudioCtx->sample_rate != (int)HwSampleRate ||
-		AudioCtx->channels != (int)HwChannels) {
+		(AudioCtx->channels != (int)HwChannels && 
+		!(AudioDownMix && HwChannels == 2))) {
 
-		err = AlsaSetup(AudioCtx, 0);
+//		fprintf(stderr, "AudioDownMix %d HwChannels %d HwSampleRate %d\n",
+//			AudioDownMix, HwChannels, HwSampleRate);
+
+		err = AlsaSetup(AudioCtx->channels, AudioCtx->sample_rate, 0);
 		if (err)
 			return err;
 	}
@@ -503,6 +508,11 @@ static int AudioFilterInit(AVCodecContext *AudioCtx)
 		n_filter++;
 	}
 	// aformat
+//	fprintf(stderr, "AudioFilterInit: aformat AudioDownMix %d HwChannels %d HwSampleRate %d ch_layout %s bytes_per_sample %d\n",
+//		AudioDownMix, HwChannels, HwSampleRate,
+//		AudioDownMix ? "stereo" : ch_layout,
+//		av_get_bytes_per_sample(AV_SAMPLE_FMT_S16));
+
 	if (!(aformat = avfilter_get_by_name("aformat")))
 		fprintf(stderr, "AudioFilterInit: Could not find the aformat filter.\n");
 	if (!(filter_ctx[n_filter] = avfilter_graph_alloc_filter(filter_graph, aformat, "aformat")))
@@ -510,7 +520,7 @@ static int AudioFilterInit(AVCodecContext *AudioCtx)
 	snprintf(options_str, sizeof(options_str),
 		"sample_fmts=%s:sample_rates=%d:channel_layouts=%s",
 		av_get_sample_fmt_name(AV_SAMPLE_FMT_S16),
-		AudioCtx->sample_rate, ch_layout);
+		AudioCtx->sample_rate, AudioDownMix ? "stereo" : ch_layout);	// 7.1 ??!
 	if (avfilter_init_str(filter_ctx[n_filter], options_str) < 0)
 		fprintf(stderr, "AudioFilterInit: Could not initialize the aformat filter.\n");
 	n_filter++;
@@ -901,7 +911,8 @@ static void AlsaInitMixer(void)
 /**
 **	Setup alsa audio for requested format.
 **
-**	@param AudioCtx		AVCodecContext
+**	@param channels		Channels requested
+**	@param sample_rate	SampleRate requested
 **	@param passthrough	use pass-through (AC-3, ...) device
 **
 **	@retval 0	everything ok
@@ -910,12 +921,12 @@ static void AlsaInitMixer(void)
 **
 **	@todo FIXME: remove pointer for freq + channels
 */
-static int AlsaSetup(AVCodecContext *AudioCtx, __attribute__ ((unused)) int passthrough)
+static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int passthrough)
 {
 	snd_pcm_hw_params_t *hwparams;
     snd_pcm_uframes_t buffer_size;
     snd_pcm_uframes_t period_size;
-	static unsigned int SampleRate;
+//	static unsigned int SampleRate;
     int err;
     int delay;
 
@@ -930,24 +941,20 @@ static int AlsaSetup(AVCodecContext *AudioCtx, __attribute__ ((unused)) int pass
 		HwChannels = 2;
 	} else {
 		for (int i = 0; HwChannelMaps[i] != NULL; i++) {
-			if ((int)HwChannelMaps[i]->map.channels == AudioCtx->channels) {
+			if ((int)HwChannelMaps[i]->map.channels == channels) {
 //				fprintf(stderr, "AlsaSetup: %d channels supported\n",
 //					channels);
-				HwChannels = AudioCtx->channels;
+				HwChannels = channels;
 				break;
 			}
 		}
 	}
 
-	if (AudioCtx->channels != (int)HwChannels) {
-		Warning(_("AlsaSetup: no channel map found for %d channels, "
-			"HwChannels %d > set CodecDownmix\n"),
-			AudioCtx->channels, HwChannels);
-		fprintf(stderr, "AlsaSetup: no channel map found for %d channels, "
-			"HwChannels %d > set CodecDownmix\n",
-			AudioCtx->channels, HwChannels);
-		CodecSetAudioDownmix(1);
-		return 1;
+	if (channels != (int)HwChannels) {
+		fprintf(stderr, "AlsaSetup: %d channels not supported! Suggest HW can handle 2 channels.\n",
+					channels);
+		HwChannels = channels = 2;
+		AudioDownMix = 1;
 	}
 
 	snd_pcm_hw_params_alloca(&hwparams);
@@ -955,18 +962,18 @@ static int AlsaSetup(AVCodecContext *AudioCtx, __attribute__ ((unused)) int pass
 		fprintf(stderr, "AlsaSetup: failed! %s\n", snd_strerror(err));
 		return -1;
 	}
-	if (snd_pcm_hw_params_test_rate(AlsaPCMHandle, hwparams, AudioCtx->sample_rate, 0)) {
-		fprintf(stderr, "AlsaSetup: SampleRate %d not supported\n", AudioCtx->sample_rate);
+	if (snd_pcm_hw_params_test_rate(AlsaPCMHandle, hwparams, sample_rate, 0)) {
+		fprintf(stderr, "AlsaSetup: SampleRate %d not supported\n", sample_rate);
 		// If test sample_rate failed should test a rate_near. later.
-		if ((err = snd_pcm_hw_params_set_rate_near(AlsaPCMHandle, hwparams,
-			&SampleRate, NULL)) < 0) {
-			fprintf(stderr, "AlsaSetup: snd_pcm_hw_params_set_rate_near failed %s\n",
-				snd_strerror(err));
-		}
+//		if ((err = snd_pcm_hw_params_set_rate_near(AlsaPCMHandle, hwparams,
+//			&SampleRate, NULL)) < 0) {
+//			fprintf(stderr, "AlsaSetup: snd_pcm_hw_params_set_rate_near failed %s\n",
+//				snd_strerror(err));
+//		}
 		return -1;
 	} else {
-		HwSampleRate = AudioCtx->sample_rate;
-//		fprintf(stderr, "AlsaSetup: SampleRate %d supported\n", AudioCtx->sample_rate);
+		HwSampleRate = sample_rate;
+//		fprintf(stderr, "AlsaSetup: SampleRate %d supported\n", sample_rate);
 	}
 
 	if (!snd_pcm_hw_params_test_access(AlsaPCMHandle, hwparams, SND_PCM_ACCESS_MMAP_INTERLEAVED)) {
@@ -984,22 +991,22 @@ static int AlsaSetup(AVCodecContext *AudioCtx, __attribute__ ((unused)) int pass
 	if ((err =
 		snd_pcm_set_params(AlsaPCMHandle, SND_PCM_FORMAT_S16,
 			AlsaUseMmap ? SND_PCM_ACCESS_MMAP_INTERLEAVED :
-			SND_PCM_ACCESS_RW_INTERLEAVED, AudioCtx->channels, AudioCtx->sample_rate, 1,
+			SND_PCM_ACCESS_RW_INTERLEAVED, channels, sample_rate, 1,
 			150000))) {
 		// try reduced buffer size (needed for sunxi)
 		// FIXME: alternativ make this configurable
 		if ((err =
 			snd_pcm_set_params(AlsaPCMHandle, SND_PCM_FORMAT_S16,
 			AlsaUseMmap ? SND_PCM_ACCESS_MMAP_INTERLEAVED :
-			SND_PCM_ACCESS_RW_INTERLEAVED, AudioCtx->channels, AudioCtx->sample_rate, 1,
+			SND_PCM_ACCESS_RW_INTERLEAVED, channels, sample_rate, 1,
 			72 * 1000))) {
 
-		Error(_("audio/alsa: set params error: %s\n"),
-			snd_strerror(err));
-		fprintf(stderr, "AlsaSetup: set params error: %s\n",
-			snd_strerror(err));
-		// FIXME: must stop sound, AudioChannels ... invalid
-		return -1;
+			Error(_("audio/alsa: set params error: %s\n"),
+				snd_strerror(err));
+			fprintf(stderr, "AlsaSetup: set params error: %s\n",
+				snd_strerror(err));
+			// FIXME: must stop sound, AudioChannels ... invalid
+			return -1;
 		}
 	}
 
@@ -1008,9 +1015,9 @@ static int AlsaSetup(AVCodecContext *AudioCtx, __attribute__ ((unused)) int pass
     snd_pcm_get_params(AlsaPCMHandle, &buffer_size, &period_size);
     Debug(3, "audio/alsa: buffer size %lu %zdms, period size %lu %zdms\n",
 		buffer_size, snd_pcm_frames_to_bytes(AlsaPCMHandle,
-		buffer_size) * 1000 / (AudioCtx->sample_rate * AudioCtx->channels * AudioBytesProSample),
+		buffer_size) * 1000 / (sample_rate * channels * AudioBytesProSample),
 		period_size, snd_pcm_frames_to_bytes(AlsaPCMHandle,
-		period_size) * 1000 / (AudioCtx->sample_rate * AudioCtx->channels * AudioBytesProSample));
+		period_size) * 1000 / (sample_rate * channels * AudioBytesProSample));
     Debug(3, "audio/alsa: state %s\n",
 		snd_pcm_state_name(snd_pcm_state(AlsaPCMHandle)));
 
@@ -1022,10 +1029,10 @@ static int AlsaSetup(AVCodecContext *AudioCtx, __attribute__ ((unused)) int pass
 		delay += VideoAudioDelay;
     }
     if (AudioStartThreshold <
-		(AudioCtx->sample_rate * AudioCtx->channels * AudioBytesProSample * delay) / 1000U) {
+		(sample_rate * channels * AudioBytesProSample * delay) / 1000U) {
 
 		AudioStartThreshold =
-			(AudioCtx->sample_rate * AudioCtx->channels * AudioBytesProSample * delay) / 1000U;
+			(sample_rate * channels * AudioBytesProSample * delay) / 1000U;
    }
     // no bigger, than 1/3 the buffer
     if (AudioStartThreshold > AudioRingBufferSize / 3) {
@@ -1033,12 +1040,12 @@ static int AlsaSetup(AVCodecContext *AudioCtx, __attribute__ ((unused)) int pass
     }
 
 	Info(_("audio/alsa: start delay %ums\n"), (AudioStartThreshold * 1000)
-		/ (AudioCtx->sample_rate * AudioCtx->channels * AudioBytesProSample));
+		/ (sample_rate * channels * AudioBytesProSample));
 
 #ifdef SOUND_DEBUG
 	printf("AlsaSetup: AudioBufferTime %d Threshold %ums\n",
 		AudioBufferTime, (AudioStartThreshold * 1000)
-		/ (AudioCtx->sample_rate * AudioCtx->channels * AudioBytesProSample));
+		/ (sample_rate * channels * AudioBytesProSample));
 
 	static snd_output_t *output = NULL;
 	err = snd_output_stdio_attach(&output, stdout, 0);
@@ -1293,7 +1300,7 @@ void AudioEnqueue(AVFrame *frame)
 **	@retval	1	error, send again
 **	@retval	0	running
 */
-int AudioFilter(AVFrame *inframe, AVCodecContext *AudioCtx)
+void AudioFilter(AVFrame *inframe, AVCodecContext *AudioCtx)
 {
 	AVFrame *outframe = NULL;
 	int err;
@@ -1304,7 +1311,14 @@ int AudioFilter(AVFrame *inframe, AVCodecContext *AudioCtx)
 	}
 
 	if (FilterInit && (AudioCtx->sample_rate != filter_graph->sink_links[0]->sample_rate ||
-		AudioCtx->channels != filter_graph->sink_links[0]->channels || Filterchanged)) {
+			Filterchanged)) {
+
+//		fprintf(stderr, "AudioFilter: FilterInit %d sink_links_count %d channels %d nb_filters %d nb_outputs %d channels %d Filterchanged %d\n",
+//			FilterInit,
+//			filter_graph->sink_links_count, filter_graph->sink_links[0]->channels,
+//			filter_graph->filters[filter_graph->nb_filters - 1]->nb_outputs,
+//			filter_graph->nb_filters, filter_graph->filters[filter_graph->nb_filters - 1]->outputs[filter_graph->filters[filter_graph->nb_filters - 1]->nb_outputs - 1]->channels,
+//			Filterchanged);
 
 		avfilter_graph_free(&filter_graph);
 		FilterInit = 0;
@@ -1314,11 +1328,12 @@ int AudioFilter(AVFrame *inframe, AVCodecContext *AudioCtx)
 	}
 
 	if (!FilterInit) {
-		if (AudioFilterInit(AudioCtx)) {
+		err = AudioFilterInit(AudioCtx);
+		if (err) {
 #ifdef DEBUG
 			fprintf(stderr, "AudioFilter: AudioFilterInit failed!\n");
 #endif
-			return 1;
+			return;
 		}
 	}
 
@@ -1363,8 +1378,6 @@ get_frame:
 */
 	if (outframe)
 		AudioEnqueue(outframe);
-
-	return 0;
 }
 
 /**
@@ -1609,6 +1622,20 @@ void AudioPause(void)
 void AudioSetBufferTime(int delay)
 {
 	AudioBufferTime = MIN_AUDIO_BUFFER + delay;
+}
+
+/**
+**	Set audio downmix.
+**
+**	@param onoff	enable/disable downmix.
+*/
+void AudioSetDownmix(int onoff)
+{
+	if (onoff == -1) {
+		AudioDownMix ^= 1;
+		return;
+	}
+	AudioDownMix = onoff;
 }
 
 /**

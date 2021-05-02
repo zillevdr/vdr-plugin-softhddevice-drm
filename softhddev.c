@@ -515,7 +515,7 @@ enum
 */
 int PlayAudio(const uint8_t * data, int size, uint8_t id)
 {
-    int n, err;
+    int n;
     const uint8_t *p;
 
 	AudioAvPkt->pts = AV_NOPTS_VALUE;
@@ -711,13 +711,9 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 			avpkt->pts = AudioAvPkt->pts;
 			avpkt->dts = AudioAvPkt->dts;
 			// FIXME: not aligned for ffmpeg
-			err = CodecAudioDecode(MyAudioDecoder, avpkt);
+			CodecAudioDecode(MyAudioDecoder, avpkt);
 			AudioAvPkt->pts = AV_NOPTS_VALUE;
 			AudioAvPkt->dts = AV_NOPTS_VALUE;
-			if (err) {
-				NewAudioStream = 1;
-				return 0;
-			}
 			p += r;
 			n -= r;
 			continue;
@@ -1476,9 +1472,7 @@ int PlayAudioPkts(AVPacket * pkt)
 //		fprintf(stderr, "PlayAudioPkts: AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE!\n");
 		return 0;
 	}
-	 if (CodecAudioDecode(MyAudioDecoder, pkt))
-		fprintf(stderr, "PlayAudioPkts: failed!\n");
-
+	CodecAudioDecode(MyAudioDecoder, pkt);
 	return 1;
 }
 

@@ -27,7 +27,7 @@
 //	Prototypes
 //----------------------------------------------------------------------------
 
-extern int AudioFilter(AVFrame *, AVCodecContext *);	///< buffer audio samples
+extern void AudioFilter(AVFrame *, AVCodecContext *);	///< buffer audio samples
 extern void AudioFlushBuffers(void);	///< flush audio buffers
 extern void AudioPoller(void);		///< poll audio events/handling		not used!
 extern int AudioFreeBytes(void);	///< free bytes in audio output
@@ -47,6 +47,7 @@ extern void AudioSetNormalize(int, int);	///< set normalize parameters
 extern void AudioSetCompression(int, int);	///< set compression parameters
 extern void AudioSetStereoDescent(int);	///< set stereo loudness descent
 extern void AudioSetEq(int[17], int);  /// Set audio equalizer.
+extern void AudioSetDownmix(int);
 
 extern void AudioSetDevice(const char *);	///< set PCM audio device
 extern void AudioSetPassthroughDevice(const char *);	/// set pass-through device

@@ -432,7 +432,7 @@ static char CodecPassthrough;
 #else
 static const int CodecPassthrough = 0;
 #endif
-static char CodecDownmix;		///< enable AC-3 decoder downmix
+
 
 /**
 **	Allocate a new audio decoder context.
@@ -480,7 +480,7 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id,
 		if (!(codec = avcodec_find_decoder_by_name("ac3_fixed"))) {
 			Fatal(_("codec: codec ac3_fixed ID %#06x not found\n"), codec_id);
 		}
-	} else if (codec_id == AV_CODEC_ID_AAC) {	// ???
+	} else if (codec_id == AV_CODEC_ID_AAC) {
 		if (!(codec = avcodec_find_decoder_by_name("aac_fixed"))) {
 			Fatal(_("codec: codec aac_fixed ID %#06x not found\n"), codec_id);
 		}
@@ -494,14 +494,6 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id,
 
 	if (!(audio_decoder->AudioCtx = avcodec_alloc_context3(codec))) {
 		Fatal(_("codec: can't allocate audio codec context\n"));
-	}
-
-	if (CodecDownmix) {
-#ifdef CODEC_DEBUG
-		fprintf(stderr, "CodecAudioOpen: CodecDownmix to AV_CH_LAYOUT_STEREO CodecDownmix %d\n",
-			CodecDownmix);
-#endif
-		audio_decoder->AudioCtx->request_channel_layout = AV_CH_LAYOUT_STEREO;
 	}
 
 	audio_decoder->AudioCtx->pkt_timebase.num = timebase->num;
@@ -520,12 +512,6 @@ void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id,
 	Debug(3, "CodecAudioOpen: Codec %s found\n", audio_decoder->AudioCtx->codec->long_name);
 	fprintf(stderr,"CodecAudioOpen: Codec %s found\n", audio_decoder->AudioCtx->codec->long_name);
 #endif
-	if (audio_decoder->AudioCtx->codec->capabilities & AV_CODEC_CAP_TRUNCATED) {
-		Debug(3, "codec: audio can use truncated packets\n");
-		fprintf(stderr, "CodecAudioOpen: audio can use truncated packets\n");
-		// we send only complete frames
-		// audio_decoder->AudioCtx->flags |= CODEC_FLAG_TRUNCATED;
-    }
 }
 
 /**
@@ -557,20 +543,6 @@ void CodecSetAudioPassthrough(int mask)
 }
 
 /**
-**	Set audio downmix.
-**
-**	@param onoff	enable/disable downmix.
-*/
-void CodecSetAudioDownmix(int onoff)
-{
-    if (onoff == -1) {
-	CodecDownmix ^= 1;
-	return;
-    }
-    CodecDownmix = onoff;
-}
-
-/**
 **	Decode an audio packet.
 **
 **	PTS must be handled self.
@@ -582,7 +554,7 @@ void CodecSetAudioDownmix(int onoff)
 **
 **	@retval	1	error, send packet again
 */
-int CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
+void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 {
 	AVFrame *frame;
 	int ret_send, ret_rec;
@@ -617,15 +589,11 @@ send:
 				frame->sample_rate);
 			audio_decoder->last_pts = frame->pts;
 		}
-
-		if (AudioFilter(frame, audio_decoder->AudioCtx))
-			return 1;
+		AudioFilter(frame, audio_decoder->AudioCtx);
 	}
 
 	if (ret_send == AVERROR(EAGAIN))
 		goto send;
-
-	return 0;
 }
 
 

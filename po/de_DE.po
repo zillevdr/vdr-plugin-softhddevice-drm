@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2021-04-14 15:50+0200\n"
+"POT-Creation-Date: 2021-05-02 11:38+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -64,10 +64,6 @@ msgid "audio/alsa: can't open mixer '%s'\n"
 msgstr ""
 
 msgid "AlsaSetup: No HwChannelMaps found! Suggest HW can handle 2 channels.\n"
-msgstr ""
-
-#, c-format
-msgid "AlsaSetup: no channel map found for %d channels, HwChannels %d > set CodecDownmix\n"
 msgstr ""
 
 #, c-format
@@ -229,8 +225,8 @@ msgstr "  Max. Kompressionsfaktor (/1000)"
 msgid "Reduce stereo volume (/1000)"
 msgstr "Reduziere Steropegel (/1000)"
 
-msgid "Enable (E-)AC-3 (decoder) downmix"
-msgstr "Aktiviere (E-)AC-3 (decoder) downmix"
+msgid "Enable Stereo downmix"
+msgstr ""
 
 msgid "Pass-through default"
 msgstr "Pass-Through-Standard"
@@ -343,6 +339,9 @@ msgstr ""
 
 msgid "VideoOsdInit: SetupFB FB OSD failed!\n"
 msgstr ""
+
+#~ msgid "Enable (E-)AC-3 (decoder) downmix"
+#~ msgstr "Aktiviere (E-)AC-3 (decoder) downmix"
 
 #~ msgid "Video"
 #~ msgstr "Video"

@@ -497,7 +497,7 @@ void cMenuSetupSoft::Create(void)
 			&AudioMaxCompression, 0, 10000));
 	Add(new cMenuEditIntItem(tr("Reduce stereo volume (/1000)"),
 		&AudioStereoDescent, 0, 1000));
-	Add(new cMenuEditBoolItem(tr("Enable (E-)AC-3 (decoder) downmix"),
+	Add(new cMenuEditBoolItem(tr("Enable Stereo downmix"),
 		&AudioDownmix, trVDR("no"), trVDR("yes")));
 	Add(new cMenuEditBoolItem(tr("Pass-through default"),
 		&AudioPassthroughDefault, trVDR("off"), trVDR("on")));
@@ -659,7 +659,7 @@ void cMenuSetupSoft::Store(void)
 	CodecSetAudioPassthrough(0);
     }
     SetupStore("AudioDownmix", ConfigAudioDownmix = AudioDownmix);
-    CodecSetAudioDownmix(ConfigAudioDownmix);
+    AudioSetDownmix(ConfigAudioDownmix);
     SetupStore("AudioSoftvol", ConfigAudioSoftvol = AudioSoftvol);
     AudioSetSoftvol(ConfigAudioSoftvol);
     SetupStore("AudioNormalize", ConfigAudioNormalize = AudioNormalize);
@@ -1281,7 +1281,7 @@ bool cPluginSoftHdDevice::SetupParse(const char *name, const char *value)
 	return true;
     }
     if (!strcasecmp(name, "AudioDownmix")) {
-	CodecSetAudioDownmix(ConfigAudioDownmix = atoi(value));
+	AudioSetDownmix(ConfigAudioDownmix = atoi(value));
 	return true;
     }
     if (!strcasecmp(name, "AudioSoftvol")) {
