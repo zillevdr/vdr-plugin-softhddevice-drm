@@ -1221,7 +1221,7 @@ int PlayVideo(const uint8_t * data, int size)
 				if (stream->CodecID == AV_CODEC_ID_H264) {
 					VideoEnqueue(stream, pts, data + i + n, size - i - n);
 				} else {
-					if (data[i + n + 4] == 0x10) {
+					if (data[i + n + 4] == 0x10 || data[i + n + 10] == 0x64) {
 						Debug(3, "video: H264 detected\n");
 						stream->CodecID = AV_CODEC_ID_H264;
 						stream->NewStream = 1;
@@ -1237,7 +1237,7 @@ int PlayVideo(const uint8_t * data, int size)
 				if (stream->CodecID == AV_CODEC_ID_HEVC) {
 					VideoEnqueue(stream, pts, data + i + n, size - i - n);
 				} else {
-					if (data[i + n + 5] == 0x10) {
+					if (data[i + n + 5] == 0x10 || data[i + n + 10] == 0x40) {
 						Debug(3, "video: hevc detected\n");
 						stream->CodecID = AV_CODEC_ID_HEVC;
 						stream->NewStream = 1;
