@@ -161,6 +161,66 @@ static int AlsaSetup(int channels, int sample_rate, int passthrough);
 //----------------------------------------------------------------------------
 
 /**
+**	Reorder audio frame.
+**
+**	ffmpeg L  R  C	Ls Rs		-> alsa L R  Ls Rs C
+**	ffmpeg L  R  C	LFE Ls Rs	-> alsa L R  Ls Rs C  LFE
+**	ffmpeg L  R  C	LFE Ls Rs Rl Rr	-> alsa L R  Ls Rs C  LFE Rl Rr
+**
+**	@param buf[IN,OUT]	sample buffer
+**	@param size		size of sample buffer in bytes
+**	@param channels		number of channels interleaved in sample buffer
+*/
+static void AudioReorderAudioFrame(int16_t * buf, int size, int channels)
+{
+	int i;
+	int c;
+	int ls;
+	int rs;
+	int lfe;
+
+	switch (channels) {
+		case 5:
+			size /= 2;
+			for (i = 0; i < size; i += 5) {
+				c = buf[i + 2];
+				ls = buf[i + 3];
+				rs = buf[i + 4];
+				buf[i + 2] = ls;
+				buf[i + 3] = rs;
+				buf[i + 4] = c;
+			}
+			break;
+		case 6:
+			size /= 2;
+			for (i = 0; i < size; i += 6) {
+				c = buf[i + 2];
+				lfe = buf[i + 3];
+				ls = buf[i + 4];
+				rs = buf[i + 5];
+				buf[i + 2] = ls;
+				buf[i + 3] = rs;
+				buf[i + 4] = c;
+				buf[i + 5] = lfe;
+			}
+			break;
+		case 8:
+			size /= 2;
+			for (i = 0; i < size; i += 8) {
+				c = buf[i + 2];
+				lfe = buf[i + 3];
+				ls = buf[i + 4];
+				rs = buf[i + 5];
+				buf[i + 2] = ls;
+				buf[i + 3] = rs;
+				buf[i + 4] = c;
+				buf[i + 5] = lfe;
+			}
+			break;
+	}
+}
+
+/**
 **	Audio normalizer.
 **
 **	@param samples	sample buffer
@@ -1154,6 +1214,8 @@ void AudioEnqueue(AVFrame *frame)
 	if (AudioNormalize) {		// in place operation
 		AudioNormalizer(buffer, count);
 	}
+
+	AudioReorderAudioFrame(buffer, count, frame->channels);
 
 	pthread_mutex_lock(&AudioRbMutex);
 	n = RingBufferWrite(AudioRingBuffer, buffer, count);
