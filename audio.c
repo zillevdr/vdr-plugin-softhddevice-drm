@@ -975,8 +975,6 @@ static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int
 	}
 	if ((int)HwChannels != channels) {
 		AudioDownMix = 1;
-		fprintf(stderr, "AlsaSetup: channels %d HwChannels %d\n",
-			channels, HwChannels);
 	}
 
 	if ((err = snd_pcm_hw_params_set_buffer_time_near(AlsaPCMHandle, hwparams, &buffer_time, NULL)) < 0) {
@@ -1023,19 +1021,23 @@ static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int
 		AudioStartThreshold = AudioRingBufferSize / 3;
 	}
 
-	Info(_("AlsaSetup: Channels %d SampleRate %d SampleFormat %s\n"
+	Info(_("AlsaSetup: Channels %d SampleRate %d\n"
+		"           HWChannels %d HWSampleRate %d SampleFormat %s\n"
 		"           Supports pause: %s mmap: %s\n"
 		"           AlsaBufferTime %dms AudioBufferTime %dms Threshold %ums\n"),
-		HwChannels, HwSampleRate, snd_pcm_format_name(SND_PCM_FORMAT_S16),
+		channels, sample_rate, HwChannels, HwSampleRate,
+		snd_pcm_format_name(SND_PCM_FORMAT_S16),
 		AlsaCanPause ? "yes" : "no", AlsaUseMmap ? "yes" : "no",
 		buffer_time / 1000, AudioBufferTime, (AudioStartThreshold * 1000) /
 		(HwSampleRate * HwChannels * AudioBytesProSample));
 
 #ifdef SOUND_DEBUG
-	printf("AlsaSetup: Channels %d SampleRate %d SampleFormat %s\n"
+	printf("AlsaSetup: Channels %d SampleRate %d\n"
+		"           HWChannels %d HWSampleRate %d SampleFormat %s\n"
 		"           Supports pause: %s mmap: %s\n"
 		"           AlsaBufferTime %dms AudioBufferTime %dms Threshold %ums\n",
-		HwChannels, HwSampleRate, snd_pcm_format_name(SND_PCM_FORMAT_S16),
+		channels, sample_rate, HwChannels, HwSampleRate,
+		snd_pcm_format_name(SND_PCM_FORMAT_S16),
 		AlsaCanPause ? "yes" : "no", AlsaUseMmap ? "yes" : "no",
 		buffer_time / 1000, AudioBufferTime, (AudioStartThreshold * 1000) /
 		(HwSampleRate * HwChannels * AudioBytesProSample));
