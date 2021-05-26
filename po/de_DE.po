@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: VDR \n"
 "Report-Msgid-Bugs-To: <see README>\n"
-"POT-Creation-Date: 2021-05-02 11:38+0200\n"
+"POT-Creation-Date: 2021-05-26 15:10+0200\n"
 "PO-Revision-Date: blabla\n"
 "Last-Translator: blabla\n"
 "Language-Team: blabla\n"
@@ -52,18 +52,7 @@ msgid "audio/alsa: can't set block mode: %s\n"
 msgstr ""
 
 #, c-format
-msgid "audio: snd_pcm_hw_params_any: no configurations available: %s\n"
-msgstr ""
-
-#, c-format
-msgid "audio/alsa: supports pause: %s\n"
-msgstr ""
-
-#, c-format
 msgid "audio/alsa: can't open mixer '%s'\n"
-msgstr ""
-
-msgid "AlsaSetup: No HwChannelMaps found! Suggest HW can handle 2 channels.\n"
 msgstr ""
 
 #, c-format
@@ -71,7 +60,10 @@ msgid "audio/alsa: set params error: %s\n"
 msgstr ""
 
 #, c-format
-msgid "audio/alsa: start delay %ums\n"
+msgid ""
+"AlsaSetup: Channels %d SampleRate %d SampleFormat %s\n"
+"           Supports pause: %s mmap: %s\n"
+"           AlsaBufferTime %dms AudioBufferTime %dms Threshold %ums\n"
 msgstr ""
 
 msgid "audio: can't cancel play thread\n"
@@ -90,9 +82,6 @@ msgstr ""
 
 #, c-format
 msgid "AudioPause: snd_pcm_pause(): %s\n"
-msgstr ""
-
-msgid "AudioInit: No HwChannelMaps found!\n"
 msgstr ""
 
 msgid "codec: can't allocate vodeo decoder\n"

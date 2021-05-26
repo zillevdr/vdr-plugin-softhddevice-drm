@@ -485,26 +485,6 @@ static int AdtsCheck(const uint8_t * data, int size)
 //	PES Demux
 //////////////////////////////////////////////////////////////////////////////
 
-///
-///	PES type.
-///
-enum
-{
-    PES_PROG_STREAM_MAP = 0xBC,
-    PES_PRIVATE_STREAM1 = 0xBD,
-    PES_PADDING_STREAM = 0xBE,		///< filler, padding stream
-    PES_PRIVATE_STREAM2 = 0xBF,
-    PES_AUDIO_STREAM_S = 0xC0,
-    PES_AUDIO_STREAM_E = 0xDF,
-    PES_VIDEO_STREAM_S = 0xE0,
-    PES_VIDEO_STREAM_E = 0xEF,
-    PES_ECM_STREAM = 0xF0,
-    PES_EMM_STREAM = 0xF1,
-    PES_DSM_CC_STREAM = 0xF2,
-    PES_ISO13522_STREAM = 0xF3,
-    PES_TYPE_E_STREAM = 0xF8,		///< ITU-T rec. h.222.1 type E stream
-    PES_PROG_STREAM_DIR = 0xFF,
-};
 
 /**
 **	Play audio packet.
@@ -842,7 +822,7 @@ void ParseResolutionH264(int *width, int *height)
 	m_pStart = NULL;
 	int i;
 
-	while (!VideoGetPackets(MyVideoStream)) {
+	while (!VideoGetPackets()) {
 		usleep(10000);
 	}
 
@@ -859,7 +839,7 @@ void ParseResolutionH264(int *width, int *height)
 	}
 	if (!m_pStart) {
 		fprintf(stderr, "ParseResolutionH264: No m_pStart %p Pkt %p Packets %d i %d\n",
-			m_pStart, avpkt, VideoGetPackets(MyVideoStream), i);
+			m_pStart, avpkt, VideoGetPackets(), i);
 		PrintStreamData(avpkt->data, avpkt->size);
 		return;
 	}
@@ -1145,9 +1125,9 @@ int VideoDecodeInput(VideoStream * stream)
 **
 **	@param stream	video stream
 */
-int VideoGetPackets(const VideoStream * stream)
+int VideoGetPackets(void)
 {
-    return atomic_read(&stream->PacketsFilled);
+    return atomic_read(&MyVideoStream->PacketsFilled);
 }
 
 /**

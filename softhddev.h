@@ -58,7 +58,7 @@ extern "C"
     /// Decode video input buffers.
     extern int VideoDecodeInput(VideoStream *);
     /// Get number of input buffers.
-    extern int VideoGetPackets(const VideoStream *);
+    extern int VideoGetPackets(void);
     /// C plugin grab an image
     extern uint8_t *GrabImage(int *, int, int, int, int);
 
