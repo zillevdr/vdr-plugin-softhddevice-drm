@@ -196,12 +196,14 @@ static void AudioReorderAudioFrame(int16_t * buf, int size, int channels)
 			for (i = 0; i < size; i += 6) {
 				c = buf[i + 2];
 				lfe = buf[i + 3];
-				ls = buf[i + 4];
-				rs = buf[i + 5];
-				buf[i + 2] = ls;
-				buf[i + 3] = rs;
-				buf[i + 4] = c;
-				buf[i + 5] = lfe;
+//				ls = buf[i + 4];	tested from jsffm
+//				rs = buf[i + 5];
+//				buf[i + 2] = ls;
+//				buf[i + 3] = rs;
+				buf[i + 2] = lfe;
+				buf[i + 3] = c;
+//				buf[i + 4] = c;
+//				buf[i + 5] = lfe;
 			}
 			break;
 		case 8:
