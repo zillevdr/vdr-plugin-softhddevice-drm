@@ -324,6 +324,7 @@ void ReadHWPlatform(VideoRender * render)
 
 	txt_buf = (char *) calloc(bufsize, sizeof(char));
 	render->CodecMode = 0;
+	render->NoHwDeint = 0;
 
 	read_size = ReadLineFromFile(txt_buf, bufsize, "/sys/firmware/devicetree/base/compatible");
 	if (!read_size) {
@@ -334,15 +335,6 @@ void ReadHWPlatform(VideoRender * render)
 	read_ptr = txt_buf;
 
 	while(read_size) {
-
-		if (strstr(read_ptr, "rockchip")) {
-#ifdef DEBUG
-			printf("ReadHWPlatform: rockchip with mainline kernel found\n");
-#endif
-			render->CodecMode = 2;	// no mpeg HW
-			render->NoHwDeint = 1;
-			break;
-		}
 
 		if (strstr(read_ptr, "bcm2711")) {
 #ifdef DEBUG
