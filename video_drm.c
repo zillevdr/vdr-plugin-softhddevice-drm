@@ -560,12 +560,12 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 	struct drm_mode_create_dumb creq;
 	uint64_t modifier[4] = { 0, 0, 0, 0 };
 	uint32_t mod_flags = 0;
+	buf->handle[0] = buf->handle[1] = buf->handle[2] = buf->handle[3] = 0;
+	buf->pitch[0] = buf->pitch[1] = buf->pitch[2] = buf->pitch[3] = 0;
+	buf->offset[0] = buf->offset[1] = buf->offset[2] = buf->offset[3] = 0;
 
 	if (primedata) {
 		uint32_t prime_handle;
-		buf->handle[0] = buf->handle[1] = buf->handle[2] = buf->handle[3] = 0;
-		buf->pitch[0] = buf->pitch[1] = buf->pitch[2] = buf->pitch[3] = 0;
-		buf->offset[0] = buf->offset[1] = buf->offset[2] = buf->offset[3] = 0;
 
 		buf->pix_fmt = primedata->layers[0].format;
 
@@ -612,7 +612,6 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 		}
 
 		buf->size = creq.size;
-		buf->handle[2] = buf->handle[1] = buf->handle[0] = creq.handle;
 
 		if (buf->pix_fmt == DRM_FORMAT_YUV420) {
 			buf->pitch[0] = buf->width;
@@ -621,6 +620,7 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 			buf->offset[0] = 0;
 			buf->offset[1] = buf->pitch[0] * buf->height;
 			buf->offset[2] = buf->offset[1] + buf->pitch[1] * buf->height / 2;
+			buf->handle[2] = buf->handle[1] = buf->handle[0] = creq.handle;
 		}
 
 		if (buf->pix_fmt == DRM_FORMAT_NV12) {
@@ -628,12 +628,14 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 
 			buf->offset[0] = 0;
 			buf->offset[1] = buf->pitch[0] * buf->height;
+			buf->handle[1] = buf->handle[0] = creq.handle;
 		}
 
 		if (buf->pix_fmt == DRM_FORMAT_ARGB8888) {
 			buf->pitch[0] = creq.pitch;
 
 			buf->offset[0] = 0;
+			buf->handle[0] = creq.handle;
 		}
 	}
 
