@@ -944,10 +944,11 @@ static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int
 
 	AudioDownMix = 0;
 
-	if (!AlsaPCMHandle) {		// alsa not running yet
-		// FIXME: if open fails for fe. pass-through, we never recover
-		fprintf(stderr, "AlsaSetup: No AlsaPCMHandle found!!!\n");
-		return -1;
+	if (AudioRunning) {
+#ifdef SOUND_DEBUG
+		fprintf(stderr, "AlsaSetup: Audio is Running => AudioFlushBuffers\n");
+#endif
+		AudioFlushBuffers();
 	}
 	snd_pcm_hw_params_alloca(&hwparams);
 	if ((err = snd_pcm_hw_params_any(AlsaPCMHandle, hwparams)) < 0) {
@@ -1327,7 +1328,9 @@ in:
 		} else {
 			Filterchanged = 1;
 			err_count++;
+#ifdef DEBUG
 			fprintf(stderr, "AudioFilter: Filterchanged %d  err_count %d\n", Filterchanged, err_count);
+#endif
 			goto in;
 		}
 	}
