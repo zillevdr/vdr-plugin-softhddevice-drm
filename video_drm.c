@@ -773,7 +773,7 @@ dequeue:
 static void Frame2Display(VideoRender * render)
 {
 	struct drm_buf *buf = 0;
-	AVFrame *frame;
+	AVFrame *frame = NULL;
 	AVDRMFrameDescriptor *primedata = NULL;
 	int64_t audio_pts;
 	int64_t video_pts;
