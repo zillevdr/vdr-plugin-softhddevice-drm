@@ -391,7 +391,7 @@ static int FindDevice(VideoRender * render)
 
 	render->fd_drm = open("/dev/dri/card0", O_RDWR);
 	if (render->fd_drm < 0) {
-		fprintf(stderr, "FindDevice: cannot open /dev/dri/card0: %m\n");
+		fprintf(stderr, "FindDevice: cannot open /dev/dri/card0!\n");
 		return -errno;
 	}
 
@@ -400,18 +400,18 @@ static int FindDevice(VideoRender * render)
 
 		render->fd_drm = open("/dev/dri/card1", O_RDWR);
 		if (render->fd_drm < 0) {
-			fprintf(stderr, "FindDevice: cannot open /dev/dri/card1: %m\n");
+			fprintf(stderr, "FindDevice: cannot open /dev/dri/card1!\n");
 			return -errno;
 		}
 
 		if (TestCaps(render->fd_drm)) {
-			return -1;
 			fprintf(stderr, "FindDevice: No DRM device available!\n");
+			return -1;
 		}
 	}
 
 	if ((resources = drmModeGetResources(render->fd_drm)) == NULL){
-		fprintf(stderr, "FindDevice: cannot retrieve DRM resources (%d): %m\n",	errno);
+		fprintf(stderr, "FindDevice: cannot retrieve DRM resources (%d): %m\n", errno);
 		return -errno;
 	}
 
