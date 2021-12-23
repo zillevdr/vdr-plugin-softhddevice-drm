@@ -1418,14 +1418,19 @@ int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 		video_ctx->sample_aspect_ratio.num, video_ctx->sample_aspect_ratio.den);
 
 	if (avfilter_graph_create_filter(&render->buffersrc_ctx, buffersrc, "src",
-		args, NULL, render->filter_graph) < 0)
-			fprintf(stderr, "VideoFilterInit: Cannot create buffer source\n");
+		args, NULL, render->filter_graph) < 0) {
+		fprintf(stderr, "VideoFilterInit: Cannot create buffer source\n");
+		goto fail;
+	}
 
 	AVBufferSrcParameters *par = av_buffersrc_parameters_alloc();
 	par->format = AV_PIX_FMT_NONE;
 	par->hw_frames_ctx = frame->hw_frames_ctx;
-	if (av_buffersrc_parameters_set(render->buffersrc_ctx, par) < 0)
+	if (av_buffersrc_parameters_set(render->buffersrc_ctx, par) < 0) {
 		fprintf(stderr, "VideoFilterInit: Cannot av_buffersrc_parameters_set\n");
+		goto fail;
+	}
+
 	av_free(par);
 
 	if (avfilter_graph_create_filter(&render->buffersink_ctx, buffersink, "out",
