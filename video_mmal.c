@@ -212,7 +212,7 @@ static void deint_output_port_cb(MMAL_PORT_T *port,
 		if (buffer->length > 0) {
 			buffer->user_data = NULL;
 			// Correct PTS MMAL use microseconds
-			buffer->pts = buffer->pts / av_q2d(render->timebase);
+			buffer->pts = buffer->pts / av_q2d(*render->timebase);
 			mmal_queue_put(render->vout_queue, buffer);
             render->buffers_deint_out--;
 			render->buffers_in_queue++;
@@ -886,7 +886,7 @@ void VideoRenderFrame(VideoRender * render,
 		render->buffers++;
 	} else {
 		// MMAL use microseconds
-		qbuffer->pts = buffer->pts * av_q2d(render->timebase);
+		qbuffer->pts = buffer->pts * av_q2d(*render->timebase);
 		mmal_port_send_buffer(render->deint->input[0], qbuffer);
 		render->buffers++;
 		render->buffers++;
