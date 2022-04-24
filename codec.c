@@ -545,14 +545,8 @@ void CodecSetAudioPassthrough(int mask)
 /**
 **	Decode an audio packet.
 **
-**	PTS must be handled self.
-**
-**	@note the caller has not aligned avpkt and not cleared the end.
-**
 **	@param audio_decoder	audio decoder data
 **	@param avpkt		audio packet
-**
-**	@retval	1	error, send packet again
 */
 void CodecAudioDecode(AudioDecoder * audio_decoder, const AVPacket * avpkt)
 {

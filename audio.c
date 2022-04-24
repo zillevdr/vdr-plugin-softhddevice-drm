@@ -997,11 +997,20 @@ static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int
 		SND_PCM_ACCESS_RW_INTERLEAVED, HwChannels, HwSampleRate, 1,
 		buffer_time))) {
 
-		Error(_("audio/alsa: set params error: %s\n"),
-			snd_strerror(err));
+		printf("AlsaSetup: Channels %d SampleRate %d\n"
+			"           HWChannels %d HWSampleRate %d SampleFormat %s\n"
+			"           Supports pause: %s mmap: %s\n"
+			"           AlsaBufferTime %dms\n",
+			channels, sample_rate, HwChannels, HwSampleRate,
+			snd_pcm_format_name(SND_PCM_FORMAT_S16),
+			AlsaCanPause ? "yes" : "no", AlsaUseMmap ? "yes" : "no",
+			buffer_time);
+
 		fprintf(stderr, "AlsaSetup: set params error: %s\n",
 			snd_strerror(err));
-		return -1;
+
+		Fatal(_("audio/alsa: set params error: %s\n"),
+			snd_strerror(err));
 	}
 
 	// update buffer
