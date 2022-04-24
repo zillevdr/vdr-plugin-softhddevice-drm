@@ -997,14 +997,15 @@ static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int
 		SND_PCM_ACCESS_RW_INTERLEAVED, HwChannels, HwSampleRate, 1,
 		buffer_time))) {
 
+		snd_pcm_state_t state = snd_pcm_state(AlsaPCMHandle);
 		printf("AlsaSetup: Channels %d SampleRate %d\n"
 			"           HWChannels %d HWSampleRate %d SampleFormat %s\n"
 			"           Supports pause: %s mmap: %s\n"
-			"           AlsaBufferTime %dms\n",
+			"           AlsaBufferTime %dms pcm state: %s\n",
 			channels, sample_rate, HwChannels, HwSampleRate,
 			snd_pcm_format_name(SND_PCM_FORMAT_S16),
 			AlsaCanPause ? "yes" : "no", AlsaUseMmap ? "yes" : "no",
-			buffer_time);
+			buffer_time, snd_pcm_state_name(state));
 
 		fprintf(stderr, "AlsaSetup: set params error: %s\n",
 			snd_strerror(err));
