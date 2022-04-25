@@ -651,6 +651,22 @@ static void AudioRingExit(void)
 //----------------------------------------------------------------------------
 
 /**
+**   xrun recovery
+**/
+static void xrun_recovery(void)
+{
+	int err;
+	snd_pcm_state_t state;
+
+	err = snd_pcm_prepare(AlsaPCMHandle);
+	if (err < 0) {
+		state = snd_pcm_state(AlsaPCMHandle);
+		Error(_("audio/alsa: Can't recovery from xrun: %s pcm state: %s\n"),
+			snd_strerror(err), snd_pcm_state_name(state));
+	}
+}
+
+/**
 **	Flush alsa buffers.
 */
 static void AlsaFlushBuffers(void)
@@ -663,7 +679,6 @@ static void AlsaFlushBuffers(void)
 #endif
 
 	state = snd_pcm_state(AlsaPCMHandle);
-	Debug(3, "audio/alsa: flush state %s\n", snd_pcm_state_name(state));
 	if (state != SND_PCM_STATE_OPEN) {
 		if ((err = snd_pcm_drop(AlsaPCMHandle)) < 0) {
 			Error(_("audio: snd_pcm_drop(): %s\n"), snd_strerror(err));
@@ -675,6 +690,8 @@ static void AlsaFlushBuffers(void)
 			fprintf(stderr, "AlsaFlushBuffers: snd_pcm_prepare(): %s\n",
 				snd_strerror(err));
 		}
+	state = snd_pcm_state(AlsaPCMHandle);
+	Debug(3, "audio/AlsaFlushBuffers: pcm state %s\n", snd_pcm_state_name(state));
 	}
 
 	RingBufferReset(AudioRingBuffer);
@@ -938,6 +955,7 @@ static void AlsaInitMixer(void)
 static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int passthrough)
 {
 	snd_pcm_hw_params_t *hwparams;
+	snd_pcm_state_t state;
 	int err;
 	int delay;
 	unsigned buffer_time = 100000;	// 100ms
@@ -950,6 +968,14 @@ static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int
 #endif
 		AudioFlushBuffers();
 	}
+
+	state = snd_pcm_state(AlsaPCMHandle);
+	if (state == SND_PCM_STATE_XRUN) {
+		Error(_("audio/AlsaSetup: recover from xrun pcm state: %s\n"),
+			snd_pcm_state_name(state));
+		xrun_recovery();
+	}
+
 	snd_pcm_hw_params_alloca(&hwparams);
 	if ((err = snd_pcm_hw_params_any(AlsaPCMHandle, hwparams)) < 0) {
 		fprintf(stderr, "AlsaSetup: Read HW config failed! %s\n", snd_strerror(err));
@@ -997,21 +1023,16 @@ static int AlsaSetup(int channels, int sample_rate, __attribute__ ((unused)) int
 		SND_PCM_ACCESS_RW_INTERLEAVED, HwChannels, HwSampleRate, 1,
 		buffer_time))) {
 
-		snd_pcm_state_t state = snd_pcm_state(AlsaPCMHandle);
-		printf("AlsaSetup: Channels %d SampleRate %d\n"
+		state = snd_pcm_state(AlsaPCMHandle);
+		Fatal(_("audio/alsa: set params error: %s\n"
+			"AlsaSetup: Channels %d SampleRate %d\n"
 			"           HWChannels %d HWSampleRate %d SampleFormat %s\n"
 			"           Supports pause: %s mmap: %s\n"
-			"           AlsaBufferTime %dms pcm state: %s\n",
-			channels, sample_rate, HwChannels, HwSampleRate,
-			snd_pcm_format_name(SND_PCM_FORMAT_S16),
+			"           AlsaBufferTime %dms pcm state: %s\n"),
+			snd_strerror(err), channels, sample_rate, HwChannels,
+			HwSampleRate, snd_pcm_format_name(SND_PCM_FORMAT_S16),
 			AlsaCanPause ? "yes" : "no", AlsaUseMmap ? "yes" : "no",
 			buffer_time, snd_pcm_state_name(state));
-
-		fprintf(stderr, "AlsaSetup: set params error: %s\n",
-			snd_strerror(err));
-
-		Fatal(_("audio/alsa: set params error: %s\n"),
-			snd_strerror(err));
 	}
 
 	// update buffer
