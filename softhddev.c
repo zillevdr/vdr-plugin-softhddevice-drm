@@ -1320,6 +1320,7 @@ void StillPicture(const uint8_t * data, int size)
 	}
 	atomic_inc(&MyVideoStream->PacketsFilled);
 
+	StreamFreezed = 1;
 	CodecVideoOpen(MyVideoStream->Decoder, codec, NULL, NULL);
 	VideoSetTrickSpeed(MyVideoStream->Render, 1);
 
@@ -1331,10 +1332,10 @@ send:
 #ifdef STILL_DEBUG
 	else fprintf(stderr, "StillPicture: Received Frame\n");
 #endif
-	CodecVideoFlushBuffers(MyVideoStream->Decoder);
 	CodecVideoClose(MyVideoStream->Decoder);
 	ClearVideo(MyVideoStream);
 	MyVideoStream->CodecID = AV_CODEC_ID_NONE;
+	StreamFreezed = 0;
 
 	usleep(100000);
 	VideoSetTrickSpeed(MyVideoStream->Render, 0);
