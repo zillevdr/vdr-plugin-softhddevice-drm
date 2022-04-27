@@ -92,6 +92,11 @@ static enum AVPixelFormat Codec_get_format(AVCodecContext * video_ctx,
 	return Video_get_format(decoder->Render, video_ctx, fmt);
 }
 
+AVCodecContext *Codec_get_VideoContext(VideoDecoder * decoder)
+{
+	return decoder->VideoCtx;
+}
+
 //----------------------------------------------------------------------------
 //	Test
 //----------------------------------------------------------------------------

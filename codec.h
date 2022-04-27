@@ -58,6 +58,9 @@ extern VideoDecoder *CodecVideoNewDecoder(VideoRender *);
     /// Deallocate a video decoder context.
 extern void CodecVideoDelDecoder(VideoDecoder *);
 
+	/// Get VideoContext
+extern  AVCodecContext *Codec_get_VideoContext(VideoDecoder *);
+
     /// Open video codec.
 extern void CodecVideoOpen(VideoDecoder *, int, AVCodecParameters *, AVRational *);
 
