@@ -212,7 +212,7 @@ static void deint_output_port_cb(MMAL_PORT_T *port,
 		if (buffer->length > 0) {
 			buffer->user_data = NULL;
 			// Correct PTS MMAL use microseconds
-			buffer->pts = buffer->pts / av_q2d(*render->timebase);
+			buffer->pts = buffer->pts / av_q2d(*render->timebase) / 1000000;
 			mmal_queue_put(render->vout_queue, buffer);
             render->buffers_deint_out--;
 			render->buffers_in_queue++;
@@ -522,7 +522,7 @@ dequeue:
 	}
 
 
-	if(diff > 35 && render->FrameCounter % 2 == 0 && !render->TrickSpeed){
+	if(diff > 35 && !render->TrickSpeed){
 		render->FramesDuped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDuped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
@@ -540,7 +540,7 @@ dupe:
 		render->buffers++;
 		buffer = rbuffer;
 	}
-	if (diff < -5 && render->buffers_in_queue > 1 && !render->TrickSpeed) {
+	if (diff < -5 && render->buffers_in_queue && !render->TrickSpeed) {
 		render->FramesDropped++;
 #ifdef AV_SYNC_DEBUG
 		fprintf(stderr, "FrameDropped Pkts %d deint %d Frames %d AudioUsedBytes %d audio %s video %s Delay %dms diff %dms\n",
@@ -886,7 +886,7 @@ void VideoRenderFrame(VideoRender * render,
 		render->buffers++;
 	} else {
 		// MMAL use microseconds
-		qbuffer->pts = buffer->pts * av_q2d(*render->timebase);
+		qbuffer->pts = buffer->pts * av_q2d(*render->timebase) * 1000000;
 		mmal_port_send_buffer(render->deint->input[0], qbuffer);
 		render->buffers++;
 		render->buffers++;
