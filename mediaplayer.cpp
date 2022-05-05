@@ -21,6 +21,7 @@
 //////////////////////////////////////////////////////////////////////////////
 
 #include <cstdlib>
+#include <sys/stat.h>
 
 #include <string>
 using std::string;
@@ -559,19 +560,28 @@ void cSoftHdMenu::FindFile(string SearchPath, FILE *playlist)
 	if ((n = scandir(sp, &DirList, NULL, alphasort)) == -1) {
 		fprintf(stderr, "FindFile: scanning directory %s failed (%d): %m\n", sp, errno);
 	} else {
+		struct stat fileAttributs;
 		for (i = 0; i < n; i++) {
-			if (DirList[i]->d_type == DT_DIR && DirList[i]->d_name[0] != '.') {
+			string str = SearchPath + "/" + DirList[i]->d_name;
+			if (stat(str.c_str(), &fileAttributs) == -1) {
+				fprintf(stderr, "FindFile: stat on %s failed (%d): %m\n", str.c_str(), errno);
+			} else {
+			if (S_ISDIR(fileAttributs.st_mode) && DirList[i]->d_name[0] != '.') {
 				if (playlist) {
-					string str = SearchPath + "/" + DirList[i]->d_name;
 					FindFile(str.c_str(), playlist);
 				} else {
 					Add(new cOsdItem(DirList[i]->d_name),
 						!LastItem.compare(0, LastItem.length(), DirList[i]->d_name));
 				}
 			}
+			}
 		}
 		for (i = 0; i < n; i++) {
-			if (DirList[i]->d_type == DT_REG && DirList[i]->d_name[0] != '.') {
+			string str = SearchPath + "/" + DirList[i]->d_name;
+			if (stat(str.c_str(), &fileAttributs) == -1) {
+				fprintf(stderr, "FindFile: stat on %s failed (%d): %m\n", str.c_str(), errno);
+			} else {
+			if (S_ISREG(fileAttributs.st_mode) && DirList[i]->d_name[0] != '.') {
 				if (playlist) {
 					if (TestMedia(DirList[i]->d_name))
 						fprintf(playlist, "%s/%s\n", SearchPath.c_str(),
@@ -579,6 +589,7 @@ void cSoftHdMenu::FindFile(string SearchPath, FILE *playlist)
 				} else {
 					Add(new cOsdItem(DirList[i]->d_name));
 				}
+			}
 			}
 		}
 	}
@@ -666,9 +677,9 @@ eOSState cSoftHdMenu::ProcessKey(eKeys key)
 				return osEnd;
 			} else {
 				string NewPath = Path + "/" + item->Text();
-				Path = NewPath;
 				struct stat sb;
 				if (stat(NewPath.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
+					Path = NewPath;
 					FindFile(NewPath.c_str(), NULL);
 				}
 			}
