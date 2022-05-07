@@ -67,6 +67,9 @@
 //----------------------------------------------------------------------------
 int VideoAudioDelay;
 
+static pthread_cond_t PauseCondition;
+static pthread_mutex_t PauseMutex;
+
 static pthread_t VideoThread;		///< video decode thread
 
 //----------------------------------------------------------------------------
@@ -83,6 +86,7 @@ struct _Mmal_Render_
     int TrickSpeed;			///< current trick speed
     int TrickCounter;			///< current trick speed counter
     VideoStream *Stream;		///< video stream
+	int VideoPaused;
     int Closing;			///< flag about closing current stream
 
     int StartCounter;			///< counter for video start
@@ -709,6 +713,12 @@ static void *DisplayHandlerThread(void *arg)
 	for (;;) {
 		pthread_testcancel();
 
+		if (render->VideoPaused) {
+			pthread_mutex_lock(&PauseMutex);
+			pthread_cond_wait(&PauseCondition, &PauseMutex);
+			pthread_mutex_unlock(&PauseMutex);
+		}
+
 		if (render->buffers < 7) {
 			if (VideoDecodeInput(render->Stream))
 				usleep(10000);
@@ -741,6 +751,9 @@ void VideoThreadExit(void)
 		}
 		VideoThread = 0;
 	}
+
+	pthread_cond_destroy(&PauseCondition);
+	pthread_mutex_destroy(&PauseMutex);
 }
 
 ///
@@ -753,6 +766,9 @@ void VideoThreadWakeup(VideoRender * render)
 	render->Closing = 0;
 
 	if (!VideoThread) {
+		pthread_cond_init(&PauseCondition,NULL);
+		pthread_mutex_init(&PauseMutex, NULL);
+
 		pthread_create(&VideoThread, NULL, DisplayHandlerThread, render);
 		pthread_setname_np(VideoThread, "softhddev video");
 	}
@@ -780,6 +796,7 @@ VideoRender *VideoNewRender(VideoStream * stream)
 
 	render->Closing = 0;
 	render->Stream = stream;
+	render->VideoPaused = 0;
 
 	return render;
 }
@@ -907,6 +924,22 @@ int64_t VideoGetClock(const VideoRender * render)
 }
 
 ///
+///	send start condition to video thread.
+///
+///	@param hw_render	video hardware render
+///
+void StartVideo(VideoRender * render)
+{
+	render->VideoPaused = 0;
+	render->StartCounter = 0;
+#ifdef DEBUG
+	fprintf(stderr, "StartVideo: reset PauseCondition StartCounter %d Closing %d TrickSpeed %d\n",
+		render->StartCounter, render->Closing, render->TrickSpeed);
+#endif
+	pthread_cond_signal(&PauseCondition);
+}
+
+///
 ///	Set closing stream flag.
 ///
 ///	@param hw_render	video hardware render
@@ -914,6 +947,10 @@ int64_t VideoGetClock(const VideoRender * render)
 void VideoSetClosing(VideoRender * render)
 {
 	render->Closing = 1;
+
+	if (render->VideoPaused) {
+		StartVideo(render);
+	}
 
 	render->StartCounter = 0;
 	render->FramesDuped = 0;
@@ -928,6 +965,7 @@ void VideoPause( __attribute__ ((unused)) VideoRender * render)
 #ifdef DEBUG
 	fprintf(stderr, "VideoPause:\n");
 #endif
+	render->VideoPaused = 1;
 }
 
 ///
@@ -944,6 +982,9 @@ void VideoSetTrickSpeed(VideoRender * render, int speed)
 	if (speed) {
 		render->Closing = 0;
 	}
+	if (render->VideoPaused) {
+		StartVideo(render);
+	}
 }
 
 /**
@@ -958,7 +999,7 @@ void VideoPlay(VideoRender * render)
 		render->TrickSpeed = 0;
 	}
 
-	VideoThreadWakeup(render);
+	StartVideo(render);
 }
 
 ///

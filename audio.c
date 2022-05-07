@@ -1574,7 +1574,6 @@ void AudioPlay(void)
 #ifdef DEBUG
 		fprintf(stderr, "AudioPlay: not paused, check the code\n");
 #endif
-//		return;
 	}
 	Debug(3, "AudioPlay: resumed\n");
 	if (AlsaCanPause) {
@@ -1584,7 +1583,6 @@ void AudioPlay(void)
 	} else {
 		AudioPaused = 0;
 		if (AudioStartThreshold < RingBufferUsedBytes(AudioRingBuffer)) {
-			fprintf(stderr, "AudioPlay: AudioStartThreshold < RingBufferUsedBytes, start play\n");
 			pthread_cond_signal(&AudioStartCond);
 		}
 	}
