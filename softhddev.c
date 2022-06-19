@@ -1150,18 +1150,12 @@ int PlayVideo(const uint8_t * data, int size)
 	int64_t pts = AV_NOPTS_VALUE;
 	int i, n;
 
-//	fprintf(stderr, "[PlayVideo] size %d\n", size);
-
 	if (StreamFreezed) {
 		return 0;
 	}
 
 	// must be a PES video start code
 	if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01 || data[3] >> 4 != 0x0e) {
-#ifdef DEBUG
-		fprintf(stderr, "PlayVideo: No PES video start code!!! %02x %02x %02x %02x\n",
-			data[0], data[1], data[2], data[3]);
-#endif
 		return size;
 	}
 
@@ -1176,70 +1170,47 @@ int PlayVideo(const uint8_t * data, int size)
 			0xFE) << 14 | data[12] << 7 | (data[13] & 0xFE) >> 1;
 	}
 
-	n = 9 + data[8];	// PES header size
+	n = PesHeadLength(data);	// PES header size
 	for (i = 0; (i < 2) && (i + 4 < size); i++) {
 		// ES start code 0x00 0x00 0x01
 		if (!data[i + n] && !data[i + n + 1] && data[i + n + 2] == 0x01) {
-			// AV_CODEC_ID_MPEG2VIDEO 0x00 0x00 0x01 0x00 || 0xb3
-			if (data[i + n + 3] == 0xb3 || !data[i + n + 3]) {
-				if (stream->CodecID == AV_CODEC_ID_MPEG2VIDEO) {
-					VideoEnqueue(stream, pts, data + i + n, size - i - n);
-				} else {
-					if (data[i + n + 3] == 0xb3) {
-						Debug(3, "video: mpeg2 detected\n");
-						stream->CodecID = AV_CODEC_ID_MPEG2VIDEO;
-						stream->NewStream = 1;
-						stream->timebase.den = 90000;
-						stream->timebase.num = 1;
-						VideoEnqueue(stream, pts, data + i + n, size - i - n);
-					}
+			if (stream->CodecID == AV_CODEC_ID_NONE) {
+				// MPEG2 I-Frame
+				if (data[i + n + 3] == 0xb3) {
+					Debug(3, "video: mpeg2 detected\n");
+					stream->CodecID = AV_CODEC_ID_MPEG2VIDEO;
+					goto newstream;
 				}
-				return size;
-			}
-			// AV_CODEC_ID_H264 (0x00) 0x00 0x00 0x01 0x09
-			if (data[i + n + 3] == 0x09) {
-				if (stream->CodecID == AV_CODEC_ID_H264) {
-					VideoEnqueue(stream, pts, data + i + n, size - i - n);
-				} else {
-					if (data[i + n + 4] == 0x10 || data[i + n + 10] == 0x64) {
-						Debug(3, "video: H264 detected\n");
-						stream->CodecID = AV_CODEC_ID_H264;
-						stream->NewStream = 1;
-						stream->timebase.den = 90000;
-						stream->timebase.num = 1;
-						VideoEnqueue(stream, pts, data + i + n, size - i - n);
-					}
+				// H264 I-Frame
+				if (data[i + n + 4] == 0x10 || data[i + n + 10] == 0x64) {
+					Debug(3, "video: H264 detected\n");
+					stream->CodecID = AV_CODEC_ID_H264;
+					goto newstream;
 				}
-				return size;
-			}
-			// AV_CODEC_ID_HEVC (0x00) 0x00 0x00 0x01 0x46
-			if (data[i + n + 3] == 0x46) {
-				if (stream->CodecID == AV_CODEC_ID_HEVC) {
+				// HEVC I-Frame
+				if (data[i + n + 5] == 0x10 || data[i + n + 10] == 0x40) {
+					Debug(3, "video: hevc detected\n");
+					stream->CodecID = AV_CODEC_ID_HEVC;
+newstream:
+					stream->NewStream = 1;
+					stream->timebase.den = 90000;
+					stream->timebase.num = 1;
 					VideoEnqueue(stream, pts, data + i + n, size - i - n);
-				} else {
-					if (data[i + n + 5] == 0x10 || data[i + n + 10] == 0x40) {
-						Debug(3, "video: hevc detected\n");
-						stream->CodecID = AV_CODEC_ID_HEVC;
-						stream->NewStream = 1;
-						stream->timebase.den = 90000;
-						stream->timebase.num = 1;
-						VideoEnqueue(stream, pts, data + i + n, size - i - n);
-					}
 				}
-				return size;
+			} else {
+				VideoEnqueue(stream, pts, data + i + n, size - i - n);
 			}
+			return size;
 		}
 	}
 
-	// this happens when vdr sends incomplete packets
+	// this happens when vdr sends incomplete packets and no stream is started
 	if (stream->CodecID == AV_CODEC_ID_NONE) {
-		Debug(3, "video: not detected\n");
 		return size;
 	}
 
-	// SKIP PES header
+	// complete last frame
 	VideoEnqueue(stream, pts, data + n, size - n);
-
 	return size;
 }
 
