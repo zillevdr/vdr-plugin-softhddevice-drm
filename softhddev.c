@@ -106,6 +106,16 @@ static int AudioChannelID;		///< current audio channel id
 #define AUDIO_BUFFER_SIZE (512 * 1024)	///< audio PES buffer default size
 static AVPacket AudioAvPkt[1];		///< audio a/v packet
 
+void PrintStreamData(const uint8_t *data, int size)
+{
+	fprintf(stderr, "Data: %02x %02x %02x %02x %02x %02x %02x %02x %02x "
+		"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x "
+		"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x size %d\n",
+		data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
+		data[9], data[10], data[11], data[12], data[13], data[14], data[15], data[16], data[17],
+		data[18], data[19], data[20], data[21], data[22], data[23], data[24], data[25], data[26],
+		data[27], data[28], data[29], data[30], data[31], data[32], data[33], data[34], size);
+}
 
 //////////////////////////////////////////////////////////////////////////////
 //	Audio codec parser
@@ -165,6 +175,7 @@ static inline int FastMpegCheck(const uint8_t * p)
     }
     return 1;
 }
+
 
 ///
 ///	Check for Mpeg audio.
@@ -252,12 +263,15 @@ static int MpegCheck(const uint8_t * data, int size)
     if (frame_size + 4 > size) {
 	return -frame_size - 4;
     }
-    // check if after this frame a new mpeg frame starts
-    if (FastMpegCheck(data + frame_size)) {
-	return frame_size;
-    }
 
-    return 0;
+#ifdef DEBUG
+	if (!FastMpegCheck(data + frame_size)) {
+		fprintf(stderr, "\nMpegCheck: after this frame NO new mpeg frame starts\n");
+		PrintStreamData(data + frame_size, frame_size);
+	}
+#endif
+
+	return frame_size;
 }
 
 ///
@@ -495,20 +509,25 @@ static int AdtsCheck(const uint8_t * data, int size)
 */
 int PlayAudio(const uint8_t * data, int size, uint8_t id)
 {
-    int n;
-    const uint8_t *p;
+	int n;
+	const uint8_t *p;
+	AVRational timebase;
+	timebase.den = 90000;
+	timebase.num = 1;
 
 	AudioAvPkt->pts = AV_NOPTS_VALUE;
 
-//	fprintf(stderr, "[PlayAudio] size %d\n", size);
-
-    if (SkipAudio || !MyAudioDecoder) {	// skip audio
+	if (SkipAudio) {	// skip audio
+		fprintf(stderr, "PlayAudio: skip audio\n");
 		return size;
-    }
-    if (StreamFreezed) {		// stream freezed
+	}
+	// hard limit buffer full: don't overrun audio buffers on replay
+	// stream freezed
+	if ((AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE) || (StreamFreezed)){
+		fprintf(stderr, "PlayAudio: StreamFreezed\n");
 		return 0;
-    }
-    if (NewAudioStream) {
+	}
+	if (NewAudioStream) {
 		// this clears the audio ringbuffer indirect, open and setup does it
 #ifdef DEBUG
 		fprintf(stderr, "PlayAudio: NewAudioStream\n");
@@ -519,53 +538,54 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 		AudioCodecID = AV_CODEC_ID_NONE;
 		AudioChannelID = -1;
 		NewAudioStream = 0;
-    }
-    // hard limit buffer full: don't overrun audio buffers on replay
-    if (AudioFreeBytes() < AUDIO_MIN_BUFFER_FREE) {
-//		fprintf(stderr, "PlayAudio: AudioFreeBytes %d < AUDIO_MIN_BUFFER_FREE %d\n",
-//			AudioFreeBytes(), AUDIO_MIN_BUFFER_FREE);
-		return 0;
-    }
-    // PES header 0x00 0x00 0x01 ID
-    // ID 0xBD 0xC0-0xCF
-    // must be a PES start code
-    if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01) {
+	}
+	// PES header 0x00 0x00 0x01 ID
+	// ID 0xBD 0xC0-0xCF
+	// must be a PES start code
+	if (size < 9 || !data || data[0] || data[1] || data[2] != 0x01) {
 		Error(_("[softhddev] invalid PES audio packet\n"));
 		return size;
 	}
-    n = data[8];			// header size
+	n = data[8];			// header size
 
-    if (size < 9 + n + 4) {		// wrong size
+	if (size < 9 + n + 4) {		// wrong size
 		if (size == 9 + n) {
 			Warning(_("[softhddev] empty audio packet\n"));
+			fprintf(stderr, "PlayAudio: empty audio packet!\n");
 		} else {
 			Error(_("[softhddev] invalid audio packet %d bytes\n"), size);
+			fprintf(stderr, "PlayAudio: invalid audio packet %d bytes\n", size);
 		}
+		fprintf(stderr, "PlayAudio: wrong size\n");
 		return size;
-    }
+	}
 
-    if (data[7] & 0x80 && n >= 5) {
+	if (data[7] & 0x80 && n >= 5) {
 		AudioAvPkt->pts =
 			(int64_t) (data[9] & 0x0E) << 29 | data[10] << 22 | (data[11] &
 			0xFE) << 14 | data[12] << 7 | (data[13] & 0xFE) >> 1;
 		//Debug(3, "audio: pts %#012" PRIx64 "\n", AudioAvPkt->pts);
-    }
+	} else {
+		fprintf(stderr, "PlayAudio: No PTS!\n");
+	}
 
-    p = data + 9 + n;
-    n = size - 9 - n;			// skip pes header
-    if (n + AudioAvPkt->stream_index > AudioAvPkt->size) {
+	p = data + 9 + n;
+	n = size - 9 - n;			// skip pes header
+	if (n + AudioAvPkt->stream_index > AudioAvPkt->size) {
 		Fatal(_("[softhddev] audio buffer too small needed %d avail %d\n"),
 			n + AudioAvPkt->stream_index, AudioAvPkt->size);
+		fprintf(stderr, "PlayAudio: audio buffer too small needed %d avail %d\n",
+			n + AudioAvPkt->stream_index, AudioAvPkt->size);
 		AudioAvPkt->stream_index = 0;
-    }
+	}
 
-    if (AudioChannelID != id) {		// id changed audio track changed
+	if (AudioChannelID != id) {		// id changed audio track changed
 		AudioChannelID = id;
 		AudioCodecID = AV_CODEC_ID_NONE;
 		Debug(3, "audio/demux: new channel id\n");
-    }
-    // Private stream + LPCM ID
-    if ((id & 0xF0) == 0xA0) {
+	}
+	// Private stream + LPCM ID
+	if ((id & 0xF0) == 0xA0) {
 		if (n < 7) {
 			Error(_("[softhddev] invalid LPCM audio packet %d bytes\n"), size);
 			return size;
@@ -616,23 +636,23 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 	Audiofilter(AudioAvPkt->data, n - 7, NULL);		// Das muss in ein AVFrame gepackt werden!!!
 */
 	return size;
-    }
-    // DVD track header
-    if ((id & 0xF0) == 0x80 && (p[0] & 0xF0) == 0x80) {
+	}
+	// DVD track header
+	if ((id & 0xF0) == 0x80 && (p[0] & 0xF0) == 0x80) {
 		p += 4;
 		n -= 4;				// skip track header
 //		if (AudioCodecID == AV_CODEC_ID_NONE) {
 //			// FIXME: ConfigAudioBufferTime + x
 //			AudioSetBufferTime(400);
 //		}
-    }
-    // append new packet, to partial old data
-    memcpy(AudioAvPkt->data + AudioAvPkt->stream_index, p, n);
-    AudioAvPkt->stream_index += n;
+	}
+	// append new packet, to partial old data
+	memcpy(AudioAvPkt->data + AudioAvPkt->stream_index, p, n);
+	AudioAvPkt->stream_index += n;
 
-    n = AudioAvPkt->stream_index;
-    p = AudioAvPkt->data;
-    while (n >= 5) {
+	n = AudioAvPkt->stream_index;
+	p = AudioAvPkt->data;
+	while (n >= 5) {
 		int r;
 		unsigned codec_id;
 
@@ -676,11 +696,6 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 
 			// new codec id, close and open new
 			if (AudioCodecID != codec_id) {
-
-				AVRational timebase;
-				timebase.den = 90000;
-				timebase.num = 1;
-
 				CodecAudioClose(MyAudioDecoder);
 				CodecAudioOpen(MyAudioDecoder, codec_id, NULL, &timebase);
 				AudioCodecID = codec_id;
@@ -689,11 +704,8 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 			avpkt->data = (void *)p;
 			avpkt->size = r;
 			avpkt->pts = AudioAvPkt->pts;
-			avpkt->dts = AudioAvPkt->dts;
-			// FIXME: not aligned for ffmpeg
 			CodecAudioDecode(MyAudioDecoder, avpkt);
 			AudioAvPkt->pts = AV_NOPTS_VALUE;
-			AudioAvPkt->dts = AV_NOPTS_VALUE;
 			p += r;
 			n -= r;
 			continue;
@@ -702,13 +714,13 @@ int PlayAudio(const uint8_t * data, int size, uint8_t id)
 		--n;
 	}
 
-    // copy remaining bytes to start of packet
-    if (n) {
+	// copy remaining bytes to start of packet
+	if (n) {
 		memmove(AudioAvPkt->data, p, n);
-    }
-    AudioAvPkt->stream_index = n;
+	}
+	AudioAvPkt->stream_index = n;
 
-    return size;
+	return size;
 }
 
 /**
@@ -753,17 +765,6 @@ void ResetChannelId(void)
 //////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////
-
-void PrintStreamData(const uint8_t *data, int size)
-{
-	fprintf(stderr, "Data: %02x %02x %02x %02x %02x %02x %02x %02x %02x "
-		"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x "
-		"%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x size %d\n",
-		data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
-		data[9], data[10], data[11], data[12], data[13], data[14], data[15], data[16], data[17],
-		data[18], data[19], data[20], data[21], data[22], data[23], data[24], data[25], data[26],
-		data[27], data[28], data[29], data[30], data[31], data[32], data[33], data[34], size);
-}
 
 // helper functions to parse resolution from stream
 const unsigned char * m_pStart;

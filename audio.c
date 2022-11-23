@@ -62,6 +62,7 @@
 #include "audio.h"
 #include "video.h"
 #include "codec.h"
+#include "softhddev.h"
 
 
 //----------------------------------------------------------------------------
@@ -760,7 +761,8 @@ static int AlsaPlayer(void)
 
 		n = RingBufferGetReadPointer(AudioRingBuffer, &p);
 		if (!n) {			// ring buffer empty
-			fprintf(stderr, "AlsaPlayer: ring buffer empty\n");
+			fprintf(stderr, "AlsaPlayer: ring buffer empty Videopkts: %d\n",
+				VideoGetPackets());
 		}
 		if (n < avail) {		// not enough bytes in ring buffer
 			avail = n;
