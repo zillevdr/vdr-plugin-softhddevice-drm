@@ -386,8 +386,8 @@ static int FindDevice(VideoRender * render)
 	drmModePlaneRes *plane_res;
 	int hdr;
 	uint32_t vrefresh;
-	uint32_t j, k;
-	int i;
+	uint32_t k, l;
+	int i, j;
 
 	render->fd_drm = open("/dev/dri/card0", O_RDWR);
 	if (render->fd_drm < 0) {
@@ -443,19 +443,21 @@ static int FindDevice(VideoRender * render)
 		}
 		// search Modes
 search_mode:
-		for (i = 0; i < connector->count_modes; i++) {
-			mode = &connector->modes[i];
+		for (j = 0; j < connector->count_modes; j++) {
+			mode = &connector->modes[j];
+			fprintf(stderr, "Found Monitor Mode %dx%d@%d\n",
+				mode->hdisplay, mode->vdisplay, mode->vrefresh);
 			// Mode HD
 			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 &&
 				mode->vrefresh == vrefresh &&
 				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && !hdr) {
-				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
+				memcpy(&render->mode, &connector->modes[j], sizeof(drmModeModeInfo));
 			}
 			// Mode HDready
 			if(mode->hdisplay == 1280 && mode->vdisplay == 720 &&
 				mode->vrefresh == vrefresh &&
 				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && hdr) {
-				memcpy(&render->mode, &connector->modes[i], sizeof(drmModeModeInfo));
+				memcpy(&render->mode, &connector->modes[j], sizeof(drmModeModeInfo));
 			}
 		}
 		if (!render->mode.hdisplay || !render->mode.vdisplay) {
@@ -481,20 +483,20 @@ search_mode:
 	if ((plane_res = drmModeGetPlaneResources(render->fd_drm)) == NULL)
 		fprintf(stderr, "FindDevice: cannot retrieve PlaneResources (%d): %m\n", errno);
 
-	for (j = 0; j < plane_res->count_planes; j++) {
-		plane = drmModeGetPlane(render->fd_drm, plane_res->planes[j]);
+	for (k = 0; k < plane_res->count_planes; k++) {
+		plane = drmModeGetPlane(render->fd_drm, plane_res->planes[k]);
 
 		if (plane == NULL)
-			fprintf(stderr, "FindDevice: cannot query DRM-KMS plane %d\n", j);
+			fprintf(stderr, "FindDevice: cannot query DRM-KMS plane %d\n", k);
 
 		for (i = 0; i < resources->count_crtcs; i++) {
 			if (plane->possible_crtcs & (1 << i))
 				break;
 		}
 
-		uint64_t type = GetPropertyValue(render->fd_drm, plane_res->planes[j],
+		uint64_t type = GetPropertyValue(render->fd_drm, plane_res->planes[k],
 							DRM_MODE_OBJECT_PLANE, "type");
-		uint64_t zpos = GetPropertyValue(render->fd_drm, plane_res->planes[j],
+		uint64_t zpos = GetPropertyValue(render->fd_drm, plane_res->planes[k],
 							DRM_MODE_OBJECT_PLANE, "zpos");
 
 #ifdef DRM_DEBUG // If more then 2 crtcs this must rewriten!!!
@@ -506,12 +508,12 @@ search_mode:
 		fprintf(stderr, "FindDevice: PixelFormats");
 #endif
 		// test pixel format and plane caps
-		for (k = 0; k < plane->count_formats; k++) {
+		for (l = 0; l < plane->count_formats; l++) {
 			if (encoder->possible_crtcs & plane->possible_crtcs) {
 #ifdef DRM_DEBUG
-				fprintf(stderr, " %4.4s", (char *)&plane->formats[k]);
+				fprintf(stderr, " %4.4s", (char *)&plane->formats[l]);
 #endif
-				switch (plane->formats[k]) {
+				switch (plane->formats[l]) {
 					case DRM_FORMAT_NV12:
 						if (!render->video_plane) {
 							if (type != DRM_PLANE_TYPE_PRIMARY) {
@@ -544,6 +546,10 @@ search_mode:
 	drmModeFreePlaneResources(plane_res);
 	drmModeFreeEncoder(encoder);
 	drmModeFreeResources(resources);
+
+	if (render->use_zpos &&
+		(render->video_plane > render->osd_plane))
+		render->use_zpos = 0;
 
 #ifdef DRM_DEBUG
 	Info(_("FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n"),

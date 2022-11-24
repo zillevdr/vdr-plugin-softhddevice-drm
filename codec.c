@@ -244,7 +244,6 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 		decoder->VideoCtx->pkt_timebase.num = timebase->num;
 		decoder->VideoCtx->pkt_timebase.den = timebase->den;
 	}
-
 	err = avcodec_open2(decoder->VideoCtx, decoder->VideoCtx->codec, NULL);
 	if (err < 0) {
 		fprintf(stderr, "CodecVideoOpen: Error opening the decoder: %s\n",
