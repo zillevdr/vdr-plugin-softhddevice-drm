@@ -344,6 +344,14 @@ void ReadHWPlatform(VideoRender * render)
 			render->NoHwDeint = 1;
 			break;
 		}
+		if (strstr(read_ptr, "amlogic")) {
+#ifdef DEBUG
+			printf("ReadHWPlatform: amlogic found\n");
+#endif
+			render->CodecMode = 3;	// set _v4l2m2m for H264
+			render->NoHwDeint = 1;
+			break;
+		}
 
 		read_size -= (strlen(read_ptr) + 1);
 		read_ptr = (char *)&read_ptr[(strlen(read_ptr) + 1)];
@@ -445,8 +453,6 @@ static int FindDevice(VideoRender * render)
 search_mode:
 		for (j = 0; j < connector->count_modes; j++) {
 			mode = &connector->modes[j];
-			fprintf(stderr, "Found Monitor Mode %dx%d@%d\n",
-				mode->hdisplay, mode->vdisplay, mode->vrefresh);
 			// Mode HD
 			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 &&
 				mode->vrefresh == vrefresh &&
@@ -547,9 +553,9 @@ search_mode:
 	drmModeFreeEncoder(encoder);
 	drmModeFreeResources(resources);
 
-	if (render->use_zpos &&
-		(render->video_plane > render->osd_plane))
-		render->use_zpos = 0;
+//	if (render->use_zpos &&
+//		(render->video_plane > render->osd_plane))
+//		render->use_zpos = 0;
 
 #ifdef DRM_DEBUG
 	Info(_("FindDevice: DRM setup CRTC: %i video_plane: %i osd_plane %i use_zpos %d\n"),
@@ -571,34 +577,45 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 	buf->offset[0] = buf->offset[1] = buf->offset[2] = buf->offset[3] = 0;
 
 	if (primedata) {
-		uint32_t prime_handle;
+#ifdef DRM_DEBUG
+		if (!render->buffers) {
+		for (int object = 0; object < primedata->nb_objects; object++) {
 
+			fprintf(stderr, "SetupFB:  %d x %d nb_objects %i Handle %i size %zu modifier %" PRIx64 "\n",
+				buf->width, buf->height, primedata->nb_objects, primedata->objects[object].fd,
+				primedata->objects[object].size, primedata->objects[object].format_modifier);
+		}
+		for (int layer = 0; layer < primedata->nb_layers; layer++) {
+			fprintf(stderr, "SetupFB: nb_layers %d nb_planes %d pix_fmt %4.4s\n",
+				primedata->nb_layers, primedata->layers[layer].nb_planes,
+				(char *)&primedata->layers[layer].format);
+
+			for (int plane = 0; plane < primedata->layers[layer].nb_planes; plane++) {
+				fprintf(stderr, "SetupFB: nb_planes %d object_index %i\n",
+					primedata->layers[layer].nb_planes, primedata->layers[layer].planes[plane].object_index);
+			}
+		}
+		}
+#endif
 		buf->pix_fmt = primedata->layers[0].format;
 
-		if (drmPrimeFDToHandle(render->fd_drm, primedata->objects[0].fd, &prime_handle))
-			fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %zu (%d): %m\n",
-				primedata->objects[0].fd, primedata->objects[0].size, errno);
-#ifdef DRM_DEBUG
-		if (!render->buffers)
-			fprintf(stderr, "SetupFB: %d x %d nb_objects %d nb_layers %d nb_planes %d size %zu pix_fmt %4.4s modifier %" PRIx64 "\n",
-				buf->width, buf->height, primedata->nb_objects, primedata->nb_layers,
-				primedata->layers[0].nb_planes, primedata->objects[0].size,
-				(char *)&buf->pix_fmt, primedata->objects[0].format_modifier);
-#endif
 		for (int plane = 0; plane < primedata->layers[0].nb_planes; plane++) {
-			buf->handle[plane] = prime_handle;
+
+			if (drmPrimeFDToHandle(render->fd_drm,
+				primedata->objects[primedata->layers[0].planes[plane].object_index].fd, &buf->handle[plane]))
+
+				fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %zu (%d): %m\n",
+					primedata->objects[primedata->layers[0].planes[plane].object_index].fd,
+					primedata->objects[primedata->layers[0].planes[plane].object_index].size, errno);
+
 			buf->pitch[plane] = primedata->layers[0].planes[plane].pitch;
 			buf->offset[plane] = primedata->layers[0].planes[plane].offset;
-			if (primedata->objects[0].format_modifier) {
+
+			if (primedata->objects[primedata->layers[0].planes[plane].object_index].format_modifier) {
 				modifier[plane] =
 					primedata->objects[primedata->layers[0].planes[plane].object_index].format_modifier;
 				mod_flags = DRM_MODE_FB_MODIFIERS;
 			}
-#ifdef DRM_DEBUG
-			if (!render->buffers)
-				fprintf(stderr, "SetupFB: plane %d pitch %d offset %d\n",
-					plane, buf->pitch[plane], buf->offset[plane]);
-#endif
 		}
 	} else {
 		memset(&creq, 0, sizeof(struct drm_mode_create_dumb));
