@@ -365,6 +365,9 @@ int CodecVideoReceiveFrame(VideoDecoder * decoder, int no_deint)
 	}
 	pthread_mutex_unlock(&CodecLockMutex);
 
+	if (decoder->Frame->flags == AV_FRAME_FLAG_CORRUPT)
+		fprintf(stderr, "CodecVideoReceiveFrame: AV_FRAME_FLAG_CORRUPT\n");
+
 	if (!ret) {
 		if (no_deint) {
 			decoder->Frame->interlaced_frame = 0;

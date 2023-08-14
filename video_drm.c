@@ -84,9 +84,10 @@ static pthread_mutex_t WaitCleanMutex;
 
 static pthread_t DecodeThread;		///< video decode thread
 
-static pthread_t DisplayThread;
-
 static pthread_t FilterThread;
+
+static pthread_t DisplayThread;
+static pthread_mutex_t DisplayQueue;
 
 //----------------------------------------------------------------------------
 //	Common Functions
@@ -121,8 +122,8 @@ struct _Drm_Render_
 //	int TrickCounter;			///< current trick speed counter
 	int VideoPaused;
 	int Closing;			///< flag about closing current stream
-	int Filter_Close;
 	int Filter_Bug;
+	int Filter_Frames;
 
 	int StartCounter;			///< counter for video start
 	int FramesDuped;			///< number of frames duplicated
@@ -602,11 +603,13 @@ static int SetupFB(VideoRender * render, struct drm_buf *buf,
 		for (int plane = 0; plane < primedata->layers[0].nb_planes; plane++) {
 
 			if (drmPrimeFDToHandle(render->fd_drm,
-				primedata->objects[primedata->layers[0].planes[plane].object_index].fd, &buf->handle[plane]))
+				primedata->objects[primedata->layers[0].planes[plane].object_index].fd, &buf->handle[plane])) {
 
 				fprintf(stderr, "SetupFB: Failed to retrieve the Prime Handle %i size %zu (%d): %m\n",
 					primedata->objects[primedata->layers[0].planes[plane].object_index].fd,
 					primedata->objects[primedata->layers[0].planes[plane].object_index].size, errno);
+				return -errno;
+			}
 
 			buf->pitch[plane] = primedata->layers[0].planes[plane].pitch;
 			buf->offset[plane] = primedata->layers[0].planes[plane].offset;
@@ -760,18 +763,12 @@ static void CleanDisplayThread(VideoRender * render)
 
 dequeue:
 	if (atomic_read(&render->FramesFilled)) {
-
 		frame = render->FramesRb[render->FramesRead];
-
 		render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
 		atomic_dec(&render->FramesFilled);
-
 		av_frame_free(&frame);
 		goto dequeue;
 	}
-
-	if (FilterThread)
-		render->Filter_Close = 1;
 
 	// Destroy FBs
 	if (render->buffers) {
@@ -820,6 +817,8 @@ dequeue:
 	}
 
 	frame = render->FramesRb[render->FramesRead];
+	render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
+	atomic_dec(&render->FramesFilled);
 	primedata = (AVDRMFrameDescriptor *)frame->data[0];
 
 	// search or made fd / FB combination
@@ -835,8 +834,12 @@ dequeue:
 		buf->height = (uint32_t)frame->height;
 		buf->fd_prime = primedata->objects[0].fd;
 
-		SetupFB(render, buf, primedata);
-		render->buffers++;
+		if (SetupFB(render, buf, primedata)) {
+			av_frame_free(&frame);	// SIGSEGV
+			return;
+		} else {
+			render->buffers++;
+		}
 	}
 
 	render->pts = frame->pts;
@@ -876,8 +879,6 @@ audioclock:
 			Timestamp2String(video_pts), VideoAudioDelay, diff);
 #endif
 		av_frame_free(&frame);
-		render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
-		atomic_dec(&render->FramesFilled);
 
 		if (!render->StartCounter)
 			render->StartCounter++;
@@ -912,8 +913,6 @@ audioclock:
 		usleep(20000 * render->TrickSpeed);
 
 	buf->frame = frame;
-	render->FramesRead = (render->FramesRead + 1) % VIDEO_SURFACES_MAX;
-	atomic_dec(&render->FramesFilled);
 
 page_flip:
 	render->act_buf = buf;
@@ -947,6 +946,11 @@ page_flip:
 			buf->fb_id, errno);
 
 	drmModeAtomicFree(ModeReq);
+
+	if (render->lastframe) {
+		av_frame_free(&render->lastframe);
+	}
+	render->lastframe = frame;
 }
 
 ///
@@ -990,11 +994,6 @@ static void *DisplayHandlerThread(void * arg)
 		}
 		last_tick = tick;
 #endif*/
-
-		if (render->lastframe) {
-			av_frame_free(&render->lastframe);
-		}
-		render->lastframe = render->act_buf->frame;
 
 		if (render->Closing && render->buf_black.fb_id == render->act_buf->fb_id) {
 			CleanDisplayThread(render);
@@ -1086,13 +1085,7 @@ static void *DecodeHandlerThread(void *arg)
 		pthread_testcancel();
 
 		// manage fill frame output ring buffer
-		if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX &&
-			atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
-
-			if (VideoDecodeInput(render->Stream))
-				usleep(10000);
-
-		} else {
+		if (VideoDecodeInput(render->Stream)) {
 			usleep(10000);
 		}
 	}
@@ -1304,9 +1297,18 @@ void EnqueueFB(VideoRender * render, AVFrame *inframe)
 
 	av_frame_free(&inframe);
 
-	render->FramesRb[render->FramesWrite] = frame;
-	render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
-	atomic_inc(&render->FramesFilled);
+fillframe:
+	pthread_mutex_lock(&DisplayQueue);
+	if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
+		render->FramesRb[render->FramesWrite] = frame;
+		render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
+		atomic_inc(&render->FramesFilled);
+		pthread_mutex_unlock(&DisplayQueue);
+	} else {
+		pthread_mutex_unlock(&DisplayQueue);
+		usleep(10000);
+		goto fillframe;
+	}
 
 	if (render->enqueue_buffer == VIDEO_SURFACES_MAX + 1)
 		render->enqueue_buffer = 0;
@@ -1323,7 +1325,7 @@ static void *FilterHandlerThread(void * arg)
 	int ret = 0;
 
 	while (1) {
-		while (!atomic_read(&render->FramesDeintFilled) && !render->Filter_Close) {
+		while (!atomic_read(&render->FramesDeintFilled) && !render->Closing) {
 			usleep(10000);
 		}
 getinframe:
@@ -1331,15 +1333,22 @@ getinframe:
 			frame = render->FramesDeintRb[render->FramesDeintRead];
 			render->FramesDeintRead = (render->FramesDeintRead + 1) % VIDEO_SURFACES_MAX;
 			atomic_dec(&render->FramesDeintFilled);
+			if (frame->interlaced_frame) {
+				render->Filter_Frames += 2;
+			} else {
+				render->Filter_Frames++;
+			}
 		}
-		if (render->Filter_Close) {
-			if (frame)
+		if (render->Closing) {
+			if (frame) {
 				av_frame_free(&frame);
+			}
 			if (atomic_read(&render->FramesDeintFilled)) {
 				goto getinframe;
 			}
 			frame = NULL;
 		}
+
 		if (av_buffersrc_add_frame_flags(render->buffersrc_ctx,
 			frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
 			fprintf(stderr, "FilterHandlerThread: can't add_frame.\n");
@@ -1366,30 +1375,35 @@ getinframe:
 				break;
 			}
 fillframe:
-			if (render->Filter_Close) {
+			if (render->Closing) {
 				av_frame_free(&filt_frame);
 				break;
 			}
-			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX && !render->Closing) {
-				if (filt_frame->format == AV_PIX_FMT_NV12) {
-					if (render->Filter_Bug)
-						filt_frame->pts = filt_frame->pts / 2;	// ffmpeg bug
-					EnqueueFB(render, filt_frame);
-				} else {
+			if (filt_frame->format == AV_PIX_FMT_NV12) {
+				if (render->Filter_Bug)
+					filt_frame->pts = filt_frame->pts / 2;	// ffmpeg bug
+				render->Filter_Frames--;
+				EnqueueFB(render, filt_frame);
+			} else {
+				pthread_mutex_lock(&DisplayQueue);
+				if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX) {
 					render->FramesRb[render->FramesWrite] = filt_frame;
 					render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
 					atomic_inc(&render->FramesFilled);
+					pthread_mutex_unlock(&DisplayQueue);
+					render->Filter_Frames--;
+				} else {
+					pthread_mutex_unlock(&DisplayQueue);
+					usleep(10000);
+					goto fillframe;
 				}
-			} else {
-				usleep(10000);
-				goto fillframe;
 			}
 		}
 	}
 
 closing:
 	avfilter_graph_free(&render->filter_graph);
-	render->Filter_Close = 0;
+	render->Filter_Frames = 0;
 #ifdef DEBUG
 	fprintf(stderr, "FilterHandlerThread: Thread Exit.\n");
 #endif
@@ -1529,7 +1543,7 @@ void VideoRenderFrame(VideoRender * render,
 	if (frame->decode_error_flags || frame->flags & AV_FRAME_FLAG_CORRUPT) {
 		fprintf(stderr, "VideoRenderFrame: error_flag or FRAME_FLAG_CORRUPT\n");
 	}
-
+fillframe:
 	if (render->Closing) {
 		av_frame_free(&frame);
 		return;
@@ -1548,14 +1562,28 @@ void VideoRenderFrame(VideoRender * render,
 			}
 		}
 
-		render->FramesDeintRb[render->FramesDeintWrite] = frame;
-		render->FramesDeintWrite = (render->FramesDeintWrite + 1) % VIDEO_SURFACES_MAX;
-		atomic_inc(&render->FramesDeintFilled);
+		if (atomic_read(&render->FramesDeintFilled) < VIDEO_SURFACES_MAX) {
+			render->FramesDeintRb[render->FramesDeintWrite] = frame;
+			render->FramesDeintWrite = (render->FramesDeintWrite + 1) % VIDEO_SURFACES_MAX;
+			atomic_inc(&render->FramesDeintFilled);
+		} else {
+			usleep(10000);
+			goto fillframe;
+		}
 	} else {
 		if (frame->format == AV_PIX_FMT_DRM_PRIME) {
-			render->FramesRb[render->FramesWrite] = frame;
-			render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
-			atomic_inc(&render->FramesFilled);
+			pthread_mutex_lock(&DisplayQueue);
+			if (atomic_read(&render->FramesFilled) < VIDEO_SURFACES_MAX && !render->Filter_Frames) {
+				render->FramesRb[render->FramesWrite] = frame;
+				render->FramesWrite = (render->FramesWrite + 1) % VIDEO_SURFACES_MAX;
+				atomic_inc(&render->FramesFilled);
+				pthread_mutex_unlock(&DisplayQueue);
+			} else {
+				pthread_mutex_unlock(&DisplayQueue);
+				usleep(10000);
+				goto fillframe;
+			}
+
 		} else {
 			EnqueueFB(render, frame);
 		}

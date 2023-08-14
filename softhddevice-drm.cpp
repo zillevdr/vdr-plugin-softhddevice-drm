@@ -94,9 +94,6 @@ void cSoftOsd::SetActive(bool on)
 cSoftOsd::cSoftOsd(int left, int top, uint level)
 :cOsd(left, top, level)
 {
-#ifdef DEBUG
-	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
-#endif
 #ifdef OSD_DEBUG
     /* FIXME: OsdWidth/OsdHeight not correct!
      */
@@ -114,9 +111,6 @@ cSoftOsd::cSoftOsd(int left, int top, uint level)
 */
 cSoftOsd::~cSoftOsd(void)
 {
-#ifdef DEBUG
-	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
-#endif
 #ifdef OSD_DEBUG
     dsyslog("[softhddev] OSD %s: level %d\n", __FUNCTION__, OsdLevel);
 #endif
@@ -369,9 +363,6 @@ void cSoftOsd::Flush(void)
 */
 cOsd *cSoftOsdProvider::CreateOsd(int left, int top, uint level)
 {
-#ifdef DEBUG
-	fprintf(stderr, "[softhddev]%s:\n", __FUNCTION__);
-#endif
 #ifdef OSD_DEBUG
     dsyslog("[softhddev] OSD %s: %d, %d, %d\n", __FUNCTION__, left, top, level);
 #endif
