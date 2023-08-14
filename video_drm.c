@@ -454,6 +454,13 @@ static int FindDevice(VideoRender * render)
 search_mode:
 		for (j = 0; j < connector->count_modes; j++) {
 			mode = &connector->modes[j];
+			// Mode UHD (not active now)
+/*			if(mode->hdisplay == 3840 && mode->vdisplay == 2160 &&
+				mode->vrefresh == vrefresh &&
+				!(mode->flags & DRM_MODE_FLAG_INTERLACE) && !hdr) {
+				memcpy(&render->mode, &connector->modes[j], sizeof(drmModeModeInfo));
+				break;
+			}*/
 			// Mode HD
 			if(mode->hdisplay == 1920 && mode->vdisplay == 1080 &&
 				mode->vrefresh == vrefresh &&
