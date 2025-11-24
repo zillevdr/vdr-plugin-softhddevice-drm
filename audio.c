@@ -513,19 +513,15 @@ static int AudioFilterInit(AVCodecContext *AudioCtx)
 
 	// Before filter init set HW parameter.
 	if (AudioCtx->sample_rate != (int)HwSampleRate ||
-		(AudioCtx->channels != (int)HwChannels && 
+		(AudioCtx->ch_layout.nb_channels != (int)HwChannels && 
 		!(AudioDownMix && HwChannels == 2))) {
 
-		err = AlsaSetup(AudioCtx->channels, AudioCtx->sample_rate, 0);
+		err = AlsaSetup(AudioCtx->ch_layout.nb_channels, AudioCtx->sample_rate, 0);
 		if (err)
 			return err;
 	}
 
 	timebase = &AudioCtx->pkt_timebase;
-
-#if LIBAVFILTER_VERSION_INT < AV_VERSION_INT(7,16,100)
-	avfilter_register_all();
-#endif
 
 	if (!(filter_graph = avfilter_graph_alloc()))
 		fprintf(stderr, "Unable to create filter graph.\n");
@@ -535,7 +531,7 @@ static int AudioFilterInit(AVCodecContext *AudioCtx)
 		fprintf(stderr, "AudioFilterInit: Could not find the abuffer filter.\n");
 	if (!(abuffersrc_ctx = avfilter_graph_alloc_filter(filter_graph, abuffer, "src")))
 		fprintf(stderr, "AudioFilterInit: Could not allocate the abuffersrc_ctx instance.\n");
-	av_get_channel_layout_string(ch_layout, sizeof(ch_layout), AudioCtx->channels, AudioCtx->channel_layout);
+	av_channel_layout_describe(&AudioCtx->ch_layout, ch_layout, sizeof(ch_layout));
 #ifdef DEBUG
 	fprintf(stderr, "AudioFilterInit: IN ch_layout %s sample_fmt %s sample_rate %d channels %d\n",
 		ch_layout, av_get_sample_fmt_name(AudioCtx->sample_fmt), AudioCtx->sample_rate, AudioCtx->channels);
@@ -568,8 +564,8 @@ static int AudioFilterInit(AVCodecContext *AudioCtx)
 	}
 
 	// aformat
-	av_get_channel_layout_string(ch_layout, sizeof(ch_layout),
-		HwChannels, av_get_default_channel_layout(HwChannels));		// should use IN layout if more then 2 ch!?
+	//av_get_channel_layout_string(ch_layout, sizeof(ch_layout),
+	//	HwChannels, av_get_default_channel_layout(HwChannels));		// should use IN layout if more then 2 ch!?
 #ifdef DEBUG
 	fprintf(stderr, "AudioFilterInit: OUT AudioDownMix %d HwChannels %d HwSampleRate %d ch_layout %s bytes_per_sample %d\n",
 		AudioDownMix, HwChannels, HwSampleRate,
@@ -580,8 +576,8 @@ static int AudioFilterInit(AVCodecContext *AudioCtx)
 	if (!(filter_ctx[n_filter] = avfilter_graph_alloc_filter(filter_graph, aformat, "aformat")))
 		fprintf(stderr, "AudioFilterInit: Could not allocate the aformat instance.\n");
 	snprintf(options_str, sizeof(options_str),
-		"sample_fmts=%s:sample_rates=%d:channel_layouts=%s",
-		av_get_sample_fmt_name(AV_SAMPLE_FMT_S16), HwSampleRate, ch_layout);
+		"sample_fmts=%s:sample_rates=%d:channel_layouts=stereo",
+		av_get_sample_fmt_name(AV_SAMPLE_FMT_S16), HwSampleRate);
 	if (avfilter_init_str(filter_ctx[n_filter], options_str) < 0)
 		fprintf(stderr, "AudioFilterInit: Could not initialize the aformat filter.\n");
 	n_filter++;
@@ -1243,7 +1239,7 @@ void AudioEnqueue(AVFrame *frame)
 		return;
 	}
 
-	int count = frame->nb_samples * frame->channels * AudioBytesProSample;
+	int count = frame->nb_samples * frame->ch_layout.nb_channels * AudioBytesProSample;
 	buffer = (void *)frame->data[0];
 
 	if (AudioCompression) {		// in place operation
@@ -1253,7 +1249,7 @@ void AudioEnqueue(AVFrame *frame)
 		AudioNormalizer(buffer, count);
 	}
 
-	AudioReorderAudioFrame(buffer, count, frame->channels);
+	AudioReorderAudioFrame(buffer, count, frame->ch_layout.nb_channels);
 
 	pthread_mutex_lock(&AudioRbMutex);
 	n = RingBufferWrite(AudioRingBuffer, buffer, count);
@@ -1356,7 +1352,7 @@ in:
 			char errbuf[128];
 			av_strerror(err, errbuf, sizeof(errbuf));
 			fprintf(stderr, "AudioFilter: Error submitting the frame to the filter fmt %s channels %d %s\n",
-				av_get_sample_fmt_name(AudioCtx->sample_fmt), AudioCtx->channels, errbuf);
+				av_get_sample_fmt_name(AudioCtx->sample_fmt), AudioCtx->ch_layout.nb_channels, errbuf);
 			return;
 		} else {
 			Filterchanged = 1;

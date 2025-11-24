@@ -31,8 +31,8 @@ Requirement:
 		for DVB.
 		http://www.tvdr.de/
 
-	media-video/ffmpeg
-		MMAL (RaspberryPi) 	version >=3.2
+	media-video/ffmpeg-7
+		MMAL (RaspberryPi 2)
 		v4l2-request (Rockchip, Allwinner)	WIP LE version
 
 	media-libs/alsa-lib
@@ -44,7 +44,6 @@ TODO:
 	cleaning
 	testing
 	other devices
-	deinterlacing
 	passthrough
 
 Setup:	environment

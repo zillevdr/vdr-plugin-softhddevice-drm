@@ -139,7 +139,7 @@ void CodecVideoDelDecoder(VideoDecoder * decoder)
 void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Par,
 		AVRational * timebase)
 {
-	AVCodec * codec;
+	const AVCodec * codec;
 	enum AVHWDeviceType type = 0;
 	static AVBufferRef *hw_device_ctx = NULL;
 	int err;
@@ -167,8 +167,9 @@ void CodecVideoOpen(VideoDecoder * decoder, int codec_id, AVCodecParameters * Pa
 #endif
 					break;
 				}
+
 				if (cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
-					cfg->device_type == AV_HWDEVICE_TYPE_DRM) {
+					cfg->pix_fmt == AV_PIX_FMT_DRM_PRIME) {
 
 #ifdef CODEC_DEBUG
 					fprintf(stderr, "CodecVideoOpen: HW codec %s found\n",
@@ -370,7 +371,7 @@ int CodecVideoReceiveFrame(VideoDecoder * decoder, int no_deint)
 
 	if (!ret) {
 		if (no_deint) {
-			decoder->Frame->interlaced_frame = 0;
+			decoder->Frame->flags &= ~AV_FRAME_FLAG_INTERLACED;
 #ifdef STILL_DEBUG
 			fprintf(stderr, "CodecVideoReceiveFrame: interlaced_frame = 0\n");
 #endif
@@ -481,7 +482,7 @@ void CodecAudioDelDecoder(AudioDecoder * decoder)
 void CodecAudioOpen(AudioDecoder * audio_decoder, int codec_id,
 		AVCodecParameters *Par, AVRational * timebase)
 {
-	AVCodec *codec;
+	const AVCodec *codec;
 
 	if (codec_id == AV_CODEC_ID_AC3) {
 		if (!(codec = avcodec_find_decoder_by_name("ac3_fixed"))) {

@@ -191,7 +191,7 @@ void cSoftHdPlayer::SetEntry(int index)
 void cSoftHdPlayer::Player(const char *url)
 {
 	AVPacket packet;
-	AVCodec *video_codec;
+	const AVCodec *video_codec;
 	int err = 0;
 	int audio_stream_index = 0;
 	int video_stream_index;

@@ -1340,7 +1340,7 @@ getinframe:
 			frame = render->FramesDeintRb[render->FramesDeintRead];
 			render->FramesDeintRead = (render->FramesDeintRead + 1) % VIDEO_SURFACES_MAX;
 			atomic_dec(&render->FramesDeintFilled);
-			if (frame->interlaced_frame) {
+			if (frame->flags & AV_FRAME_FLAG_INTERLACED) {
 				render->Filter_Frames += 2;
 			} else {
 				render->Filter_Frames++;
@@ -1437,7 +1437,7 @@ int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 	render->filter_graph = avfilter_graph_alloc();
 	render->Filter_Bug = 0;
 
-	if (frame->interlaced_frame) {
+	if (frame->flags & AV_FRAME_FLAG_INTERLACED) {
 		if (frame->format == AV_PIX_FMT_DRM_PRIME)
 			filter_descr = "deinterlace_v4l2m2m";
 		else if (frame->format == AV_PIX_FMT_YUV420P) {
@@ -1451,14 +1451,10 @@ int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 		filter_descr);
 #endif
 
-#if LIBAVFILTER_VERSION_INT < AV_VERSION_INT(7,16,100)
-	avfilter_register_all();
-#endif
-
 	snprintf(args, sizeof(args),
 		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
 		video_ctx->width, video_ctx->height, frame->format,
-		video_ctx->time_base.num, video_ctx->time_base.den,
+		video_ctx->framerate.den, video_ctx->framerate.num,
 		video_ctx->sample_aspect_ratio.num, video_ctx->sample_aspect_ratio.den);
 
 	if (avfilter_graph_create_filter(&render->buffersrc_ctx, buffersrc, "src",
@@ -1472,6 +1468,7 @@ int VideoFilterInit(VideoRender * render, const AVCodecContext * video_ctx,
 	par->hw_frames_ctx = frame->hw_frames_ctx;
 	if (av_buffersrc_parameters_set(render->buffersrc_ctx, par) < 0) {
 		fprintf(stderr, "VideoFilterInit: Cannot av_buffersrc_parameters_set\n");
+		av_free(par);
 		goto fail;
 	}
 
@@ -1556,7 +1553,7 @@ fillframe:
 		return;
 	}
 
-	if (frame->format == AV_PIX_FMT_YUV420P || (frame->interlaced_frame &&
+	if (frame->format == AV_PIX_FMT_YUV420P || (frame->flags & AV_FRAME_FLAG_INTERLACED &&
 		frame->format == AV_PIX_FMT_DRM_PRIME && !render->NoHwDeint)) {
 
 		if (!FilterThread) {
