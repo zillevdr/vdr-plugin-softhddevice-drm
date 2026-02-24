@@ -24,6 +24,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -274,6 +275,8 @@ void cVideoStream::CloseDecoder(void)
 	m_codecId = AV_CODEC_ID_NONE;
 	m_pDecoder->Close();
 	m_pPar = nullptr;
+	m_numIFrames = 0;
+	m_naluTypesAtStart.clear();
 }
 
 /**
@@ -333,9 +336,14 @@ void cVideoStream::OpenDecoder(void)
 
 	if (needsParsing && m_codecId == AV_CODEC_ID_H264) {
 		cH264Parser h264Packet(m_packets.Peek());
+		if (!h264Packet.HasSPS()) {
+			LOGDEBUG2(L_CODEC, "videostream %s: %s: No SPS in the packet!", m_identifier, __FUNCTION__);
+			h264Packet.PrintStreamData();
+		}
 
 		// start decoding with an I-Frame only
 		if (!h264Packet.IsIFrame() && m_startDecodingWithIFrame) {
+			h264Packet.PrintNalUnits();
 			LOGDEBUG2(L_CODEC, "videostream %s: %s: Skip h264 packet, no I-Frame!", m_identifier, __FUNCTION__);
 			AVPacket *avpkt = m_packets.Pop();
 			av_packet_free(&avpkt);
@@ -356,6 +364,7 @@ void cVideoStream::OpenDecoder(void)
 	m_pConfig->CurrentDecoderType = m_pDecoder->IsHardwareDecoder() ? "hardware" : "software";
 	m_pConfig->CurrentDecoderName = m_pDecoder->Name();
 	m_newStream = false;
+	m_logFrames = true;
 }
 
 /**
@@ -376,6 +385,21 @@ void cVideoStream::DecodeInput(void)
 	AVPacket *avpkt = m_packets.Peek();
 
 	ret = m_pDecoder->SendPacket(avpkt);
+
+	// log nal units of the frames until the second I Frame arrives
+	if (!ret && m_codecId == AV_CODEC_ID_H264 && m_logFrames) {
+		if (m_numIFrames < 2) {
+			cH264Parser h264Packet(m_packets.Peek());
+			if (h264Packet.IsIFrame())
+				m_numIFrames++;
+			m_naluTypesAtStart.push_back(h264Packet.GetNalUnitString());
+		} else {
+			for (std::size_t i = 0; i < m_naluTypesAtStart.size(); i++) {
+				LOGDEBUG2(L_CODEC, "videostream %s: %s: (%02d) %s", m_identifier, __FUNCTION__, i, m_naluTypesAtStart[i].c_str());
+			}
+			m_logFrames = false;
+		}
+	}
 
 	if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
 		avpkt = m_packets.Pop();

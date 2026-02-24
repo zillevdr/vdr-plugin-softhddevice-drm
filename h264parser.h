@@ -20,17 +20,22 @@
 #ifndef __H264PARSER_H
 #define __H264PARSER_H
 
+#include <string>
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
 typedef enum {
 	NALU_TYPE_NON_IDR = (1 << 0),
-	NALU_TYPE_IDR     = (1 << 1),
-	NALU_TYPE_SEI     = (1 << 2),
-	NALU_TYPE_SPS     = (1 << 3),
-	NALU_TYPE_PPS     = (1 << 4),
-	NALU_TYPE_AUD     = (1 << 5)
+	NALU_TYPE_PART_A  = (1 << 1),
+	NALU_TYPE_PART_B  = (1 << 2),
+	NALU_TYPE_PART_C  = (1 << 3),
+	NALU_TYPE_IDR     = (1 << 4),
+	NALU_TYPE_SEI     = (1 << 5),
+	NALU_TYPE_SPS     = (1 << 6),
+	NALU_TYPE_PPS     = (1 << 7),
+	NALU_TYPE_AUD     = (1 << 8)
 } NalUnitTypes;
 
 /**
@@ -44,6 +49,10 @@ public:
 	int GetHeight(void) { return m_height; };
 	bool IsIFrame(void);
 	bool IsMbaff(void) { return m_mbaff; };
+	bool HasSPS(void) { return m_hasSPS; };
+	void PrintNalUnits(void);
+	std::string GetNalUnitString(void) { return m_naluString; };
+	void PrintStreamData(void);
 
 private:
 	AVPacket *m_pAvpkt;
@@ -52,10 +61,12 @@ private:
 	int m_nCurrentBit;
 
 	int m_nalutype = 0;
+	bool m_hasSPS = false;
 
 	int m_width = 0;
 	int m_height = 0;
 	bool m_mbaff = false;
+	std::string m_naluString;
 
 	unsigned int ReadBit(void);
 	unsigned int ReadBits(int);

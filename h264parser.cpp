@@ -22,6 +22,7 @@
  */
 
 #include <cassert>
+#include <string>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -34,23 +35,6 @@ extern "C" {
 /*****************************************************************************
  * cH264Parser class
  ****************************************************************************/
-
-/**
- * Print raw stream data
- *
- * @param data        pointer to stream data
- * @param size        data size
- */
-static void PrintStreamData(const uint8_t *data, int size)
-{
-	LOGDEBUG("Stream: %02x %02x %02x %02x %02x %02x %02x %02x %02x "
-	         "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x "
-	         "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x size %d",
-	         data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
-	         data[9], data[10], data[11], data[12], data[13], data[14], data[15], data[16], data[17],
-	         data[18], data[19], data[20], data[21], data[22], data[23], data[24], data[25], data[26],
-	         data[27], data[28], data[29], data[30], data[31], data[32], data[33], data[34], size);
-}
 
 /**
  * Returns true, if we have a 0x000001 start code
@@ -86,21 +70,39 @@ cH264Parser::cH264Parser(AVPacket *avpkt)
 
 		switch (NalUnitType(m_pAvpkt->data, i)) {
 			case 1:
+				m_naluString += " NON-IDR";
 				m_nalutype |= NALU_TYPE_NON_IDR;
 				break;
+			case 2:
+				m_naluString += " PART_A";
+				m_nalutype |= NALU_TYPE_PART_A;
+				break;
+			case 3:
+				m_naluString += " PART_B";
+				m_nalutype |= NALU_TYPE_PART_B;
+				break;
+			case 4:
+				m_naluString += " PART_C";
+				m_nalutype |= NALU_TYPE_PART_C;
+				break;
 			case 5:
+				m_naluString += " IDR";
 				m_nalutype |= NALU_TYPE_IDR;
 				break;
 			case 6:
+				m_naluString += " SEI";
 				m_nalutype |= NALU_TYPE_SEI;
 				break;
 			case 7:
+				m_naluString += " SPS";
 				m_nalutype |= NALU_TYPE_SPS;
 				break;
 			case 8:
+				m_naluString += " PPS";
 				m_nalutype |= NALU_TYPE_PPS;
 				break;
 			case 9:
+				m_naluString += " AUD";
 				m_nalutype |= NALU_TYPE_AUD;
 				break;
 			default:
@@ -122,11 +124,10 @@ cH264Parser::cH264Parser(AVPacket *avpkt)
 	}
 
 	// no SPS available
-	if (!m_pStart) {
-		LOGERROR("H264Parser: %s: No m_pStart %p Pkt %p i %d", __FUNCTION__, m_pStart, m_pAvpkt, i);
-		PrintStreamData(m_pAvpkt->data, m_pAvpkt->size);
+	if (!m_pStart)
 		return;
-	}
+
+	m_hasSPS = true;
 
 	m_nCurrentBit = 0;
 	int frameCropLeftOffset = 0;
@@ -224,15 +225,28 @@ cH264Parser::cH264Parser(AVPacket *avpkt)
 
 	m_height = ((2 - frameMbsOnlyFlag)* (picHeightInMapUnitsMinusOne +1) * 16) -
 		subHeightC * ((frameCropBottomOffset * 2) + (frameCropTopOffset * 2));
+}
 
-	LOGDEBUG2(L_CODEC, "H264Parser: %s %s%s%s%s%s%s width %d height %d", __FUNCTION__,
-		m_nalutype & NALU_TYPE_AUD     ? "AUD " : "",
-		m_nalutype & NALU_TYPE_SPS     ? "SPS " : "",
-		m_nalutype & NALU_TYPE_PPS     ? "PPS " : "",
-		m_nalutype & NALU_TYPE_SEI     ? "SEI " : "",
-		m_nalutype & NALU_TYPE_IDR     ? "IDR " : "",
-		m_nalutype & NALU_TYPE_NON_IDR ? "NON-IDR " : "",
-		m_width, m_height);
+/**
+ * Print raw stream data of the first 35 bytes
+ */
+void cH264Parser::PrintStreamData(void)
+{
+	const uint8_t *data = m_pAvpkt->data;
+
+	LOGDEBUG("Stream: %02x %02x %02x %02x %02x %02x %02x %02x %02x "
+	         "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x "
+	         "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x size %d",
+	         data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
+	         data[9], data[10], data[11], data[12], data[13], data[14], data[15], data[16], data[17],
+	         data[18], data[19], data[20], data[21], data[22], data[23], data[24], data[25], data[26],
+	         data[27], data[28], data[29], data[30], data[31], data[32], data[33], data[34], m_pAvpkt->size);
+}
+
+void cH264Parser::PrintNalUnits(void)
+{
+	LOGDEBUG2(L_CODEC, "H264Parser: %s %s (%d x %d)", __FUNCTION__,
+		m_naluString.c_str(), m_width, m_height);
 }
 
 /*
