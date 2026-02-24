@@ -364,7 +364,7 @@ void cVideoStream::OpenDecoder(void)
 	m_pConfig->CurrentDecoderType = m_pDecoder->IsHardwareDecoder() ? "hardware" : "software";
 	m_pConfig->CurrentDecoderName = m_pDecoder->Name();
 	m_newStream = false;
-	m_logFrames = true;
+	m_logFrames = m_pConfig->ConfigParseH264StreamStart;
 }
 
 /**
@@ -394,8 +394,9 @@ void cVideoStream::DecodeInput(void)
 				m_numIFrames++;
 			m_naluTypesAtStart.push_back(h264Packet.GetNalUnitString());
 		} else {
+			LOGDEBUG("videostream %s: %s: parsed H.264 stream:", m_identifier, __FUNCTION__);
 			for (std::size_t i = 0; i < m_naluTypesAtStart.size(); i++) {
-				LOGDEBUG2(L_CODEC, "videostream %s: %s: (%02d) %s", m_identifier, __FUNCTION__, i, m_naluTypesAtStart[i].c_str());
+				LOGDEBUG("[H264] (%02d) %s", i, m_naluTypesAtStart[i].c_str());
 			}
 			m_logFrames = false;
 		}

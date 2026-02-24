@@ -302,6 +302,9 @@ msgstr "  (mindestens: %d)"
 msgid "  fallback after num packets"
 msgstr "  Fallback nach Anzahl Paketen"
 
+msgid " Parse H.264 stream start"
+msgstr " Beginn eines H.264 streams parsen"
+
 msgid " OSD settings"
 msgstr " OSD Einstellungen"
 

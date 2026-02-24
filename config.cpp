@@ -57,6 +57,7 @@ bool cSoftHdConfig::SetupParse(const char *name, const char *value)
 	} else if (!strcasecmp(name, "ParseH264Dimensions"))   { ConfigParseH264Dimensions = atoi(value);
 	} else if (!strcasecmp(name, "DecoderFallbackToSw"))   { ConfigDecoderFallbackToSw = atoi(value);
 	} else if (!strcasecmp(name, "DecoderFallbackToSwNumPkts")) { ConfigDecoderFallbackToSwNumPkts = atoi(value);
+	} else if (!strcasecmp(name, "ParseH264StreamStart"))  { ConfigParseH264StreamStart = atoi(value);
 	} else if (!strcasecmp(name, "AudioDelay"))            { ConfigVideoAudioDelayMs = atoi(value);
 	} else if (!strcasecmp(name, "AudioPassthrough"))      { ConfigAudioPassthroughMask = abs(atoi(value)); ConfigAudioPassthroughState = atoi(value) > 0;
 	} else if (!strcasecmp(name, "AudioDownmix"))          { ConfigAudioDownmix = atoi(value);

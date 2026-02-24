@@ -208,6 +208,7 @@ void cMenuSetupSoft::Create(void)
 			Add(new cOsdItem(cString::sprintf(tr("  (minimum: %d)"), m_pConfig->GetDecoderNeedsMaxPackets() + 1), osUnknown, false));
 			Add(new cMenuEditIntItem(tr("  fallback after num packets"), &m_cDecoderFallbackToSwNumPkts, 22));
 		}
+		Add(new cMenuEditBoolItem(tr(" Parse H.264 stream start"), &m_cParseH264StreamStart, trVDR("no"), trVDR("yes")));
 #ifdef USE_GLES
 		Add(SeparatorName(tr(" OSD settings")));
 		if (!m_pConfig->ConfigDisableOglOsd) {
@@ -358,6 +359,7 @@ cMenuSetupSoft::cMenuSetupSoft(cSoftHdDevice *device)
 	m_cParseH264Dimensions = m_pConfig->ConfigParseH264Dimensions;
 	m_cDecoderFallbackToSw = m_pConfig->ConfigDecoderFallbackToSw;
 	m_cDecoderFallbackToSwNumPkts = m_pConfig->ConfigDecoderFallbackToSwNumPkts;
+	m_cParseH264StreamStart = m_pConfig->ConfigParseH264StreamStart;
 #ifdef USE_GLES
 	m_cMaxSizeGPUImageCache = m_pConfig->ConfigMaxSizeGPUImageCache;
 #endif
@@ -492,6 +494,7 @@ void cMenuSetupSoft::Store(void)
 	SetupStore("DecoderFallbackToSw", m_pConfig->ConfigDecoderFallbackToSw = m_cDecoderFallbackToSw);
 	SetupStore("DecoderFallbackToSwNumPkts", m_pConfig->ConfigDecoderFallbackToSwNumPkts = m_cDecoderFallbackToSwNumPkts);
 	m_pDevice->SetDecoderFallbackToSw(m_pConfig->ConfigDecoderFallbackToSw);
+	SetupStore("ParseH264StreamStart", m_pConfig->ConfigParseH264StreamStart = m_cParseH264StreamStart);
 #ifdef USE_GLES
 	SetupStore("MaxSizeGPUImageCache", m_pConfig->ConfigMaxSizeGPUImageCache = m_cMaxSizeGPUImageCache);
 #endif

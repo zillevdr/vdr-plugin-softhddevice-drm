@@ -306,6 +306,9 @@ Setup: /etc/vdr/setup.conf
 		maximum number of packets sent to the hardware decoder
 		until the software fallback jumps in
 
+	softhddevice-drm-gles.ParseH264StreamStart = 0
+		parse and log the packets of an H.264 stream at stream start up to the second I-Frame
+
 	softhddevice-drm-gles.PipScalePercent = 25
 		10 - 100 = scale factor for pip (%)
 
