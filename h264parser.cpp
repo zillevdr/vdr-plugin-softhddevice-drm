@@ -23,6 +23,7 @@
 
 #include <cassert>
 #include <string>
+#include <vector>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -51,6 +52,40 @@ bool isValidStartCode(const uint8_t *data, int offset)
 static int NalUnitType(const uint8_t *data, int i)
 {
 	return data[i + 3] & 0x1F;
+}
+
+int cH264Parser::GetSPSOffset(void)
+{
+	int offset = -1;
+
+	for (int i = 0; i < m_pAvpkt->size - 4; i++) {
+		if (!isValidStartCode(m_pAvpkt->data, i))
+			continue;
+
+		if (NalUnitType(m_pAvpkt->data, i) == 7) {
+			offset = i;
+			break;
+		}
+	}
+
+	return offset;
+}
+
+int cH264Parser::GetSliceOffset(void)
+{
+	int offset = -1;
+
+	for (int i = 0; i < m_pAvpkt->size - 4; i++) {
+		if (!isValidStartCode(m_pAvpkt->data, i))
+			continue;
+
+		if (NalUnitType(m_pAvpkt->data, i) == 1 || NalUnitType(m_pAvpkt->data, i) == 5) {
+			offset = i;
+			break;
+		}
+	}
+
+	return offset;
 }
 
 /**
@@ -111,120 +146,182 @@ cH264Parser::cH264Parser(AVPacket *avpkt)
 	}
 
 	// part 2: parse h264 SPS and get width and height
-	m_pStart = NULL;
-	for (i = 0; i < m_pAvpkt->size - 4; i++) {
-		if (!isValidStartCode(m_pAvpkt->data, i))
-			continue;
+	int spsOffset = GetSPSOffset();
 
-		if (NalUnitType(m_pAvpkt->data, i) == 7) {
-			m_pStart = &m_pAvpkt->data[i + 4];
-			m_nLength = m_pAvpkt->size - i - 4;
-			break;
-		}
-	}
+	// SPS is available
+	if (spsOffset != -1) {
+		m_hasSPS = true;
 
-	// no SPS available
-	if (!m_pStart)
-		return;
+		m_pStart = &m_pAvpkt->data[spsOffset + 4];
+		m_nLength = m_pAvpkt->size - spsOffset - 4;
 
-	m_hasSPS = true;
+		m_nCurrentBit = 0;
+		int frameCropLeftOffset = 0;
+		int frameCropRightOffset = 0;
+		int frameCropTopOffset = 0;
+		int frameCropBottomOffset = 0;
+		int chromaFormatIdc = 0;
+		int separateColorPlaneFlag = 0;
 
-	m_nCurrentBit = 0;
-	int frameCropLeftOffset = 0;
-	int frameCropRightOffset = 0;
-	int frameCropTopOffset = 0;
-	int frameCropBottomOffset = 0;
-	int chromaFormatIdc = 0;
-	int separateColorPlaneFlag = 0;
-
-	int profileIdc = ReadBits(8);
-	ReadBits(16);
-	ReadExponentialGolombCode();
-
-	if (profileIdc == 100 || profileIdc == 110 ||
-	    profileIdc == 122 || profileIdc == 244 ||
-	    profileIdc == 44 || profileIdc == 83 ||
-	    profileIdc == 86 || profileIdc == 118) {
-
-		chromaFormatIdc = ReadExponentialGolombCode();
-		if (chromaFormatIdc == 3)
-			separateColorPlaneFlag = ReadBit();
+		int profileIdc = ReadBits(8);
+		ReadBits(16);
 		ReadExponentialGolombCode();
-		ReadExponentialGolombCode();
-		ReadBit();
-		int seqScalingMatrixPresentFlag = ReadBit();
-		if (seqScalingMatrixPresentFlag) {
-			for (int i = 0; i < 8; i++) {
-				int seqScalingListPresentFlag = ReadBit();
-				if (seqScalingListPresentFlag) {
-					int sizeOfScalingList = (i < 6) ? 16 : 64;
-					int lastScale = 8;
-					int nextScale = 8;
-					for (int j = 0; j < sizeOfScalingList; j++) {
-						if (nextScale != 0) {
-							int delta_scale = ReadSE();
-							nextScale = (lastScale + delta_scale + 256) % 256;
+
+		if (profileIdc == 100 || profileIdc == 110 ||
+		    profileIdc == 122 || profileIdc == 244 ||
+		    profileIdc == 44 || profileIdc == 83 ||
+		    profileIdc == 86 || profileIdc == 118) {
+
+			chromaFormatIdc = ReadExponentialGolombCode();
+			if (chromaFormatIdc == 3)
+				separateColorPlaneFlag = ReadBit();
+			ReadExponentialGolombCode();
+			ReadExponentialGolombCode();
+			ReadBit();
+			int seqScalingMatrixPresentFlag = ReadBit();
+			if (seqScalingMatrixPresentFlag) {
+				for (int i = 0; i < 8; i++) {
+					int seqScalingListPresentFlag = ReadBit();
+					if (seqScalingListPresentFlag) {
+						int sizeOfScalingList = (i < 6) ? 16 : 64;
+						int lastScale = 8;
+						int nextScale = 8;
+						for (int j = 0; j < sizeOfScalingList; j++) {
+							if (nextScale != 0) {
+								int delta_scale = ReadSE();
+								nextScale = (lastScale + delta_scale + 256) % 256;
+							}
+							lastScale = (nextScale == 0) ? lastScale : nextScale;
 						}
-						lastScale = (nextScale == 0) ? lastScale : nextScale;
 					}
 				}
 			}
 		}
-	}
-	ReadExponentialGolombCode();
-	int picOrderCntType = ReadExponentialGolombCode();
-	if (picOrderCntType == 0) {
-		ReadExponentialGolombCode();
-	} else if (picOrderCntType == 1) {
-		ReadBit();
-		ReadSE();
-		ReadSE();
-		int numRefFramesInPicOrderCntCycle = ReadExponentialGolombCode();
-		for (int i = 0; i < numRefFramesInPicOrderCntCycle; i++ ) {
+		m_log2MaxFrameNumMinus4 = ReadExponentialGolombCode();
+		int picOrderCntType = ReadExponentialGolombCode();
+		if (picOrderCntType == 0) {
+			ReadExponentialGolombCode();
+		} else if (picOrderCntType == 1) {
+			ReadBit();
 			ReadSE();
+			ReadSE();
+			int numRefFramesInPicOrderCntCycle = ReadExponentialGolombCode();
+			for (int i = 0; i < numRefFramesInPicOrderCntCycle; i++ ) {
+				ReadSE();
+			}
+		}
+		ReadExponentialGolombCode();
+		ReadBit();
+		int picWidthInMbsMinusOne = ReadExponentialGolombCode();
+		int picHeightInMapUnitsMinusOne = ReadExponentialGolombCode();
+		int frameMbsOnlyFlag = ReadBit();
+		if (!frameMbsOnlyFlag) {
+			m_mbaff = ReadBit();
+		}
+
+		ReadBit();
+		int frameCroppingFlag = ReadBit();
+		if (frameCroppingFlag) {
+			frameCropLeftOffset = ReadExponentialGolombCode();
+			frameCropRightOffset = ReadExponentialGolombCode();
+			frameCropTopOffset = ReadExponentialGolombCode();
+			frameCropBottomOffset = ReadExponentialGolombCode();
+		}
+
+		int subWidthC = 0;
+		int subHeightC = 0;
+
+		if (chromaFormatIdc == 0 && separateColorPlaneFlag == 0) { // monochrome
+			subWidthC = subHeightC = 2;
+		} else if (chromaFormatIdc == 1 && separateColorPlaneFlag == 0) { // 4:2:0
+			subWidthC = subHeightC = 2;
+		} else if (chromaFormatIdc == 2 && separateColorPlaneFlag == 0) { // 4:2:2
+			subWidthC = 2;
+			subHeightC = 1;
+		} else if (chromaFormatIdc == 3) { // 4:4:4
+			if (separateColorPlaneFlag == 0) {
+				subWidthC = subHeightC = 1;
+			} else if (separateColorPlaneFlag == 1) {
+				subWidthC = subHeightC = 0;
+			}
+		}
+
+		m_width = ((picWidthInMbsMinusOne + 1) * 16) -
+			subWidthC * (frameCropRightOffset + frameCropLeftOffset);
+
+		m_height = ((2 - frameMbsOnlyFlag)* (picHeightInMapUnitsMinusOne +1) * 16) -
+			subHeightC * ((frameCropBottomOffset * 2) + (frameCropTopOffset * 2));
+	}
+
+	// part 3: parse slice header
+	int sliceOffset = GetSliceOffset();
+
+	// slice is available
+	if (sliceOffset) {
+		m_pStart = &m_pAvpkt->data[sliceOffset + 4];
+		m_nLength = m_pAvpkt->size - sliceOffset - 4;
+		uint8_t nalHeader = m_pAvpkt->data[sliceOffset + 3];
+
+		m_nalRefIdc = (nalHeader >> 5) & 0x03;
+		m_isReference = (m_nalRefIdc != 0);
+		m_isIDR = (NalUnitType(m_pAvpkt->data, i) == 5);
+
+		m_nCurrentBit = 0;
+
+		ReadExponentialGolombCode(); // int first_mb_in_slice =
+		int slice_type_raw = ReadExponentialGolombCode();
+
+		m_sliceType = slice_type_raw % 5;   // normalize
+
+		ReadExponentialGolombCode(); // int pic_parameter_set_id =
+
+		int frame_num_bits = m_log2MaxFrameNumMinus4 + 4;
+		m_frameNum = ReadBits(frame_num_bits);
+
+		if (m_isIDR)
+			ReadExponentialGolombCode(); // idr_pic_id
+
+		// Only care about P-slice reference behavior
+		m_refMods.clear();
+		m_refListModFlagL0 = false;
+		m_numRefIdxL0Active = 1;
+
+		if (m_sliceType == 0) { // P-slice
+			m_naluString += " -P-";
+			int num_ref_idx_override = ReadBit();
+
+			if (num_ref_idx_override)
+				m_numRefIdxL0Active = ReadExponentialGolombCode() + 1;
+			else
+				m_numRefIdxL0Active = 1;
+
+			m_refListModFlagL0 = ReadBit();
+
+			if (m_refListModFlagL0) {
+				int idc;
+				do {
+					idc = ReadExponentialGolombCode();
+
+					if (idc == 0 || idc == 1) {
+						RefPicMod mod;
+						mod.idc = idc;
+						mod.abs_diff_pic_num_minus1 = ReadExponentialGolombCode();
+						m_refMods.push_back(mod);
+					} else if (idc == 2) {
+						ReadExponentialGolombCode(); // ignore long-term
+					}
+				} while (idc != 3);
+			}
+		} else if (m_sliceType == 1) { // B-slice
+			m_naluString += "     -B-";
+		} else if (m_sliceType == 2) { // I-slice
+			m_naluString += " -I-";
+		} else if (m_sliceType == 3) { // SP-slice
+			m_naluString += " -SP-";
+		} else if (m_sliceType == 5) { // SI-slice
+			m_naluString += " -SI-";
 		}
 	}
-	ReadExponentialGolombCode();
-	ReadBit();
-	int picWidthInMbsMinusOne = ReadExponentialGolombCode();
-	int picHeightInMapUnitsMinusOne = ReadExponentialGolombCode();
-	int frameMbsOnlyFlag = ReadBit();
-	if (!frameMbsOnlyFlag) {
-		m_mbaff = ReadBit();
-	}
-
-	ReadBit();
-	int frameCroppingFlag = ReadBit();
-	if (frameCroppingFlag) {
-		frameCropLeftOffset = ReadExponentialGolombCode();
-		frameCropRightOffset = ReadExponentialGolombCode();
-		frameCropTopOffset = ReadExponentialGolombCode();
-		frameCropBottomOffset = ReadExponentialGolombCode();
-	}
-
-	int subWidthC = 0;
-	int subHeightC = 0;
-
-	if (chromaFormatIdc == 0 && separateColorPlaneFlag == 0) { // monochrome
-		subWidthC = subHeightC = 2;
-	} else if (chromaFormatIdc == 1 && separateColorPlaneFlag == 0) { // 4:2:0
-		subWidthC = subHeightC = 2;
-	} else if (chromaFormatIdc == 2 && separateColorPlaneFlag == 0) { // 4:2:2
-		subWidthC = 2;
-		subHeightC = 1;
-	} else if (chromaFormatIdc == 3) { // 4:4:4
-		if (separateColorPlaneFlag == 0) {
-			subWidthC = subHeightC = 1;
-		} else if (separateColorPlaneFlag == 1) {
-			subWidthC = subHeightC = 0;
-		}
-	}
-
-	m_width = ((picWidthInMbsMinusOne + 1) * 16) -
-		subWidthC * (frameCropRightOffset + frameCropLeftOffset);
-
-	m_height = ((2 - frameMbsOnlyFlag)* (picHeightInMapUnitsMinusOne +1) * 16) -
-		subHeightC * ((frameCropBottomOffset * 2) + (frameCropTopOffset * 2));
 }
 
 /**

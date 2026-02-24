@@ -21,6 +21,7 @@
 #define __H264PARSER_H
 
 #include <string>
+#include <vector>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -43,6 +44,12 @@ typedef enum {
  */
 class cH264Parser
 {
+private:
+	struct RefPicMod {
+		int idc;
+		int abs_diff_pic_num_minus1;
+	};
+
 public:
 	cH264Parser(AVPacket *);
 	int GetWidth(void) { return m_width; };
@@ -53,6 +60,15 @@ public:
 	void PrintNalUnits(void);
 	std::string GetNalUnitString(void) { return m_naluString; };
 	void PrintStreamData(void);
+
+	bool IsPSlice() const { return m_sliceType == 0; }
+	bool IsIDR() const { return m_isIDR; }
+	bool IsReference() const { return m_isReference; }
+	int GetFrameNum() const { return m_frameNum; }
+	bool HasRefListModification() const { return m_refListModFlagL0; }
+	int GetNumRefIdxL0() const { return m_numRefIdxL0Active; }
+	const std::vector<RefPicMod>& GetRefMods() const { return m_refMods; }
+	int GetLog2MaxFrameNumMinus4() const { return m_log2MaxFrameNumMinus4; }
 
 private:
 	AVPacket *m_pAvpkt;
@@ -68,10 +84,22 @@ private:
 	bool m_mbaff = false;
 	std::string m_naluString;
 
+	int  m_sliceType = -1;      // normalized: 0=P, 2=I
+	int  m_frameNum = -1;
+	int  m_nalRefIdc = 0;
+	bool m_isIDR = false;
+	bool m_isReference = false;
+	bool m_refListModFlagL0 = false;
+	int  m_numRefIdxL0Active = 1;
+	int  m_log2MaxFrameNumMinus4 = 0; // from SPS
+	std::vector<RefPicMod> m_refMods;
+
 	unsigned int ReadBit(void);
 	unsigned int ReadBits(int);
 	unsigned int ReadExponentialGolombCode(void);
 	unsigned int ReadSE(void);
+	int GetSPSOffset(void);
+	int GetSliceOffset(void);
 };
 
 #endif
