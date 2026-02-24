@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -135,6 +136,9 @@ private:
 	std::vector<std::string> m_naluTypesAtStart;
 	int m_numIFrames = 0;
 	bool m_logFrames = false;
+	std::set<int> m_dpbFrames;
+	int m_maxFrameNum = 1;
+	int m_log2MaxFrameNumMinus4 = -4;
 
 	void RenderFrame(AVFrame *);
 	void CheckForcingFrameDecode(void);

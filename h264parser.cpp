@@ -93,8 +93,9 @@ int cH264Parser::GetSliceOffset(void)
  *
  * @param avpkt      AVPacket to parse
  */
-cH264Parser::cH264Parser(AVPacket *avpkt)
-	: m_pAvpkt(avpkt)
+cH264Parser::cH264Parser(AVPacket *avpkt, int maxFrameNum)
+	: m_pAvpkt(avpkt),
+	  m_log2MaxFrameNumMinus4(maxFrameNum)
 {
 	int i;
 
@@ -257,14 +258,14 @@ cH264Parser::cH264Parser(AVPacket *avpkt)
 	int sliceOffset = GetSliceOffset();
 
 	// slice is available
-	if (sliceOffset) {
+	if (sliceOffset != -1) {
 		m_pStart = &m_pAvpkt->data[sliceOffset + 4];
 		m_nLength = m_pAvpkt->size - sliceOffset - 4;
 		uint8_t nalHeader = m_pAvpkt->data[sliceOffset + 3];
 
 		m_nalRefIdc = (nalHeader >> 5) & 0x03;
 		m_isReference = (m_nalRefIdc != 0);
-		m_isIDR = (NalUnitType(m_pAvpkt->data, i) == 5);
+		m_isIDR = (NalUnitType(m_pAvpkt->data, sliceOffset) == 5);
 
 		m_nCurrentBit = 0;
 
@@ -287,7 +288,7 @@ cH264Parser::cH264Parser(AVPacket *avpkt)
 		m_numRefIdxL0Active = 1;
 
 		if (m_sliceType == 0) { // P-slice
-			m_naluString += " -P-";
+			m_naluString += " -P-    ";
 			int num_ref_idx_override = ReadBit();
 
 			if (num_ref_idx_override)
@@ -315,13 +316,36 @@ cH264Parser::cH264Parser(AVPacket *avpkt)
 		} else if (m_sliceType == 1) { // B-slice
 			m_naluString += "     -B-";
 		} else if (m_sliceType == 2) { // I-slice
-			m_naluString += " -I-";
+			m_naluString += " -I-    ";
 		} else if (m_sliceType == 3) { // SP-slice
-			m_naluString += " -SP-";
+			m_naluString += " -SP-   ";
 		} else if (m_sliceType == 5) { // SI-slice
-			m_naluString += " -SI-";
+			m_naluString += " -SI-   ";
 		}
 	}
+}
+
+void cH264Parser::AddInvalidReference(int modRef)
+{
+	m_invalidReferences += " ";
+	m_invalidReferences += std::to_string(modRef);
+	m_hasInvalidReferences = true;
+}
+
+void cH264Parser::MarkInvalidReference(void)
+{
+	if (!m_hasInvalidReferences)
+		return;
+
+	m_naluString += " <-- invalid reference to ";
+	m_naluString += m_invalidReferences;
+}
+
+void cH264Parser::AddFrameNumber(int num)
+{
+	m_naluString += " (ref ";
+	m_naluString += std::to_string(num);
+	m_naluString += ")";
 }
 
 /**
@@ -360,7 +384,7 @@ bool cH264Parser::IsIFrame(void)
  */
 unsigned int cH264Parser::ReadBit()
 {
-	assert(m_nCurrentBit <= m_nLength * 8);
+	assert(m_nCurrentBit < m_nLength * 8);
 	int nIndex = m_nCurrentBit / 8;
 	int nOffset = m_nCurrentBit % 8 + 1;
 

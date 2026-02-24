@@ -51,7 +51,7 @@ private:
 	};
 
 public:
-	cH264Parser(AVPacket *);
+	cH264Parser(AVPacket *, int);
 	int GetWidth(void) { return m_width; };
 	int GetHeight(void) { return m_height; };
 	bool IsIFrame(void);
@@ -69,6 +69,9 @@ public:
 	int GetNumRefIdxL0() const { return m_numRefIdxL0Active; }
 	const std::vector<RefPicMod>& GetRefMods() const { return m_refMods; }
 	int GetLog2MaxFrameNumMinus4() const { return m_log2MaxFrameNumMinus4; }
+	void MarkInvalidReference(void);
+	void AddFrameNumber(int);
+	void AddInvalidReference(int);
 
 private:
 	AVPacket *m_pAvpkt;
@@ -83,6 +86,7 @@ private:
 	int m_height = 0;
 	bool m_mbaff = false;
 	std::string m_naluString;
+	std::string m_invalidReferences;
 
 	int  m_sliceType = -1;      // normalized: 0=P, 2=I
 	int  m_frameNum = -1;
@@ -93,6 +97,7 @@ private:
 	int  m_numRefIdxL0Active = 1;
 	int  m_log2MaxFrameNumMinus4 = 0; // from SPS
 	std::vector<RefPicMod> m_refMods;
+	bool m_hasInvalidReferences = false;
 
 	unsigned int ReadBit(void);
 	unsigned int ReadBits(int);

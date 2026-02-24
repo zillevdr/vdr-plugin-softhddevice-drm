@@ -23,6 +23,7 @@
  */
 
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -276,7 +277,9 @@ void cVideoStream::CloseDecoder(void)
 	m_pDecoder->Close();
 	m_pPar = nullptr;
 	m_numIFrames = 0;
+	m_maxFrameNum = 1;
 	m_naluTypesAtStart.clear();
+	m_dpbFrames.clear();
 }
 
 /**
@@ -335,7 +338,7 @@ void cVideoStream::OpenDecoder(void)
 	                   (m_hardwareQuirks & QUIRK_CODEC_NEEDS_EXT_INIT);
 
 	if (needsParsing && m_codecId == AV_CODEC_ID_H264) {
-		cH264Parser h264Packet(m_packets.Peek());
+		cH264Parser h264Packet(m_packets.Peek(), m_log2MaxFrameNumMinus4);
 		if (!h264Packet.HasSPS()) {
 			LOGDEBUG2(L_CODEC, "videostream %s: %s: No SPS in the packet!", m_identifier, __FUNCTION__);
 			h264Packet.PrintStreamData();
@@ -389,9 +392,33 @@ void cVideoStream::DecodeInput(void)
 	// log nal units of the frames until the second I Frame arrives
 	if (!ret && m_codecId == AV_CODEC_ID_H264 && m_logFrames) {
 		if (m_numIFrames < 2) {
-			cH264Parser h264Packet(m_packets.Peek());
+			cH264Parser h264Packet(m_packets.Peek(), m_log2MaxFrameNumMinus4);
+			if (h264Packet.HasSPS()) {
+				m_maxFrameNum = 1 << (h264Packet.GetLog2MaxFrameNumMinus4() + 4);
+				m_log2MaxFrameNumMinus4 = h264Packet.GetLog2MaxFrameNumMinus4();
+			}
+
+			int frameNumber = h264Packet.GetFrameNum();
+
+			if (h264Packet.IsReference()) {
+				h264Packet.AddFrameNumber(frameNumber);
+				m_dpbFrames.insert(frameNumber);
+			}
+
+			if (h264Packet.IsPSlice()) {
+				for (auto& mod : h264Packet.GetRefMods()) {
+					int modRef = (frameNumber - mod.abs_diff_pic_num_minus1 - 1 + m_maxFrameNum) % m_maxFrameNum;
+					if (m_dpbFrames.find(modRef) == m_dpbFrames.end()) {
+						h264Packet.AddInvalidReference(modRef);
+//						LOGDEBUG("videostream %s: %s: P-Frame reference missing %d", m_identifier, __FUNCTION__, modRef);
+					}
+				}
+				h264Packet.MarkInvalidReference();
+			}
+
 			if (h264Packet.IsIFrame())
 				m_numIFrames++;
+
 			m_naluTypesAtStart.push_back(h264Packet.GetNalUnitString());
 		} else {
 			LOGDEBUG("videostream %s: %s: parsed H.264 stream:", m_identifier, __FUNCTION__);
