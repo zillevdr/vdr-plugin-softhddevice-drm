@@ -405,7 +405,7 @@ void cVideoStream::DecodeInput(void)
 				m_dpbFrames.insert(frameNumber);
 			}
 
-			if (h264Packet.IsPSlice()) {
+			if (h264Packet.IsPSlice() || h264Packet.IsBSlice()) {
 				for (auto& mod : h264Packet.GetRefMods()) {
 					int modRef = (frameNumber - mod.abs_diff_pic_num_minus1 - 1 + m_maxFrameNum) % m_maxFrameNum;
 					if (m_dpbFrames.find(modRef) == m_dpbFrames.end()) {

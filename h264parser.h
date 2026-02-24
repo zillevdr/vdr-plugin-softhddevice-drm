@@ -62,6 +62,7 @@ public:
 	void PrintStreamData(void);
 
 	bool IsPSlice() const { return m_sliceType == 0; }
+	bool IsBSlice() const { return m_sliceType == 1; }
 	bool IsIDR() const { return m_isIDR; }
 	bool IsReference() const { return m_isReference; }
 	int GetFrameNum() const { return m_frameNum; }
