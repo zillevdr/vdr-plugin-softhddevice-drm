@@ -20,6 +20,7 @@
 #ifndef __H264PARSER_H
 #define __H264PARSER_H
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,17 +47,20 @@ class cH264Parser
 {
 private:
 	struct RefPicMod {
+		int list;
 		int idc;
 		int abs_diff_pic_num_minus1;
+		int long_term_pic_num;
 	};
 
 public:
-	cH264Parser(AVPacket *, int);
+	cH264Parser(AVPacket *, int, int, int);
 	int GetWidth(void) { return m_width; };
 	int GetHeight(void) { return m_height; };
 	bool IsIFrame(void);
 	bool IsMbaff(void) { return m_mbaff; };
 	bool HasSPS(void) { return m_hasSPS; };
+	bool HasPPS(void) { return m_hasPPS; };
 	void PrintNalUnits(void);
 	std::string GetNalUnitString(void) { return m_naluString; };
 	void PrintStreamData(void);
@@ -66,13 +70,15 @@ public:
 	bool IsIDR() const { return m_isIDR; }
 	bool IsReference() const { return m_isReference; }
 	int GetFrameNum() const { return m_frameNum; }
-	bool HasRefListModification() const { return m_refListModFlagL0; }
-	int GetNumRefIdxL0() const { return m_numRefIdxL0Active; }
 	const std::vector<RefPicMod>& GetRefMods() const { return m_refMods; }
 	int GetLog2MaxFrameNumMinus4() const { return m_log2MaxFrameNumMinus4; }
-	void MarkInvalidReference(void);
+	int GetPpsNumRefIdxL0DefaultActiveMinus1(void) { return m_ppsNumRefIdxL0DefaultActiveMinus1; };
+	int GetPpsNumRefIdxL1DefaultActiveMinus1(void) { return m_ppsNumRefIdxL1DefaultActiveMinus1; };
+	void PrintInvalidReference(void);
+	void PrintValidReference(void);
 	void AddFrameNumber(int);
 	void AddInvalidReference(int);
+	void AddValidReference(int);
 
 private:
 	AVPacket *m_pAvpkt;
@@ -82,29 +88,34 @@ private:
 
 	int m_nalutype = 0;
 	bool m_hasSPS = false;
+	bool m_hasPPS = false;
 
 	int m_width = 0;
 	int m_height = 0;
 	bool m_mbaff = false;
 	std::string m_naluString;
-	std::string m_invalidReferences;
+	std::set<int> m_invalidReferences;
+	std::set<int> m_validReferences;
 
 	int  m_sliceType = -1;      // normalized: 0=P, 2=I
 	int  m_frameNum = -1;
 	int  m_nalRefIdc = 0;
 	bool m_isIDR = false;
 	bool m_isReference = false;
-	bool m_refListModFlagL0 = false;
-	int  m_numRefIdxL0Active = 1;
-	int  m_log2MaxFrameNumMinus4 = 0; // from SPS
+	int  m_log2MaxFrameNumMinus4 = -4; // from SPS
 	std::vector<RefPicMod> m_refMods;
 	bool m_hasInvalidReferences = false;
+	bool m_hasValidReferences = false;
+
+	int m_ppsNumRefIdxL0DefaultActiveMinus1 = -1; // from PPS
+	int m_ppsNumRefIdxL1DefaultActiveMinus1 = -1; // from PPS
 
 	unsigned int ReadBit(void);
 	unsigned int ReadBits(int);
 	unsigned int ReadExponentialGolombCode(void);
 	unsigned int ReadSE(void);
 	int GetSPSOffset(void);
+	int GetPPSOffset(void);
 	int GetSliceOffset(void);
 };
 

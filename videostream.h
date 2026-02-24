@@ -139,6 +139,10 @@ private:
 	std::set<int> m_dpbFrames;
 	int m_maxFrameNum = 1;
 	int m_log2MaxFrameNumMinus4 = -4;
+	int m_ppsPicParameterSetId = 0;
+	int m_ppsSeqParameterSetId = 0;
+	int m_ppsNumRefIdxL0DefaultActiveMinus1 = -1;
+	int m_ppsNumRefIdxL1DefaultActiveMinus1 = -1;
 
 	void RenderFrame(AVFrame *);
 	void CheckForcingFrameDecode(void);

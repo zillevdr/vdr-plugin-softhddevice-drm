@@ -338,7 +338,10 @@ void cVideoStream::OpenDecoder(void)
 	                   (m_hardwareQuirks & QUIRK_CODEC_NEEDS_EXT_INIT);
 
 	if (needsParsing && m_codecId == AV_CODEC_ID_H264) {
-		cH264Parser h264Packet(m_packets.Peek(), m_log2MaxFrameNumMinus4);
+		cH264Parser h264Packet(m_packets.Peek(),
+		                       m_log2MaxFrameNumMinus4,
+		                       m_ppsNumRefIdxL0DefaultActiveMinus1,
+		                       m_ppsNumRefIdxL1DefaultActiveMinus1);
 		if (!h264Packet.HasSPS()) {
 			LOGDEBUG2(L_CODEC, "videostream %s: %s: No SPS in the packet!", m_identifier, __FUNCTION__);
 			h264Packet.PrintStreamData();
@@ -392,10 +395,18 @@ void cVideoStream::DecodeInput(void)
 	// log nal units of the frames until the second I Frame arrives
 	if (!ret && m_codecId == AV_CODEC_ID_H264 && m_logFrames) {
 		if (m_numIFrames < 2) {
-			cH264Parser h264Packet(m_packets.Peek(), m_log2MaxFrameNumMinus4);
+			cH264Parser h264Packet(m_packets.Peek(),
+		                               m_log2MaxFrameNumMinus4,
+		                               m_ppsNumRefIdxL0DefaultActiveMinus1,
+		                               m_ppsNumRefIdxL1DefaultActiveMinus1);
 			if (h264Packet.HasSPS()) {
 				m_maxFrameNum = 1 << (h264Packet.GetLog2MaxFrameNumMinus4() + 4);
 				m_log2MaxFrameNumMinus4 = h264Packet.GetLog2MaxFrameNumMinus4();
+			}
+
+			if (h264Packet.HasPPS()) {
+				m_ppsNumRefIdxL0DefaultActiveMinus1 = h264Packet.GetPpsNumRefIdxL0DefaultActiveMinus1();
+				m_ppsNumRefIdxL1DefaultActiveMinus1 = h264Packet.GetPpsNumRefIdxL1DefaultActiveMinus1();
 			}
 
 			int frameNumber = h264Packet.GetFrameNum();
@@ -403,17 +414,37 @@ void cVideoStream::DecodeInput(void)
 			if (h264Packet.IsReference()) {
 				h264Packet.AddFrameNumber(frameNumber);
 				m_dpbFrames.insert(frameNumber);
+			} else {
+				h264Packet.AddFrameNumber(-1);
 			}
 
 			if (h264Packet.IsPSlice() || h264Packet.IsBSlice()) {
 				for (auto& mod : h264Packet.GetRefMods()) {
-					int modRef = (frameNumber - mod.abs_diff_pic_num_minus1 - 1 + m_maxFrameNum) % m_maxFrameNum;
+					// Ignore long-term references, since we don't support them
+					if (mod.idc != 0 && mod.idc != 1)
+						continue;
+
+					// Compute the short-term reference frame number
+					int modRef = -1;
+					int diff = mod.abs_diff_pic_num_minus1 + 1;
+
+					if (mod.idc == 0) { // subtraction
+						modRef = (frameNumber - diff + m_maxFrameNum) % m_maxFrameNum;
+					} else if (mod.idc == 1) { // addition
+						modRef = (frameNumber + diff) % m_maxFrameNum;
+					}
+
+					// Check if this reference exists in the DPB
 					if (m_dpbFrames.find(modRef) == m_dpbFrames.end()) {
 						h264Packet.AddInvalidReference(modRef);
-//						LOGDEBUG("videostream %s: %s: P-Frame reference missing %d", m_identifier, __FUNCTION__, modRef);
+					} else {
+						h264Packet.AddValidReference(modRef);
 					}
 				}
-				h264Packet.MarkInvalidReference();
+
+				// only print invalid references for better readability
+				h264Packet.PrintInvalidReference();
+				// h264Packet.PrintValidReference();
 			}
 
 			if (h264Packet.IsIFrame())

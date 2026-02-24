@@ -22,6 +22,7 @@
  */
 
 #include <cassert>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -71,6 +72,23 @@ int cH264Parser::GetSPSOffset(void)
 	return offset;
 }
 
+int cH264Parser::GetPPSOffset(void)
+{
+	int offset = -1;
+
+	for (int i = 0; i < m_pAvpkt->size - 4; i++) {
+		if (!isValidStartCode(m_pAvpkt->data, i))
+			continue;
+
+		if (NalUnitType(m_pAvpkt->data, i) == 8) {
+			offset = i;
+			break;
+		}
+	}
+
+	return offset;
+}
+
 int cH264Parser::GetSliceOffset(void)
 {
 	int offset = -1;
@@ -93,9 +111,11 @@ int cH264Parser::GetSliceOffset(void)
  *
  * @param avpkt      AVPacket to parse
  */
-cH264Parser::cH264Parser(AVPacket *avpkt, int maxFrameNum)
+cH264Parser::cH264Parser(AVPacket *avpkt, int maxFrameNum, int refIdxL0, int refIdxL1)
 	: m_pAvpkt(avpkt),
-	  m_log2MaxFrameNumMinus4(maxFrameNum)
+	  m_log2MaxFrameNumMinus4(maxFrameNum),
+	  m_ppsNumRefIdxL0DefaultActiveMinus1(refIdxL0),
+	  m_ppsNumRefIdxL1DefaultActiveMinus1(refIdxL1)
 {
 	int i;
 
@@ -155,8 +175,8 @@ cH264Parser::cH264Parser(AVPacket *avpkt, int maxFrameNum)
 
 		m_pStart = &m_pAvpkt->data[spsOffset + 4];
 		m_nLength = m_pAvpkt->size - spsOffset - 4;
-
 		m_nCurrentBit = 0;
+
 		int frameCropLeftOffset = 0;
 		int frameCropRightOffset = 0;
 		int frameCropTopOffset = 0;
@@ -254,7 +274,61 @@ cH264Parser::cH264Parser(AVPacket *avpkt, int maxFrameNum)
 			subHeightC * ((frameCropBottomOffset * 2) + (frameCropTopOffset * 2));
 	}
 
-	// part 3: parse slice header
+	// part 3: parse h264 PPS
+	int ppsOffset = GetPPSOffset();
+
+	// PPS is available
+	if (ppsOffset != -1) {
+		m_hasPPS = true;
+
+		m_pStart = &m_pAvpkt->data[ppsOffset + 4];
+		m_nLength = m_pAvpkt->size - ppsOffset - 4;
+		m_nCurrentBit = 0;
+
+		ReadExponentialGolombCode(); // PicParameterSetId
+		ReadExponentialGolombCode(); // SeqParameterSetId
+
+		ReadBit(); // entropy_coding_mode_flag
+		ReadBit(); // bottom_field_pic_order_in_frame_present_flag
+
+		int num_slice_groups_minus1 = ReadExponentialGolombCode();
+		if (num_slice_groups_minus1 > 0) {
+			int slice_group_map_type = ReadExponentialGolombCode();
+
+			if (slice_group_map_type == 0) {
+				for (int i = 0; i <= num_slice_groups_minus1; i++)
+					ReadExponentialGolombCode(); // run_length_minus1
+			} else if (slice_group_map_type == 2) {
+				for (int i = 0; i < num_slice_groups_minus1; i++) {
+					ReadExponentialGolombCode(); // top_left
+					ReadExponentialGolombCode(); // bottom_right
+				}
+			} else if (slice_group_map_type == 3 ||
+			           slice_group_map_type == 4 ||
+			           slice_group_map_type == 5) {
+				ReadBit();                    // slice_group_change_direction_flag
+				ReadExponentialGolombCode();  // slice_group_change_rate_minus1
+			} else if (slice_group_map_type == 6) {
+				int pic_size_in_map_units_minus1 = ReadExponentialGolombCode();
+
+				int bits = 0;
+				while ((1 << bits) < (num_slice_groups_minus1 + 1)) {
+					bits++;
+				}
+
+				for (int i = 0; i <= pic_size_in_map_units_minus1; i++) {
+					for (int b = 0; b < bits; b++) {
+						ReadBit(); // slice_group_id
+					}
+				}
+			}
+		}
+
+		m_ppsNumRefIdxL0DefaultActiveMinus1 = ReadExponentialGolombCode();
+		m_ppsNumRefIdxL1DefaultActiveMinus1 = ReadExponentialGolombCode();
+	}
+
+	// part 4: parse slice header
 	int sliceOffset = GetSliceOffset();
 
 	// slice is available
@@ -282,43 +356,107 @@ cH264Parser::cH264Parser(AVPacket *avpkt, int maxFrameNum)
 		if (m_isIDR)
 			ReadExponentialGolombCode(); // idr_pic_id
 
-		// Only care about P-slice reference behavior
 		m_refMods.clear();
-		m_refListModFlagL0 = false;
-		m_numRefIdxL0Active = 1;
+		bool refListModFlagL0;
+		bool refListModFlagL1;
+		//int numRefIdxL0Active;
+		//int numRefIdxL1Active;
 
 		if (m_sliceType == 0) { // P-slice
-			m_naluString += " -P-    ";
+			m_naluString += "         -P-    ";
+
 			int num_ref_idx_override = ReadBit();
 
 			if (num_ref_idx_override)
-				m_numRefIdxL0Active = ReadExponentialGolombCode() + 1;
-			else
-				m_numRefIdxL0Active = 1;
+				ReadExponentialGolombCode(); // numRefIdxL0Active = ReadExponentialGolombCode() + 1;
+			// else
+			//	numRefIdxL0Active = m_ppsNumRefIdxL0DefaultActiveMinus1 + 1;
 
-			m_refListModFlagL0 = ReadBit();
+			refListModFlagL0 = ReadBit();
 
-			if (m_refListModFlagL0) {
+			if (refListModFlagL0) {
 				int idc;
 				do {
 					idc = ReadExponentialGolombCode();
 
 					if (idc == 0 || idc == 1) {
 						RefPicMod mod;
+						mod.list = 0;
 						mod.idc = idc;
 						mod.abs_diff_pic_num_minus1 = ReadExponentialGolombCode();
 						m_refMods.push_back(mod);
-					} else if (idc == 2) {
-						ReadExponentialGolombCode(); // ignore long-term
+					} else if (idc == 2) { // ignore long-term ?
+						RefPicMod mod;
+						mod.list = 0;
+						mod.idc = idc;
+						mod.long_term_pic_num = ReadExponentialGolombCode();
+						m_refMods.push_back(mod);
 					}
 				} while (idc != 3);
 			}
 		} else if (m_sliceType == 1) { // B-slice
-			m_naluString += "     -B-";
+			m_naluString += "            -B- ";
+
+			int num_ref_idx_override = ReadBit();
+
+			if (num_ref_idx_override) {
+				ReadExponentialGolombCode(); // numRefIdxL0Active = ReadExponentialGolombCode() + 1;
+				ReadExponentialGolombCode(); // numRefIdxL1Active = ReadExponentialGolombCode() + 1;
+			}
+			//else {
+			//	numRefIdxL0Active = m_ppsNumRefIdxL0DefaultActiveMinus1 + 1;
+			//	numRefIdxL1Active = m_ppsNumRefIdxL1DefaultActiveMinus1 + 1;
+			//}
+
+			// ----- List 0 -----
+			refListModFlagL0 = ReadBit();
+
+			if (refListModFlagL0) {
+				int idc;
+				do {
+					idc = ReadExponentialGolombCode();
+					if (idc == 0 || idc == 1) {
+						RefPicMod mod;
+						mod.list = 0;
+						mod.idc = idc;
+						mod.abs_diff_pic_num_minus1 = ReadExponentialGolombCode();
+						m_refMods.push_back(mod);
+					} else if (idc == 2) {
+						RefPicMod mod;
+						mod.list = 0;
+						mod.idc = idc;
+						mod.long_term_pic_num = ReadExponentialGolombCode();
+						m_refMods.push_back(mod);
+					}
+				} while (idc != 3);
+			}
+
+			// ----- List 1 -----
+			refListModFlagL1 = ReadBit();
+
+			if (refListModFlagL1) {
+				int idc;
+				do {
+					idc = ReadExponentialGolombCode();
+					if (idc == 0 || idc == 1) {
+						RefPicMod mod;
+						mod.list = 1;
+						mod.idc = idc;
+						mod.abs_diff_pic_num_minus1 = ReadExponentialGolombCode();
+						m_refMods.push_back(mod);
+					} else if (idc == 2) {
+						RefPicMod mod;
+						mod.list = 1;
+						mod.idc = idc;
+						mod.long_term_pic_num = ReadExponentialGolombCode();
+						m_refMods.push_back(mod);
+					}
+				} while (idc != 3);
+			}
 		} else if (m_sliceType == 2) { // I-slice
 			m_naluString += " -I-    ";
 		} else if (m_sliceType == 3) { // SP-slice
-			m_naluString += " -SP-   ";
+			m_naluString += "       -SP-   ";
 		} else if (m_sliceType == 5) { // SI-slice
 			m_naluString += " -SI-   ";
 		}
@@ -327,25 +465,53 @@ cH264Parser::cH264Parser(AVPacket *avpkt, int maxFrameNum)
 
 void cH264Parser::AddInvalidReference(int modRef)
 {
-	m_invalidReferences += " ";
-	m_invalidReferences += std::to_string(modRef);
+	m_invalidReferences.insert(modRef);
 	m_hasInvalidReferences = true;
 }
 
-void cH264Parser::MarkInvalidReference(void)
+void cH264Parser::AddValidReference(int modRef)
+{
+	m_validReferences.insert(modRef);
+	m_hasValidReferences = true;
+}
+
+void cH264Parser::PrintInvalidReference(void)
 {
 	if (!m_hasInvalidReferences)
 		return;
 
-	m_naluString += " <-- invalid reference to ";
-	m_naluString += m_invalidReferences;
+	m_naluString += " !!!";
+	for (auto r : m_invalidReferences) {
+		m_naluString += " ";
+		m_naluString += std::to_string(r);
+	}
+}
+
+void cH264Parser::PrintValidReference(void)
+{
+	if (!m_hasValidReferences)
+		return;
+
+	m_naluString += " -->";
+	for (auto r : m_validReferences) {
+		m_naluString += " ";
+		m_naluString += std::to_string(r);
+	}
 }
 
 void cH264Parser::AddFrameNumber(int num)
 {
-	m_naluString += " (ref ";
-	m_naluString += std::to_string(num);
-	m_naluString += ")";
+	if (num != -1) {
+		if (num < 10)
+			m_naluString += "#  ";
+		else if (num < 100)
+			m_naluString += "# ";
+		else
+			m_naluString += "#";
+		m_naluString += std::to_string(num);
+	} else {
+		m_naluString += "    ";
+	}
 }
 
 /**
